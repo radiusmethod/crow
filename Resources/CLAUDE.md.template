@@ -1,0 +1,49 @@
+# rm-ai-ide (ride) — Manager Context
+
+This is the development root managed by rm-ai-ide. The Manager tab runs Claude Code here to orchestrate work sessions via the `ride` CLI.
+
+## ride CLI Reference
+
+The `ride` CLI communicates with the rm-ai-ide app via Unix socket at `$TMPDIR/ride.sock`. The app must be running for commands to work. All commands require `dangerouslyDisableSandbox: true` and return JSON.
+
+### Session Commands
+```
+ride new-session --name "feature-name"          → {"session_id":"<uuid>","name":"..."}
+ride rename-session --session <uuid> "new-name" → {"session_id":"...","name":"..."}
+ride select-session --session <uuid>            → {"session_id":"..."}
+ride list-sessions                              → {"sessions":[...]}
+ride get-session --session <uuid>               → {id, name, status, ticket_url, ...}
+ride set-status --session <uuid> active|completed|archived
+ride delete-session --session <uuid>            → {"deleted":true}
+```
+
+### Metadata Commands
+```
+ride set-ticket --session <uuid> --url "..." [--title "..."] [--number N]
+ride add-link --session <uuid> --label "Issue" --url "..." --type ticket|pr|repo|custom
+ride list-links --session <uuid>
+```
+
+### Worktree Commands
+```
+ride add-worktree --session <uuid> --repo "name" --path "/full/path" --branch "feature/..." [--primary]
+ride list-worktrees --session <uuid>
+```
+
+### Terminal Commands
+```
+ride new-terminal --session <uuid> --cwd "/path" [--name "Claude Code"] [--command "claude ..."]
+ride list-terminals --session <uuid>
+ride send --session <uuid> --terminal <uuid> "text to send\n"
+```
+
+## Important Notes
+
+- `--session` always expects a full UUID (e.g., `a1b2c3d4-e5f6-7890-abcd-ef1234567890`), not a session name
+- Always capture the `session_id` from `new-session` output before using it in subsequent commands
+- The Manager session UUID is always `00000000-0000-0000-0000-000000000000` — do not delete it
+- Use `/ride-workspace` skill for full workspace setup (worktrees + session + Claude Code)
+
+## Known Issues / Corrections
+
+<!-- Claude Code appends corrections here when ride commands fail -->

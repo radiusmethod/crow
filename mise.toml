@@ -1,0 +1,38 @@
+[env]
+PROJECT_NAME = "RmAiIde"
+DERIVED_DATA = "{{cwd}}/.derived-data"
+
+[tools]
+zig = "0.15.2"
+
+[tasks.dev]
+description = "Run the app in debug mode"
+run = "swift run RmAiIde"
+
+[tasks.build]
+description = "Build debug"
+run = "swift build"
+
+[tasks."build:release"]
+description = "Build release"
+run = "swift build -c release"
+
+[tasks."build:ghostty"]
+description = "Build GhosttyKit XCFramework"
+run = "bash scripts/build-ghostty.sh"
+
+[tasks.test]
+description = "Run all tests"
+run = "swift test"
+
+[tasks.bundle]
+description = "Create .app bundle"
+run = "bash scripts/bundle.sh"
+
+[tasks.clean]
+description = "Clean build artifacts"
+run = "rm -rf .build .derived-data RmAiIde.app"
+
+[tasks."xcode:generate"]
+description = "Generate Xcode project"
+run = "swift package generate-xcodeproj"
