@@ -174,11 +174,13 @@ ride set-ticket --session {session_id} \
 # 3. Register each worktree (after creating with git)
 #    IMPORTANT: --repo-path is the MAIN repo path (e.g., .../citadel)
 #    --path is the WORKTREE path (e.g., .../citadel-197-slug)
+#    --workspace is the workspace folder name (e.g., "RadiusMethod", "PlatformOne")
 ride add-worktree --session {session_id} \
   --repo "{repo_name}" \
   --repo-path "{main_repo_path}" \
   --path "{worktree_path}" \
   --branch "feature/{name}" \
+  --workspace "{workspace_name}" \
   --primary   # for the first/main repo
 
 # 4. Add ticket link (only if URL was provided)

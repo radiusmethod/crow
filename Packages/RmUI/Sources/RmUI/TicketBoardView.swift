@@ -26,8 +26,8 @@ public struct TicketBoardView: View {
     private var ticketBoardHeader: some View {
         HStack {
             Text("Ticket Board")
-                .font(.title3)
-                .fontWeight(.semibold)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(CorveilTheme.gold)
 
             if appState.isLoadingIssues {
                 ProgressView()
@@ -38,11 +38,11 @@ public struct TicketBoardView: View {
 
             Text("\(appState.assignedIssues.count) issues")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(CorveilTheme.textSecondary)
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
-        .background(.bar)
+        .background(CorveilTheme.bgSurface)
     }
 }
 
@@ -131,11 +131,21 @@ struct TicketListView: View {
 
     var body: some View {
         if filteredIssues.isEmpty {
-            ContentUnavailableView(
-                "No \(appState.selectedTicketStatus.rawValue) Tickets",
-                systemImage: "ticket",
-                description: Text("No issues are in the \(appState.selectedTicketStatus.rawValue) state.")
-            )
+            VStack {
+                Spacer().frame(height: 40)
+                Image(systemName: "ticket")
+                    .font(.system(size: 32))
+                    .foregroundStyle(CorveilTheme.textMuted)
+                Text("No \(appState.selectedTicketStatus.rawValue) Tickets")
+                    .font(.headline)
+                    .foregroundStyle(CorveilTheme.textSecondary)
+                    .padding(.top, 8)
+                Text("No issues are in the \(appState.selectedTicketStatus.rawValue) state.")
+                    .font(.caption)
+                    .foregroundStyle(CorveilTheme.textMuted)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
         } else {
             List(filteredIssues) { issue in
                 TicketRow(issue: issue, appState: appState)
@@ -245,7 +255,7 @@ struct TicketRow: View {
 
 // MARK: - Sidebar Row
 
-/// Compact sidebar row showing ticket board with status counts.
+/// Compact sidebar row showing ticket board with status counts using SF Symbols.
 public struct TicketBoardSidebarRow: View {
     @Bindable var appState: AppState
 
@@ -254,40 +264,55 @@ public struct TicketBoardSidebarRow: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(spacing: 8) {
             HStack {
-                Text("Ticket Board")
-                    .font(.headline)
-                    .lineLimit(1)
                 Spacer()
+                Text("Tickets")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(CorveilTheme.gold)
                 if appState.isLoadingIssues {
                     ProgressView()
                         .controlSize(.mini)
                 }
+                Spacer()
             }
             HStack(spacing: 8) {
-                StatusCount(color: .gray, count: appState.issueCount(for: .backlog))
-                StatusCount(color: .blue, count: appState.issueCount(for: .ready))
-                StatusCount(color: .orange, count: appState.issueCount(for: .inProgress))
-                StatusCount(color: .purple, count: appState.issueCount(for: .inReview))
+                Spacer(minLength: 0)
+                StatusCount(icon: "tray", color: CorveilTheme.textMuted, count: appState.issueCount(for: .backlog))
+                StatusCount(icon: "flag.fill", color: .blue, count: appState.issueCount(for: .ready))
+                StatusCount(icon: "bolt.fill", color: .orange, count: appState.issueCount(for: .inProgress))
+                StatusCount(icon: "eye.fill", color: .purple, count: appState.issueCount(for: .inReview))
+                StatusCount(icon: "checkmark.circle.fill", color: .green, count: appState.doneIssuesLast24h)
+                Spacer(minLength: 0)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(CorveilTheme.bgSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(CorveilTheme.borderSubtle, lineWidth: 1)
+                )
+        )
     }
 }
 
 struct StatusCount: View {
+    let icon: String
     let color: Color
     let count: Int
 
     var body: some View {
-        HStack(spacing: 2) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
+        HStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundStyle(color)
             Text("\(count)")
-                .font(.caption2)
+                .font(.system(size: 11, weight: .semibold))
                 .monospacedDigit()
+                .foregroundStyle(CorveilTheme.textSecondary)
         }
     }
 }

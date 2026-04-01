@@ -2,6 +2,12 @@ import SwiftUI
 import AppKit
 import GhosttyKit
 
+/// Terminal surface readiness state (local to RmTerminal, independent of RmCore).
+public enum SurfaceState: String, Sendable {
+    case created       // ghostty_surface_t created, shell spawning
+    case shellReady    // Probe file detected — shell accepts input
+}
+
 /// Manages live terminal surfaces, keeping them alive across SwiftUI view reloads.
 @MainActor
 public final class TerminalManager {
@@ -9,15 +15,23 @@ public final class TerminalManager {
 
     private var surfaces: [UUID: GhosttySurfaceView] = [:]
 
+    /// Called when a surface's readiness state changes.
+    public var onStateChanged: ((UUID, SurfaceState) -> Void)?
+
     private init() {}
 
     public func surface(for id: UUID, workingDirectory: String, command: String? = nil) -> GhosttySurfaceView {
-        if let existing = surfaces[id] { return existing }
+        if let existing = surfaces[id] {
+            NSLog("[TerminalManager] surface(for: \(id)) — returning EXISTING view")
+            return existing
+        }
+        NSLog("[TerminalManager] surface(for: \(id)) — creating NEW view, setting onSurfaceCreated callback")
         let view = GhosttySurfaceView(frame: .zero, workingDirectory: workingDirectory, command: command)
+        view.onSurfaceCreated = { [weak self] in
+            NSLog("[TerminalManager] onSurfaceCreated callback fired for \(id)")
+            self?.surfaceDidCreate(id: id)
+        }
         surfaces[id] = view
-        // Don't eagerly create the surface — it needs to be in a window first
-        // so it can get the correct scale factor and size.
-        // createSurface() is called in viewDidMoveToWindow.
         return view
     }
 
@@ -29,22 +43,31 @@ public final class TerminalManager {
 
     public func send(id: UUID, text: String) { surfaces[id]?.writeText(text) }
 
-    /// Pre-create a surface and attach it briefly to a window so `viewDidMoveToWindow` fires
-    /// and the Ghostty surface initializes. The view is placed off-screen and removed after init.
-    public func warmSurface(for id: UUID, workingDirectory: String, command: String? = nil, in window: NSWindow) {
-        let view = surface(for: id, workingDirectory: workingDirectory, command: command)
-        guard !view.hasSurface else { return }  // Already initialized
+    // MARK: - Readiness Monitoring
 
-        // Temporarily add to the window's content view off-screen to trigger viewDidMoveToWindow
-        let container = NSView(frame: NSRect(x: -9999, y: -9999, width: 800, height: 600))
-        container.addSubview(view)
-        view.frame = container.bounds
-        window.contentView?.addSubview(container)
+    /// Set of terminal IDs that should be monitored for readiness.
+    /// Only terminals in this set will start the probe monitor on surface creation.
+    private var monitoredTerminals: Set<UUID> = []
 
-        // Give it time to initialize, then remove the container (but keep the surface alive in TerminalManager)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            view.removeFromSuperview()
-            container.removeFromSuperview()
+    /// Register a terminal ID for readiness monitoring. Must be called before the surface is created.
+    public func trackReadiness(for id: UUID) {
+        NSLog("[TerminalManager] trackReadiness for \(id)")
+        monitoredTerminals.insert(id)
+    }
+
+    /// Called after a surface's createSurface() completes. Begins monitoring if tracked.
+    public func surfaceDidCreate(id: UUID) {
+        NSLog("[TerminalManager] surfaceDidCreate(\(id)) — tracked=\(monitoredTerminals.contains(id)), hasOnStateChanged=\(onStateChanged != nil)")
+        onStateChanged?(id, .created)
+        if monitoredTerminals.contains(id) {
+            monitoredTerminals.remove(id)
+            // Shell needs time to initialize after surface creation.
+            // Wait 2 seconds then mark as ready — the surface is in a window,
+            // createSurface() has spawned the shell, we just need zsh to start.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+                guard let self else { return }
+                self.onStateChanged?(id, .shellReady)
+            }
         }
     }
 }

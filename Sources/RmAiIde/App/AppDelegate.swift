@@ -98,6 +98,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Create session service and hydrate state
         let service = SessionService(store: store, appState: appState)
         service.hydrateState()
+        service.wireTerminalReadiness()
         self.sessionService = service
 
         // Ensure manager session exists
@@ -109,6 +110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         appState.onCompleteSession = { [weak service] id in
             service?.completeSession(id: id)
+        }
+
+        appState.onLaunchClaude = { [weak service] terminalID in
+            service?.launchClaude(terminalID: terminalID)
         }
 
         // Wire "Work on" issue action — sends issue URL to Manager terminal
@@ -145,7 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered,
             defer: false
         )
-        mainWindow.title = "rm-ai-ide"
+        mainWindow.title = "Corveil AI IDE"
         mainWindow.contentView = hostingView
         mainWindow.center()
         mainWindow.setFrameAutosaveName("MainWindow")
@@ -156,13 +161,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenu()
 
         NSApp.activate(ignoringOtherApps: true)
-
-        // After the window is fully up, pre-create terminal surfaces
-        // and launch `claude --continue` in each
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            guard let self, let window = self.window else { return }
-            self.sessionService?.launchWorkSessionClaude(window: window)
-        }
     }
 
     // MARK: - Settings
@@ -274,8 +272,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     guard let s = capturedAppState.sessions.first(where: { $0.id == id }) else {
                         return ["error": .string("Session not found")]
                     }
-                    return ["id": .string(s.id.uuidString), "name": .string(s.name), "status": .string(s.status.rawValue),
-                            "ticket_url": s.ticketURL.map { .string($0) } ?? .null, "ticket_title": s.ticketTitle.map { .string($0) } ?? .null]
+                    let fmt = ISO8601DateFormatter()
+                    return [
+                        "id": .string(s.id.uuidString),
+                        "name": .string(s.name),
+                        "status": .string(s.status.rawValue),
+                        "ticket_url": s.ticketURL.map { .string($0) } ?? .null,
+                        "ticket_title": s.ticketTitle.map { .string($0) } ?? .null,
+                        "ticket_number": s.ticketNumber.map { .int($0) } ?? .null,
+                        "provider": s.provider.map { .string($0.rawValue) } ?? .null,
+                        "created_at": .string(fmt.string(from: s.createdAt)),
+                        "updated_at": .string(fmt.string(from: s.updatedAt)),
+                    ]
                 }
             },
             "set-status": { @Sendable params in
@@ -317,7 +325,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 return await MainActor.run {
                     if let idx = capturedAppState.sessions.firstIndex(where: { $0.id == id }) {
-                        if let url = params["url"]?.stringValue { capturedAppState.sessions[idx].ticketURL = url }
+                        if let url = params["url"]?.stringValue {
+                            capturedAppState.sessions[idx].ticketURL = url
+                            // Auto-detect provider from URL
+                            if capturedAppState.sessions[idx].provider == nil {
+                                if url.contains("github.com") {
+                                    capturedAppState.sessions[idx].provider = .github
+                                } else if url.contains("gitlab.com") || url.contains("repo1.dso.mil") || url.contains("code.il2.dso.mil") {
+                                    capturedAppState.sessions[idx].provider = .gitlab
+                                }
+                            }
+                        }
                         if let title = params["title"]?.stringValue { capturedAppState.sessions[idx].ticketTitle = title }
                         if let num = params["number"]?.intValue { capturedAppState.sessions[idx].ticketNumber = num }
                         capturedStore.mutate { data in
@@ -370,6 +388,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return await MainActor.run {
                     capturedAppState.terminals[sessionID, default: []].append(terminal)
                     capturedStore.mutate { $0.terminals.append(terminal) }
+                    // Track readiness for work session terminals (not Manager)
+                    if sessionID != AppState.managerSessionID {
+                        capturedAppState.terminalReadiness[terminal.id] = .uninitialized
+                        TerminalManager.shared.trackReadiness(for: terminal.id)
+                    }
                     return ["terminal_id": .string(terminal.id.uuidString), "session_id": .string(idStr)]
                 }
             },

@@ -43,7 +43,17 @@ public final class JSONStore: Sendable {
         if let data = try? Data(contentsOf: fileURL) {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            self._data = (try? decoder.decode(StoreData.self, from: data)) ?? StoreData()
+            do {
+                self._data = try decoder.decode(StoreData.self, from: data)
+            } catch {
+                // Log the error so we know WHY decoding failed — this was silently wiping the store
+                NSLog("[JSONStore] ERROR: Failed to decode store.json: \(error.localizedDescription)")
+                NSLog("[JSONStore] Backing up corrupt store to store.json.bak")
+                let backupURL = dir.appendingPathComponent("store.json.bak")
+                try? FileManager.default.removeItem(at: backupURL)
+                try? FileManager.default.copyItem(at: fileURL, to: backupURL)
+                self._data = StoreData()
+            }
         } else {
             self._data = StoreData()
         }
@@ -61,7 +71,14 @@ public final class JSONStore: Sendable {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let jsonData = try? encoder.encode(data) else { return }
-        try? jsonData.write(to: url, options: .atomic)
+        guard let jsonData = try? encoder.encode(data) else {
+            NSLog("[JSONStore] ERROR: Failed to encode store data")
+            return
+        }
+        do {
+            try jsonData.write(to: url, options: .atomic)
+        } catch {
+            NSLog("[JSONStore] ERROR: Failed to write store.json: \(error.localizedDescription)")
+        }
     }
 }

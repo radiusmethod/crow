@@ -35,6 +35,7 @@ let package = Package(
             path: "Sources/RmAiIde",
             resources: [
                 .copy("Resources/AppIcon.png"),
+                .copy("Resources/CorveilBrandmark.png"),
             ],
             linkerSettings: [
                 .linkedFramework("Carbon"),

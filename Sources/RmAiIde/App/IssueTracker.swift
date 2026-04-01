@@ -7,7 +7,7 @@ import RmPersistence
 final class IssueTracker {
     private let appState: AppState
     private var timer: Timer?
-    private let pollInterval: TimeInterval = 300 // 5 minutes
+    private let pollInterval: TimeInterval = 60 // 1 minute
 
     init(appState: AppState) {
         self.appState = appState
@@ -74,7 +74,15 @@ final class IssueTracker {
         // Check for PRs on active session branches
         await checkSessionPRs(config: config)
 
+        // Fetch PR status (pipeline, review, mergeability) for sessions with PR links
+        await fetchPRStatuses()
+
         appState.assignedIssues = allIssues
+
+        // Fetch count of issues closed in last 24h
+        if checkedGitHub {
+            appState.doneIssuesLast24h = await fetchDoneIssuesLast24h()
+        }
 
         // Auto-complete sessions whose linked issue/PR is no longer open
         await autoCompleteFinishedSessions(openIssues: allIssues)
@@ -225,9 +233,11 @@ final class IssueTracker {
         if let output = try? shellSync(
             "git", "-C", worktree.repoPath, "remote", "get-url", "origin"
         ) {
-            let url = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Parse: https://github.com/org/repo.git or git@github.com:org/repo.git
-            if let match = url.range(of: #"[:/]([^/:]+/[^/.]+?)(?:\.git)?$"#, options: .regularExpression) {
+            var url = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Strip .git suffix first
+            if url.hasSuffix(".git") { url = String(url.dropLast(4)) }
+            // Parse: https://github.com/org/repo or git@github.com:org/repo
+            if let match = url.range(of: #"[:/]([^/:]+/[^/:]+)$"#, options: .regularExpression) {
                 return String(url[match]).trimmingCharacters(in: CharacterSet(charactersIn: "/:"))
             }
         }
@@ -250,6 +260,90 @@ final class IssueTracker {
             throw NSError(domain: "IssueTracker", code: Int(process.terminationStatus))
         }
         return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    // MARK: - PR Status Enrichment
+
+    private func fetchPRStatuses() async {
+        for session in appState.activeSessions {
+            let links = appState.links(for: session.id)
+            guard let prLink = links.first(where: { $0.linkType == .pr }) else { continue }
+
+            guard let output = try? await shell(
+                "gh", "pr", "view", prLink.url,
+                "--json", "state,mergeable,reviewDecision,statusCheckRollup"
+            ) else { continue }
+
+            guard let data = output.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+
+            // Parse checks
+            var checksPass: PRStatus.CheckStatus = .unknown
+            var failedChecks: [String] = []
+            if let checks = json["statusCheckRollup"] as? [[String: Any]] {
+                if checks.isEmpty {
+                    checksPass = .unknown
+                } else {
+                    let hasPending = checks.contains { ($0["status"] as? String) != "COMPLETED" }
+                    let hasFailed = checks.contains { ($0["conclusion"] as? String) == "FAILURE" }
+                    if hasPending {
+                        checksPass = .pending
+                    } else if hasFailed {
+                        checksPass = .failing
+                        failedChecks = checks.filter { ($0["conclusion"] as? String) == "FAILURE" }
+                            .compactMap { $0["name"] as? String }
+                    } else {
+                        checksPass = .passing
+                    }
+                }
+            }
+
+            // Parse review status
+            let reviewStatus: PRStatus.ReviewStatus
+            switch json["reviewDecision"] as? String {
+            case "APPROVED": reviewStatus = .approved
+            case "CHANGES_REQUESTED": reviewStatus = .changesRequested
+            case "REVIEW_REQUIRED": reviewStatus = .reviewRequired
+            case "": reviewStatus = .reviewRequired  // empty string means no reviews yet
+            default: reviewStatus = .unknown
+            }
+
+            // Parse merge status
+            let mergeStatus: PRStatus.MergeStatus
+            switch json["mergeable"] as? String {
+            case "MERGEABLE": mergeStatus = .mergeable
+            case "CONFLICTING": mergeStatus = .conflicting
+            default: mergeStatus = .unknown
+            }
+
+            appState.prStatus[session.id] = PRStatus(
+                checksPass: checksPass,
+                reviewStatus: reviewStatus,
+                mergeable: mergeStatus,
+                failedCheckNames: failedChecks
+            )
+        }
+    }
+
+    // MARK: - Done Issues (Last 24h)
+
+    private func fetchDoneIssuesLast24h() async -> Int {
+        let formatter = ISO8601DateFormatter()
+        let since = formatter.string(from: Date().addingTimeInterval(-86400))
+
+        guard let output = try? await shell(
+            "gh", "search", "issues",
+            "--assignee", "@me",
+            "--state", "closed",
+            "--json", "number",
+            "--limit", "50",
+            "--", "closed:>\(since)"
+        ) else { return 0 }
+
+        guard let data = output.data(using: .utf8),
+              let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return 0 }
+
+        return items.count
     }
 
     // MARK: - Auto-Complete Finished Sessions

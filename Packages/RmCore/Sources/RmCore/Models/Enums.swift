@@ -30,6 +30,27 @@ public enum ClaudeState: String, Codable, Sendable {
     case done
 }
 
+/// Terminal surface lifecycle state.
+public enum TerminalReadiness: String, Codable, Sendable, Comparable {
+    case uninitialized    // GhosttySurfaceView exists but createSurface() not called
+    case surfaceCreated   // ghostty_surface_t exists, shell process spawning
+    case shellReady       // Shell prompt detected (probe file appeared)
+    case claudeLaunched   // claude --continue has been sent
+
+    private var sortOrder: Int {
+        switch self {
+        case .uninitialized: 0
+        case .surfaceCreated: 1
+        case .shellReady: 2
+        case .claudeLaunched: 3
+        }
+    }
+
+    public static func < (lhs: TerminalReadiness, rhs: TerminalReadiness) -> Bool {
+        lhs.sortOrder < rhs.sortOrder
+    }
+}
+
 /// Pipeline status for a ticket, derived from project board fields.
 public enum TicketStatus: String, Codable, Sendable, CaseIterable {
     case backlog    = "Backlog"

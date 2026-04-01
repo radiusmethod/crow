@@ -6,7 +6,7 @@ import RmTerminal
 public struct SessionDetailView: View {
     let session: Session
     @Bindable var appState: AppState
-    @State private var showDeleteConfirmation = false
+    @State private var sessionToDelete: Session?
 
     public init(session: Session, appState: AppState) {
         self.session = session
@@ -24,26 +24,11 @@ public struct SessionDetailView: View {
     public var body: some View {
         VStack(spacing: 0) {
             sessionHeader
-            Divider()
+            Divider().overlay(CorveilTheme.borderSubtle)
             terminalArea
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .alert("Delete Session?", isPresented: $showDeleteConfirmation) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete Everything", role: .destructive) {
-                Task { try? await appState.onDeleteSession?(session.id) }
-            }
-        } message: {
-            let wts = appState.worktrees(for: session.id)
-            if wts.isEmpty {
-                Text("This will delete the session \"\(session.name)\".")
-            } else {
-                Text("This will delete:\n\n" +
-                     wts.map { "  \u{2022} \($0.worktreePath)\n  \u{2022} Branch: \($0.branch)" }
-                         .joined(separator: "\n\n") +
-                     "\n\nWorktree folders and git branches will be removed.")
-            }
-        }
+        .deleteSessionAlert(session: $sessionToDelete, appState: appState)
     }
 
     // MARK: - Three-Row Header
@@ -54,13 +39,13 @@ public struct SessionDetailView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(session.name)
-                        .font(.title3)
-                        .fontWeight(.semibold)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(CorveilTheme.gold)
 
                     if let title = session.ticketTitle {
                         Text(title)
                             .font(.callout)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(CorveilTheme.textSecondary)
                             .lineLimit(2)
                     }
                 }
@@ -75,7 +60,7 @@ public struct SessionDetailView: View {
 
             // Row 2: Repo / Branch / Path (if worktree exists)
             if let wt = primaryWorktree {
-                Divider().padding(.horizontal, 16)
+                Divider().overlay(CorveilTheme.borderSubtle).padding(.horizontal, 16)
 
                 HStack(spacing: 16) {
                     DetailLabel(icon: "folder", text: wt.repoName)
@@ -83,7 +68,7 @@ public struct SessionDetailView: View {
                     Spacer()
                     Text(shortenPath(wt.worktreePath))
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(CorveilTheme.textMuted)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
@@ -91,22 +76,28 @@ public struct SessionDetailView: View {
                 .padding(.vertical, 6)
             }
 
-            // Row 3: Links + Actions
-            Divider().padding(.horizontal, 16)
+            // Row 3: Links + Actions (only if there's content to show)
+            if session.ticketURL != nil || !sessionLinks.isEmpty || session.id != AppState.managerSessionID {
+                Divider().overlay(CorveilTheme.borderSubtle).padding(.horizontal, 16)
 
-            HStack(spacing: 8) {
+                HStack(spacing: 8) {
                 // Issue link
                 if let url = session.ticketURL {
                     LinkChip(
-                        label: session.ticketNumber.map { "#\($0)" } ?? "Issue",
+                        label: session.ticketNumber.map { "Issue #\($0)" } ?? "Issue",
                         url: url,
                         icon: "link"
                     )
                 }
 
-                // PR link (from session links)
+                // PR link with status (from session links)
                 ForEach(sessionLinks.filter { $0.linkType == .pr }) { link in
                     LinkChip(label: link.label, url: link.url, icon: "arrow.triangle.pull")
+                }
+
+                // PR status indicators (pipeline, review, merge)
+                if let status = appState.prStatus[session.id] {
+                    PRStatusDetail(status: status)
                 }
 
                 // Repo link
@@ -122,15 +113,16 @@ public struct SessionDetailView: View {
                         Button {
                             appState.onCompleteSession?(session.id)
                         } label: {
-                            Label("Complete", systemImage: "checkmark.circle")
+                            Label("Mark as Completed", systemImage: "checkmark.circle")
                                 .font(.caption)
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .tint(CorveilTheme.gold)
                     }
 
                     Button(role: .destructive) {
-                        showDeleteConfirmation = true
+                        sessionToDelete = session
                     } label: {
                         Label("Delete", systemImage: "trash")
                             .font(.caption)
@@ -141,8 +133,25 @@ public struct SessionDetailView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
+            }
         }
-        .background(.bar)
+        .background(CorveilTheme.bgSurface)
+    }
+
+    @ViewBuilder
+    private var managerBrandmark: some View {
+        let image: NSImage? = {
+            for bundle in Bundle.allBundles {
+                if let url = bundle.url(forResource: "CorveilBrandmark", withExtension: "png"),
+                   let img = NSImage(contentsOf: url) { return img }
+            }
+            return nil
+        }()
+        if let image {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+        }
     }
 
     // MARK: - Terminal Area
@@ -158,12 +167,7 @@ public struct SessionDetailView: View {
             .id(session.id)
         } else if sessionTerminals.count == 1 {
             let terminal = sessionTerminals[0]
-            TerminalSurfaceView(
-                terminalID: terminal.id,
-                workingDirectory: terminal.cwd,
-                command: terminal.command
-            )
-            .id(terminal.id)
+            ReadinessAwareTerminal(terminal: terminal, appState: appState)
         } else {
             VStack(spacing: 0) {
                 TerminalTabBar(
@@ -171,15 +175,10 @@ public struct SessionDetailView: View {
                     activeID: appState.activeTerminalID[session.id] ?? sessionTerminals[0].id,
                     onSelect: { id in appState.activeTerminalID[session.id] = id }
                 )
-                Divider()
+                Divider().overlay(CorveilTheme.borderSubtle)
                 let activeID = appState.activeTerminalID[session.id] ?? sessionTerminals[0].id
                 if let terminal = sessionTerminals.first(where: { $0.id == activeID }) {
-                    TerminalSurfaceView(
-                        terminalID: terminal.id,
-                        workingDirectory: terminal.cwd,
-                        command: terminal.command
-                    )
-                    .id(terminal.id)
+                    ReadinessAwareTerminal(terminal: terminal, appState: appState)
                 }
             }
         }
@@ -188,7 +187,6 @@ public struct SessionDetailView: View {
     // MARK: - Helpers
 
     private func shortenBranch(_ branch: String) -> String {
-        // Show last component: "feature/citadel-197-tab" → "citadel-197-tab"
         if let last = branch.split(separator: "/").last {
             return String(last)
         }
@@ -214,10 +212,10 @@ struct DetailLabel: View {
         HStack(spacing: 3) {
             Image(systemName: icon)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(CorveilTheme.textMuted)
             Text(text)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(CorveilTheme.textSecondary)
                 .lineLimit(1)
         }
     }
@@ -234,15 +232,16 @@ public struct TerminalTabBar: View {
                 Button { onSelect(terminal.id) } label: {
                     Text(terminal.name)
                         .font(.caption)
+                        .foregroundStyle(terminal.id == activeID ? CorveilTheme.gold : CorveilTheme.textSecondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
-                        .background(terminal.id == activeID ? Color.accentColor.opacity(0.15) : Color.clear)
+                        .background(terminal.id == activeID ? CorveilTheme.gold.opacity(0.12) : Color.clear)
                 }
                 .buttonStyle(.plain)
             }
             Spacer()
         }
-        .background(.bar)
+        .background(CorveilTheme.bgSurface)
     }
 }
 
@@ -251,8 +250,8 @@ struct StatusBadge: View {
 
     var body: some View {
         Text(status.rawValue.capitalized)
-            .font(.caption)
-            .fontWeight(.medium)
+            .font(.system(size: 11, weight: .semibold))
+            .tracking(0.3)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(statusColor.opacity(0.15))
@@ -264,8 +263,8 @@ struct StatusBadge: View {
         switch status {
         case .active: .green
         case .paused: .yellow
-        case .completed: .blue
-        case .archived: .secondary
+        case .completed: CorveilTheme.gold
+        case .archived: CorveilTheme.textMuted
         }
     }
 }
@@ -286,12 +285,60 @@ struct LinkChip: View {
                     .font(.caption)
                 Text(label)
                     .font(.caption)
+                    .fontWeight(.medium)
             }
+            .foregroundStyle(CorveilTheme.gold)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(.quaternary)
+            .background(CorveilTheme.gold.opacity(0.1))
+            .overlay(
+                Capsule().strokeBorder(CorveilTheme.goldDark.opacity(0.3), lineWidth: 1)
+            )
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Readiness-Aware Terminal Wrapper
+
+/// Wraps a TerminalSurfaceView with readiness tracking.
+/// Auto-launches `claude --continue` when the shell becomes ready on first focus.
+struct ReadinessAwareTerminal: View {
+    let terminal: SessionTerminal
+    @Bindable var appState: AppState
+
+    private var readiness: TerminalReadiness {
+        appState.terminalReadiness[terminal.id] ?? .claudeLaunched  // Default for non-tracked terminals
+    }
+
+    var body: some View {
+        ZStack {
+            TerminalSurfaceView(
+                terminalID: terminal.id,
+                workingDirectory: terminal.cwd,
+                command: terminal.command
+            )
+            .id(terminal.id)
+
+            // Loading overlay while terminal is not yet ready
+            if readiness < .shellReady {
+                VStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.regular)
+                    Text(readiness == .uninitialized ? "Waiting for terminal..." : "Shell starting...")
+                        .font(.caption)
+                        .foregroundStyle(CorveilTheme.textMuted)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(CorveilTheme.bgDeep.opacity(0.85))
+            }
+        }
+        .onChange(of: readiness) { oldValue, newValue in
+            if newValue == .shellReady {
+                // Shell just became ready — auto-launch Claude
+                appState.onLaunchClaude?(terminal.id)
+            }
+        }
     }
 }

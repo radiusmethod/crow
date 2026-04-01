@@ -13,50 +13,56 @@ public struct SessionListView: View {
 
     public var body: some View {
         List(selection: $appState.selectedSessionID) {
-            // Ticket board tab
-            Section {
-                TicketBoardSidebarRow(appState: appState)
-                    .tag(AppState.ticketBoardSessionID)
-            } header: {
-                Label("Tickets", systemImage: "ticket")
-            }
+            // Brandmark header
+            SidebarBrandmark()
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
 
-            // Pinned manager tab
+            // Ticket board row
+            TicketBoardSidebarRow(appState: appState)
+                .tag(AppState.ticketBoardSessionID)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+
+            // Manager row
             if let manager = appState.managerSession {
-                Section {
-                    SessionRow(session: manager, isManager: true)
-                        .tag(manager.id)
-                } header: {
-                    Label("Manager", systemImage: "sparkle")
-                }
+                ManagerRow()
+                    .tag(manager.id)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
             }
 
             // Active sessions
             if !appState.activeSessions.isEmpty {
-                Section("Active") {
-                    ForEach(filteredSessions(appState.activeSessions)) { session in
-                        SessionRow(session: session)
-                            .tag(session.id)
-                            .contextMenu {
-                                sessionContextMenu(session)
-                            }
-                    }
+                SectionDivider(title: "Active")
+                ForEach(filteredSessions(appState.activeSessions)) { session in
+                    SessionRow(session: session, appState: appState)
+                        .tag(session.id)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .contextMenu {
+                            sessionContextMenu(session)
+                        }
                 }
             }
 
             // Completed sessions
             if !appState.completedSessions.isEmpty {
-                Section("Completed") {
-                    ForEach(filteredSessions(appState.completedSessions)) { session in
-                        SessionRow(session: session)
-                            .tag(session.id)
-                            .contextMenu {
-                                sessionContextMenu(session)
-                            }
-                    }
+                SectionDivider(title: "Completed")
+                ForEach(filteredSessions(appState.completedSessions)) { session in
+                    SessionRow(session: session, appState: appState)
+                        .tag(session.id)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .contextMenu {
+                            sessionContextMenu(session)
+                        }
                 }
             }
         }
+        .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+        .background(CorveilTheme.bgDeep)
         .searchable(text: $searchText, prompt: "Search sessions")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -64,6 +70,7 @@ public struct SessionListView: View {
                     appState.isCreatingSession = true
                 } label: {
                     Label("New Session", systemImage: "plus")
+                        .foregroundStyle(CorveilTheme.gold)
                 }
                 .keyboardShortcut("n", modifiers: .command)
             }
@@ -71,48 +78,7 @@ public struct SessionListView: View {
         .sheet(isPresented: $appState.isCreatingSession) {
             CreateSessionView(appState: appState)
         }
-        .alert("Delete Session?", isPresented: Binding(
-            get: { sessionToDelete != nil },
-            set: { if !$0 { sessionToDelete = nil } }
-        )) {
-            Button("Cancel", role: .cancel) { sessionToDelete = nil }
-            if let session = sessionToDelete {
-                let wts = appState.worktrees(for: session.id)
-                let hasRealWorktrees = wts.contains { !Self.isMainCheckout($0) }
-                Button(hasRealWorktrees ? "Delete Everything" : "Remove Session", role: .destructive) {
-                    Task { try? await appState.onDeleteSession?(session.id) }
-                    sessionToDelete = nil
-                }
-            }
-        } message: {
-            if let session = sessionToDelete {
-                let wts = appState.worktrees(for: session.id)
-                let realWorktrees = wts.filter { !Self.isMainCheckout($0) }
-                let mainCheckouts = wts.filter { Self.isMainCheckout($0) }
-
-                if wts.isEmpty {
-                    Text("This will delete the session \"\(session.name)\".")
-                } else if realWorktrees.isEmpty {
-                    // All worktrees are main checkouts — only removing session metadata
-                    Text("This will remove the session \"\(session.name)\".\n\nThe repository folder and branch (\(mainCheckouts.map(\.branch).joined(separator: ", "))) will not be affected.")
-                } else if mainCheckouts.isEmpty {
-                    // All are real worktrees — full cleanup
-                    Text("This will delete:\n\n" +
-                         realWorktrees.map { wt in
-                             "  \u{2022} Worktree: \(wt.worktreePath)\n  \u{2022} Branch: \(wt.branch)"
-                         }.joined(separator: "\n\n") +
-                         "\n\nThe worktree folders and git branches will be removed from disk.")
-                } else {
-                    // Mix of both
-                    Text("This will delete:\n\n" +
-                         realWorktrees.map { wt in
-                             "  \u{2022} Worktree: \(wt.worktreePath)\n  \u{2022} Branch: \(wt.branch)"
-                         }.joined(separator: "\n\n") +
-                         "\n\nThe worktree folders and branches above will be removed.\n\n" +
-                         "The main repo (\(mainCheckouts.map(\.branch).joined(separator: ", "))) will not be affected.")
-                }
-            }
-        }
+        .deleteSessionAlert(session: $sessionToDelete, appState: appState)
     }
 
     @ViewBuilder
@@ -121,7 +87,7 @@ public struct SessionListView: View {
             Button {
                 appState.onCompleteSession?(session.id)
             } label: {
-                Label("Complete", systemImage: "checkmark.circle")
+                Label("Mark as Completed", systemImage: "checkmark.circle")
             }
         }
 
@@ -136,67 +102,232 @@ public struct SessionListView: View {
         if searchText.isEmpty { return sessions }
         return sessions.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
     }
+}
 
-    /// Check if a worktree entry is the main repo checkout (not a real git worktree).
-    private static func isMainCheckout(_ wt: SessionWorktree) -> Bool {
-        let worktree = (wt.worktreePath as NSString).standardizingPath
-        let repo = (wt.repoPath as NSString).standardizingPath
-        if worktree == repo { return true }
-        let branch = wt.branch.lowercased()
-        let protectedNames: Set<String> = ["main", "master", "develop", "dev", "trunk", "release"]
-        return protectedNames.contains(branch)
+// MARK: - Sidebar Brandmark
+
+struct SidebarBrandmark: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            if let image = loadBrandmark() {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 120)
+                    .opacity(0.7)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 2)
+    }
+
+    private func loadBrandmark() -> NSImage? {
+        for bundle in Bundle.allBundles {
+            if let url = bundle.url(forResource: "CorveilBrandmark", withExtension: "png"),
+               let image = NSImage(contentsOf: url) {
+                return image
+            }
+        }
+        return nil
     }
 }
 
-struct SessionRow: View {
-    let session: Session
-    var isManager: Bool = false
+// MARK: - Section Divider
+
+struct SectionDivider: View {
+    let title: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+            .font(.system(size: 10, weight: .bold))
+            .tracking(1.5)
+            .textCase(.uppercase)
+            .foregroundStyle(CorveilTheme.goldDark)
+            .padding(.top, 10)
+            .padding(.bottom, 2)
+            .listRowSeparator(.hidden)
+    }
+}
+
+// MARK: - Manager Row
+
+struct ManagerRow: View {
+    var body: some View {
+        HStack {
+            Spacer()
+            Text("Manager")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(CorveilTheme.gold)
+            Spacer()
+        }
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(CorveilTheme.bgSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(CorveilTheme.goldDark.opacity(0.4), lineWidth: 1)
+                )
+        )
+        .padding(.vertical, 2)
+    }
+}
+
+// MARK: - Session Row
+
+struct SessionRow: View {
+    let session: Session
+    let appState: AppState
+
+    private var primaryWorktree: SessionWorktree? {
+        appState.primaryWorktree(for: session.id)
+    }
+
+    private var prLink: SessionLink? {
+        appState.links(for: session.id).first(where: { $0.linkType == .pr })
+    }
+
+    private var prStatus: PRStatus? {
+        appState.prStatus[session.id]
+    }
+
+    private var claudeState: ClaudeState {
+        appState.claudeState[session.id] ?? .idle
+    }
+
+    /// Readiness of the primary terminal for this session.
+    private var terminalReadiness: TerminalReadiness? {
+        let terminals = appState.terminals(for: session.id)
+        guard let primary = terminals.first else { return nil }
+        return appState.terminalReadiness[primary.id]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            // Row 1: Name + status indicator
             HStack {
-                if isManager {
-                    Image(systemName: "sparkle")
-                        .font(.caption)
-                        .foregroundStyle(.tint)
-                }
                 Text(session.name)
-                    .font(.headline)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(CorveilTheme.textPrimary)
                     .lineLimit(1)
                 Spacer()
-                if !isManager {
-                    statusIndicator
-                }
+                statusIndicator
             }
+
+            // Row 2: Ticket title (if any)
             if let title = session.ticketTitle {
                 Text(title)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(CorveilTheme.textSecondary)
                     .lineLimit(1)
             }
+
+            // Row 3: Repo + branch
+            if let wt = primaryWorktree {
+                Text("\(wt.repoName) / \(shortenBranch(wt.branch))")
+                    .font(.caption2)
+                    .foregroundStyle(CorveilTheme.textMuted)
+                    .lineLimit(1)
+            }
+
+            // Row 4: Issue badge + PR badge + Claude state
+            let hasIssueBadge = session.ticketNumber != nil
+            let hasBadges = hasIssueBadge || prLink != nil || claudeState != .idle
+            if hasBadges {
+                HStack(spacing: 6) {
+                    if let num = session.ticketNumber {
+                        Text("Issue #\(num)")
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(CorveilTheme.gold.opacity(0.1))
+                            .foregroundStyle(CorveilTheme.gold)
+                            .overlay(
+                                Capsule().strokeBorder(CorveilTheme.goldDark.opacity(0.3), lineWidth: 0.5)
+                            )
+                            .clipShape(Capsule())
+                    }
+                    if let pr = prLink {
+                        PRBadge(label: pr.label, status: prStatus)
+                    }
+                    if claudeState != .idle {
+                        claudeStateBadge
+                    }
+                }
+            }
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(CorveilTheme.bgCard)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(CorveilTheme.borderSubtle, lineWidth: 1)
+                )
+        )
+        .padding(.vertical, 1)
     }
 
     @ViewBuilder
     private var statusIndicator: some View {
         switch session.status {
         case .active:
-            Circle()
-                .fill(.green)
-                .frame(width: 8, height: 8)
+            // Reflect terminal readiness state
+            switch terminalReadiness {
+            case .uninitialized, nil:
+                Circle()
+                    .fill(CorveilTheme.textMuted)
+                    .frame(width: 8, height: 8)
+            case .surfaceCreated:
+                Circle()
+                    .fill(.yellow)
+                    .frame(width: 8, height: 8)
+            case .shellReady:
+                Circle()
+                    .fill(.blue)
+                    .frame(width: 8, height: 8)
+            case .claudeLaunched:
+                Circle()
+                    .fill(.green)
+                    .frame(width: 8, height: 8)
+            }
         case .paused:
             Circle()
                 .fill(.yellow)
                 .frame(width: 8, height: 8)
         case .completed:
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(CorveilTheme.gold)
                 .font(.caption)
         case .archived:
             Image(systemName: "archivebox.fill")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(CorveilTheme.textMuted)
                 .font(.caption)
         }
+    }
+
+    @ViewBuilder
+    private var claudeStateBadge: some View {
+        let (icon, color, label): (String, Color, String) = switch claudeState {
+        case .working: ("bolt.fill", .orange, "Working")
+        case .waiting: ("ellipsis.circle.fill", .blue, "Waiting")
+        case .done: ("checkmark.circle.fill", CorveilTheme.gold, "Done")
+        case .idle: ("circle", CorveilTheme.textMuted, "Idle")
+        }
+        HStack(spacing: 3) {
+            Image(systemName: icon)
+                .font(.caption2)
+            Text(label)
+                .font(.caption2)
+        }
+        .foregroundStyle(color)
+    }
+
+    private func shortenBranch(_ branch: String) -> String {
+        branch
+            .replacingOccurrences(of: "feature/", with: "")
+            .replacingOccurrences(of: "refs/heads/", with: "")
     }
 }

@@ -38,11 +38,26 @@ public final class AppState {
     public var assignedIssues: [AssignedIssue] = []
     public var isLoadingIssues: Bool = false
 
+    /// Number of issues completed (closed) in the last 24 hours.
+    public var doneIssuesLast24h: Int = 0
+
     /// Currently selected pipeline filter on the ticket board.
     public var selectedTicketStatus: TicketStatus = .inProgress
 
+    /// Claude Code state per session (idle, working, waiting, done).
+    public var claudeState: [UUID: ClaudeState] = [:]
+
+    /// PR status per session (pipeline, review, merge readiness).
+    public var prStatus: [UUID: PRStatus] = [:]
+
+    /// Terminal readiness state per terminal ID.
+    public var terminalReadiness: [UUID: TerminalReadiness] = [:]
+
     /// Called when user clicks "Work on" for an assigned issue.
     public var onWorkOnIssue: ((String) -> Void)?  // receives issue URL
+
+    /// Called to launch Claude in a terminal that just became ready.
+    public var onLaunchClaude: ((UUID) -> Void)?  // receives terminal ID
 
     // MARK: - Closures wired by AppDelegate
 

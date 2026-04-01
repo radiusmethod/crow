@@ -21,7 +21,18 @@ final class SessionService {
         let data = store.data
         appState.sessions = data.sessions
 
-        for session in data.sessions {
+        // Backfill provider from ticketURL for sessions that predate provider tracking
+        for i in appState.sessions.indices {
+            if appState.sessions[i].provider == nil, let url = appState.sessions[i].ticketURL {
+                if url.contains("github.com") {
+                    appState.sessions[i].provider = .github
+                } else if url.contains("gitlab.com") || url.contains("repo1.dso.mil") || url.contains("code.il2.dso.mil") {
+                    appState.sessions[i].provider = .gitlab
+                }
+            }
+        }
+
+        for session in appState.sessions {
             appState.worktrees[session.id] = data.worktrees.filter { $0.sessionID == session.id }
             appState.links[session.id] = data.links.filter { $0.sessionID == session.id }
 
@@ -43,42 +54,40 @@ final class SessionService {
                 }
             }
             appState.terminals[session.id] = terminals
-        }
-    }
 
-    /// After the window is up, pre-create terminal surfaces off-screen,
-    /// then send `claude --continue` to each work session terminal.
-    func launchWorkSessionClaude(window: NSWindow) {
-        let claudePath = Self.findClaudeBinary() ?? "claude"
-        let workSessions = appState.sessions.filter { $0.id != AppState.managerSessionID && $0.status == .active }
-
-        guard !workSessions.isEmpty else { return }
-
-        // Step 1: Warm all terminal surfaces by briefly attaching them to the window off-screen.
-        // This triggers viewDidMoveToWindow → createSurface without needing to select each tab.
-        for session in workSessions {
-            let terminals = appState.terminals(for: session.id)
-            for terminal in terminals {
-                TerminalManager.shared.warmSurface(
-                    for: terminal.id,
-                    workingDirectory: terminal.cwd ?? FileManager.default.homeDirectoryForCurrentUser.path,
-                    command: terminal.command,
-                    in: window
-                )
-            }
-        }
-
-        // Step 2: After surfaces have initialized, send claude --continue to each
-        let sendDelay = 3.0  // wait for surfaces to fully initialize
-        for (i, session) in workSessions.enumerated() {
-            let terminals = appState.terminals(for: session.id)
-            for terminal in terminals {
-                let delay = sendDelay + Double(i) * 1.0
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                    TerminalManager.shared.send(id: terminal.id, text: "\(claudePath) --continue\n")
+            // Initialize readiness tracking for work session terminals
+            if session.id != AppState.managerSessionID {
+                for terminal in terminals {
+                    appState.terminalReadiness[terminal.id] = .uninitialized
+                    TerminalManager.shared.trackReadiness(for: terminal.id)
                 }
             }
         }
+    }
+
+    /// Wire TerminalManager readiness callbacks to update AppState.
+    func wireTerminalReadiness() {
+        NSLog("[SessionService] wireTerminalReadiness — setting onStateChanged callback")
+        TerminalManager.shared.onStateChanged = { [weak self] terminalID, state in
+            guard let self else { return }
+            // Only update state for terminals we're tracking (work sessions, not Manager)
+            guard self.appState.terminalReadiness[terminalID] != nil else { return }
+            NSLog("[SessionService] onStateChanged: terminal=\(terminalID), state=\(state)")
+            switch state {
+            case .created:
+                self.appState.terminalReadiness[terminalID] = .surfaceCreated
+            case .shellReady:
+                self.appState.terminalReadiness[terminalID] = .shellReady
+            }
+        }
+    }
+
+    /// Send `claude --continue` to a terminal and mark it as launched.
+    func launchClaude(terminalID: UUID) {
+        guard appState.terminalReadiness[terminalID] == .shellReady else { return }
+        let claudePath = Self.findClaudeBinary() ?? "claude"
+        TerminalManager.shared.send(id: terminalID, text: "\(claudePath) --continue\n")
+        appState.terminalReadiness[terminalID] = .claudeLaunched
     }
 
     // MARK: - Ensure Manager Session
@@ -202,7 +211,10 @@ final class SessionService {
 
     /// Returns true if a branch name is a protected default branch that should never be deleted.
     private static func isProtectedBranch(_ branch: String) -> Bool {
-        let name = branch.lowercased()
+        let name = branch
+            .replacingOccurrences(of: "refs/heads/", with: "")
+            .replacingOccurrences(of: "origin/", with: "")
+            .lowercased()
         let protectedNames: Set<String> = ["main", "master", "develop", "dev", "trunk", "release"]
         return protectedNames.contains(name)
     }

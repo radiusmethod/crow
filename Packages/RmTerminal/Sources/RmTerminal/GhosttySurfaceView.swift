@@ -10,6 +10,9 @@ public final class GhosttySurfaceView: NSView {
     /// Whether the Ghostty surface has been created (needs window attachment first).
     public var hasSurface: Bool { surface != nil }
 
+    /// Called after createSurface() succeeds.
+    public var onSurfaceCreated: (() -> Void)?
+
     /// The working directory for the shell spawned in this surface.
     public var workingDirectory: String?
 
@@ -74,6 +77,13 @@ public final class GhosttySurfaceView: NSView {
         }
 
         updateTrackingAreaInternal()
+
+        if surface != nil {
+            NSLog("[Ghostty] createSurface() succeeded, hasCallback=\(onSurfaceCreated != nil)")
+            onSurfaceCreated?()
+        } else {
+            NSLog("[Ghostty] createSurface() FAILED — surface is nil")
+        }
     }
 
     private static func shellEscape(_ str: String) -> String {
