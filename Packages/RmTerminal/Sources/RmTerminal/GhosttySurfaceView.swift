@@ -106,9 +106,31 @@ public final class GhosttySurfaceView: NSView {
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         guard let surface else { return }
-        let scale = Double(window?.backingScaleFactor ?? 2.0)
+        let scale = Double(window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0)
         ghostty_surface_set_content_scale(surface, scale, scale)
         ghostty_surface_set_size(surface, UInt32(newSize.width * scale), UInt32(newSize.height * scale))
+    }
+
+    public override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        guard let surface, let window else { return }
+        let scale = Double(window.backingScaleFactor)
+        ghostty_surface_set_content_scale(surface, scale, scale)
+        let size = frame.size
+        if size.width > 0 && size.height > 0 {
+            ghostty_surface_set_size(surface, UInt32(size.width * scale), UInt32(size.height * scale))
+        }
+    }
+
+    public override func resize(withOldSuperviewSize oldSize: NSSize) {
+        super.resize(withOldSuperviewSize: oldSize)
+        guard let surface else { return }
+        let scale = Double(window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0)
+        let size = frame.size
+        if size.width > 0 && size.height > 0 {
+            ghostty_surface_set_content_scale(surface, scale, scale)
+            ghostty_surface_set_size(surface, UInt32(size.width * scale), UInt32(size.height * scale))
+        }
     }
 
     public override func updateTrackingAreas() {

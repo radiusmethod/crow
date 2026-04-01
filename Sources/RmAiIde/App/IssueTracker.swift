@@ -513,48 +513,55 @@ final class IssueTracker {
     // MARK: - Shell
 
     private func shell(env: [String: String] = [:], _ args: String...) async throws -> String {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
-        if !env.isEmpty {
-            var environment = ProcessInfo.processInfo.environment
-            for (k, v) in env { environment[k] = v }
-            process.environment = environment
-        }
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        try process.run()
-        process.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard process.terminationStatus == 0 else {
-            throw NSError(domain: "IssueTracker", code: Int(process.terminationStatus))
-        }
-        return String(data: data, encoding: .utf8) ?? ""
+        let args = args
+        let env = env
+        return try await Task.detached {
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = args
+            if !env.isEmpty {
+                var environment = ProcessInfo.processInfo.environment
+                for (k, v) in env { environment[k] = v }
+                process.environment = environment
+            }
+            process.standardOutput = pipe
+            process.standardError = Pipe()
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            guard process.terminationStatus == 0 else {
+                throw NSError(domain: "IssueTracker", code: Int(process.terminationStatus))
+            }
+            return String(data: data, encoding: .utf8) ?? ""
+        }.value
     }
 
-    private struct ShellResult {
+    private struct ShellResult: Sendable {
         let stdout: String
         let stderr: String
         let exitCode: Int32
     }
 
     private func shellWithStatus(_ args: String...) async -> ShellResult {
-        let process = Process()
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = args
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-        do { try process.run() } catch { return ShellResult(stdout: "", stderr: error.localizedDescription, exitCode: -1) }
-        process.waitUntilExit()
-        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-        return ShellResult(
-            stdout: String(data: outData, encoding: .utf8) ?? "",
-            stderr: String(data: errData, encoding: .utf8) ?? "",
-            exitCode: process.terminationStatus
-        )
+        let args = args
+        return await Task.detached {
+            let process = Process()
+            let outPipe = Pipe()
+            let errPipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = args
+            process.standardOutput = outPipe
+            process.standardError = errPipe
+            do { try process.run() } catch { return ShellResult(stdout: "", stderr: error.localizedDescription, exitCode: -1) }
+            process.waitUntilExit()
+            let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            return ShellResult(
+                stdout: String(data: outData, encoding: .utf8) ?? "",
+                stderr: String(data: errData, encoding: .utf8) ?? "",
+                exitCode: process.terminationStatus
+            )
+        }.value
     }
 }
