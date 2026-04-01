@@ -36,7 +36,13 @@ public struct PRStatus: Codable, Sendable {
     public enum MergeStatus: String, Codable, Sendable {
         case mergeable
         case conflicting
+        case merged
         case unknown
+    }
+
+    /// True if the PR has been merged.
+    public var isMerged: Bool {
+        mergeable == .merged
     }
 
     /// True if the PR is ready to merge (checks pass, approved, no conflicts).
@@ -46,6 +52,6 @@ public struct PRStatus: Codable, Sendable {
 
     /// True if there are blockers preventing merge.
     public var hasBlockers: Bool {
-        checksPass == .failing || reviewStatus == .changesRequested || mergeable == .conflicting
+        !isMerged && (checksPass == .failing || reviewStatus == .changesRequested || mergeable == .conflicting)
     }
 }

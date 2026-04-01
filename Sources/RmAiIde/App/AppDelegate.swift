@@ -101,6 +101,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         service.wireTerminalReadiness()
         self.sessionService = service
 
+        // Detect orphaned worktrees (runs async, updates UI when done)
+        Task { await service.detectOrphanedWorktrees() }
+
         // Ensure manager session exists
         service.ensureManagerSession(devRoot: devRoot)
 

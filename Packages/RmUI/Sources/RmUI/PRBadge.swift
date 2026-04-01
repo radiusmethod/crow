@@ -13,15 +13,22 @@ struct PRBadge: View {
                 .fontWeight(.medium)
 
             if let status {
-                // Pipeline status
-                Image(systemName: checksIcon(status.checksPass))
-                    .font(.system(size: 8))
-                    .foregroundStyle(checksColor(status.checksPass))
+                if status.isMerged {
+                    // Merged — single purple checkmark
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.purple)
+                } else {
+                    // Pipeline status
+                    Image(systemName: checksIcon(status.checksPass))
+                        .font(.system(size: 8))
+                        .foregroundStyle(checksColor(status.checksPass))
 
-                // Review status
-                Image(systemName: reviewIcon(status.reviewStatus))
-                    .font(.system(size: 8))
-                    .foregroundStyle(reviewColor(status.reviewStatus))
+                    // Review status
+                    Image(systemName: reviewIcon(status.reviewStatus))
+                        .font(.system(size: 8))
+                        .foregroundStyle(reviewColor(status.reviewStatus))
+                }
             }
         }
         .padding(.horizontal, 6)
@@ -36,23 +43,24 @@ struct PRBadge: View {
 
     private var badgeBackground: Color {
         guard let status else { return CorveilTheme.gold.opacity(0.15) }
-        if status.checksPass == .failing || status.mergeable == .conflicting {
-            return Color.red.opacity(0.12)
-        }
+        if status.isMerged { return Color.purple.opacity(0.12) }
+        if status.hasBlockers { return Color.red.opacity(0.12) }
         if status.isReadyToMerge { return Color.green.opacity(0.12) }
         return CorveilTheme.gold.opacity(0.12)
     }
 
     private var badgeForeground: Color {
         guard let status else { return CorveilTheme.gold }
-        if status.checksPass == .failing || status.mergeable == .conflicting { return .red }
+        if status.isMerged { return .purple }
+        if status.hasBlockers { return .red }
         if status.isReadyToMerge { return .green }
         return CorveilTheme.gold
     }
 
     private var badgeBorder: Color {
         guard let status else { return CorveilTheme.goldDark.opacity(0.3) }
-        if status.checksPass == .failing || status.mergeable == .conflicting { return .red.opacity(0.3) }
+        if status.isMerged { return Color.purple.opacity(0.3) }
+        if status.hasBlockers { return .red.opacity(0.3) }
         if status.isReadyToMerge { return .green.opacity(0.3) }
         return CorveilTheme.goldDark.opacity(0.3)
     }
@@ -99,19 +107,29 @@ struct PRStatusDetail: View {
     let status: PRStatus
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Pipeline
+        if status.isMerged {
             HStack(spacing: 3) {
-                Image(systemName: checksIcon)
+                Image(systemName: "checkmark.circle.fill")
                     .font(.caption2)
-                    .foregroundStyle(checksColor)
-                Text(checksLabel)
+                    .foregroundStyle(.purple)
+                Text("Merged")
                     .font(.caption2)
-                    .foregroundStyle(checksColor)
+                    .foregroundStyle(.purple)
             }
+        } else {
+            HStack(spacing: 8) {
+                // Pipeline
+                HStack(spacing: 3) {
+                    Image(systemName: checksIcon)
+                        .font(.caption2)
+                        .foregroundStyle(checksColor)
+                    Text(checksLabel)
+                        .font(.caption2)
+                        .foregroundStyle(checksColor)
+                }
 
-            // Review
-            HStack(spacing: 3) {
+                // Review
+                HStack(spacing: 3) {
                 Image(systemName: reviewIcon)
                     .font(.caption2)
                     .foregroundStyle(reviewColor)
@@ -130,6 +148,7 @@ struct PRStatusDetail: View {
                         .font(.caption2)
                         .foregroundStyle(.red)
                 }
+            }
             }
         }
     }

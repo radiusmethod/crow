@@ -232,6 +232,236 @@ final class SessionService {
         return String(data: data, encoding: .utf8) ?? ""
     }
 
+    /// Resolve org/repo slug from a repo's git remote URL.
+    private func resolveRepoSlug(repoPath: String) -> String? {
+        guard let output = try? shellSync("git", "-C", repoPath, "remote", "get-url", "origin") else { return nil }
+        var url = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        if url.hasSuffix(".git") { url = String(url.dropLast(4)) }
+        if let match = url.range(of: #"[:/]([^/:]+/[^/:]+)$"#, options: .regularExpression) {
+            return String(url[match]).trimmingCharacters(in: CharacterSet(charactersIn: "/:"))
+        }
+        return nil
+    }
+
+    private func shellSync(_ args: String...) throws -> String {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = args
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "SessionService", code: Int(process.terminationStatus))
+        }
+        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    }
+
+    // MARK: - Orphan Worktree Detection
+
+    /// Scan repos for worktrees that exist on disk but have no session in the store.
+    /// Re-imports them as active sessions so they appear in the sidebar.
+    func detectOrphanedWorktrees() async {
+        guard let devRoot = ConfigStore.loadDevRoot(),
+              let config = ConfigStore.loadConfig(devRoot: devRoot) else { return }
+
+        // Collect all known worktree paths from the store
+        let knownPaths = Set(
+            appState.worktrees.values.flatMap { $0 }
+                .map { ($0.worktreePath as NSString).standardizingPath }
+        )
+
+        let fm = FileManager.default
+
+        // Scan each workspace for repos
+        guard let workspaceDirs = try? fm.contentsOfDirectory(atPath: devRoot) else { return }
+
+        for wsDir in workspaceDirs {
+            let wsPath = (devRoot as NSString).appendingPathComponent(wsDir)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: wsPath, isDirectory: &isDir), isDir.boolValue else { continue }
+            guard !config.defaults.excludeDirs.contains(wsDir) else { continue }
+
+            guard let repoDirs = try? fm.contentsOfDirectory(atPath: wsPath) else { continue }
+            for repoDir in repoDirs {
+                let repoPath = (wsPath as NSString).appendingPathComponent(repoDir)
+                let gitPath = (repoPath as NSString).appendingPathComponent(".git")
+                var gitIsDir: ObjCBool = false
+
+                // Only process real repos (not worktrees — .git is a directory for repos, a file for worktrees)
+                guard fm.fileExists(atPath: gitPath, isDirectory: &gitIsDir), gitIsDir.boolValue else { continue }
+
+                // Get worktrees for this repo
+                guard let output = try? await shell("git", "-C", repoPath, "worktree", "list", "--porcelain") else { continue }
+                let worktrees = parseWorktreeList(output)
+
+                for wt in worktrees {
+                    let standardPath = (wt.path as NSString).standardizingPath
+
+                    // Skip the main checkout
+                    if standardPath == (repoPath as NSString).standardizingPath { continue }
+
+                    // Skip if already tracked
+                    if knownPaths.contains(standardPath) { continue }
+
+                    // Skip protected branches
+                    if Self.isProtectedBranch(wt.branch) { continue }
+
+                    // This is an orphan — recover it
+                    NSLog("[SessionService] Recovered orphan worktree: \(wt.path) branch=\(wt.branch)")
+                    await recoverOrphan(worktreePath: wt.path, branch: wt.branch, repoName: repoDir, repoPath: repoPath, workspace: wsDir)
+                }
+            }
+        }
+    }
+
+    private struct WorktreeEntry {
+        let path: String
+        let branch: String
+    }
+
+    private func parseWorktreeList(_ output: String) -> [WorktreeEntry] {
+        var entries: [WorktreeEntry] = []
+        var currentPath: String?
+        var currentBranch: String?
+
+        for line in output.components(separatedBy: "\n") {
+            if line.hasPrefix("worktree ") {
+                // Save previous entry
+                if let path = currentPath, let branch = currentBranch {
+                    entries.append(WorktreeEntry(path: path, branch: branch))
+                }
+                currentPath = String(line.dropFirst("worktree ".count))
+                currentBranch = nil
+            } else if line.hasPrefix("branch ") {
+                currentBranch = String(line.dropFirst("branch ".count))
+                    .replacingOccurrences(of: "refs/heads/", with: "")
+            }
+        }
+        // Don't forget the last entry
+        if let path = currentPath, let branch = currentBranch {
+            entries.append(WorktreeEntry(path: path, branch: branch))
+        }
+        return entries
+    }
+
+    private func recoverOrphan(worktreePath: String, branch: String, repoName: String, repoPath: String, workspace: String) async {
+        let dirName = (worktreePath as NSString).lastPathComponent
+
+        // Try to parse ticket number from directory name (e.g., "citadel-209-slug" → 209)
+        var ticketNumber: Int?
+        var ticketURL: String?
+        var ticketTitle: String?
+        var provider: Provider?
+
+        let parts = dirName.components(separatedBy: "-")
+        // Look for a numeric part after the repo name prefix
+        if let repoPrefix = parts.first {
+            for (i, part) in parts.enumerated() where i > 0 {
+                if let num = Int(part) {
+                    ticketNumber = num
+                    break
+                }
+            }
+        }
+
+        // Try to construct ticket URL and fetch title from GitHub
+        if let num = ticketNumber {
+            if let remoteURL = try? await shell("git", "-C", repoPath, "remote", "get-url", "origin") {
+                var url = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                if url.hasSuffix(".git") { url = String(url.dropLast(4)) }
+                // Convert SSH to HTTPS
+                if url.hasPrefix("git@github.com:") {
+                    let slug = url.replacingOccurrences(of: "git@github.com:", with: "")
+                    ticketURL = "https://github.com/\(slug)/issues/\(num)"
+                    provider = .github
+                } else if url.contains("github.com") {
+                    ticketURL = "\(url)/issues/\(num)"
+                    provider = .github
+                }
+            }
+
+            // Try to fetch issue title
+            if let issueURL = ticketURL {
+                if let output = try? await shell("gh", "issue", "view", issueURL, "--json", "title"),
+                   let data = output.data(using: .utf8),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let title = json["title"] as? String {
+                    ticketTitle = title
+                }
+            }
+        }
+
+        // Create the session
+        let session = Session(
+            name: dirName,
+            status: .active,
+            ticketURL: ticketURL,
+            ticketTitle: ticketTitle,
+            ticketNumber: ticketNumber,
+            provider: provider
+        )
+
+        let worktree = SessionWorktree(
+            sessionID: session.id,
+            repoName: repoName,
+            repoPath: repoPath,
+            worktreePath: worktreePath,
+            branch: branch,
+            workspace: workspace,
+            isPrimary: true
+        )
+
+        let terminal = SessionTerminal(
+            sessionID: session.id,
+            name: "Claude Code",
+            cwd: worktreePath
+        )
+
+        // Add to state and store
+        appState.sessions.append(session)
+        appState.worktrees[session.id] = [worktree]
+        appState.terminals[session.id] = [terminal]
+        appState.terminalReadiness[terminal.id] = .uninitialized
+        TerminalManager.shared.trackReadiness(for: terminal.id)
+
+        if let ticketURL {
+            let link = SessionLink(sessionID: session.id, label: "Issue #\(ticketNumber ?? 0)", url: ticketURL, linkType: .ticket)
+            appState.links[session.id] = [link]
+            store.mutate { data in
+                data.links.append(link)
+            }
+        }
+
+        // Check for a PR on this branch
+        if let repoSlug = resolveRepoSlug(repoPath: repoPath) {
+            if let prOutput = try? await shell(
+                "gh", "pr", "list", "--repo", repoSlug, "--head", branch,
+                "--state", "all", "--json", "number,url,state", "--limit", "1"
+            ), let prData = prOutput.data(using: .utf8),
+               let prItems = try? JSONSerialization.jsonObject(with: prData) as? [[String: Any]],
+               let pr = prItems.first,
+               let prNum = pr["number"] as? Int,
+               let prURL = pr["url"] as? String {
+                let prLink = SessionLink(sessionID: session.id, label: "PR #\(prNum)", url: prURL, linkType: .pr)
+                appState.links[session.id, default: []].append(prLink)
+                store.mutate { data in
+                    data.links.append(prLink)
+                }
+                NSLog("[SessionService] Found PR #\(prNum) for orphan '\(dirName)'")
+            }
+        }
+
+        store.mutate { data in
+            data.sessions.append(session)
+            data.worktrees.append(worktree)
+            data.terminals.append(terminal)
+        }
+
+        NSLog("[SessionService] Recovered session '\(dirName)' — ticket=#\(ticketNumber ?? 0) title=\(ticketTitle ?? "unknown")")
+    }
+
     // MARK: - Complete Session
 
     func completeSession(id: UUID) {

@@ -265,7 +265,9 @@ final class IssueTracker {
     // MARK: - PR Status Enrichment
 
     private func fetchPRStatuses() async {
-        for session in appState.activeSessions {
+        // Check all non-manager sessions (active + completed) so merged PRs show correct status
+        let sessionsWithPRs = appState.sessions.filter { $0.id != AppState.managerSessionID }
+        for session in sessionsWithPRs {
             let links = appState.links(for: session.id)
             guard let prLink = links.first(where: { $0.linkType == .pr }) else { continue }
 
@@ -308,12 +310,17 @@ final class IssueTracker {
             default: reviewStatus = .unknown
             }
 
-            // Parse merge status
+            // Parse merge status — check PR state first for merged
+            let prState = json["state"] as? String
             let mergeStatus: PRStatus.MergeStatus
-            switch json["mergeable"] as? String {
-            case "MERGEABLE": mergeStatus = .mergeable
-            case "CONFLICTING": mergeStatus = .conflicting
-            default: mergeStatus = .unknown
+            if prState == "MERGED" {
+                mergeStatus = .merged
+            } else {
+                switch json["mergeable"] as? String {
+                case "MERGEABLE": mergeStatus = .mergeable
+                case "CONFLICTING": mergeStatus = .conflicting
+                default: mergeStatus = .unknown
+                }
             }
 
             appState.prStatus[session.id] = PRStatus(
