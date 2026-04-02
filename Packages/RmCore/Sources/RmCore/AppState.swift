@@ -56,6 +56,17 @@ public final class AppState {
     /// Terminal readiness state per terminal ID.
     public var terminalReadiness: [UUID: TerminalReadiness] = [:]
 
+    // MARK: - Hook Events
+
+    /// Recent hook events per session (ring buffer, last 50 events).
+    public var hookEvents: [UUID: [HookEvent]] = [:]
+
+    /// Pending notification requiring user attention, per session.
+    public var pendingNotification: [UUID: HookNotification] = [:]
+
+    /// Last tool activity per session (what Claude is currently doing).
+    public var lastToolActivity: [UUID: ToolActivity] = [:]
+
     /// Called when user clicks "Work on" for an assigned issue.
     public var onWorkOnIssue: ((String) -> Void)?  // receives issue URL
 

@@ -264,7 +264,12 @@ struct SessionRow: View {
                 .fill(CorveilTheme.bgCard)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(CorveilTheme.borderSubtle, lineWidth: 1)
+                        .strokeBorder(
+                            appState.pendingNotification[session.id] != nil
+                                ? Color.orange.opacity(0.6)
+                                : CorveilTheme.borderSubtle,
+                            lineWidth: appState.pendingNotification[session.id] != nil ? 1.5 : 1
+                        )
                 )
         )
         .padding(.vertical, 1)
@@ -289,9 +294,35 @@ struct SessionRow: View {
                     .fill(.blue)
                     .frame(width: 8, height: 8)
             case .claudeLaunched:
-                Circle()
-                    .fill(.green)
-                    .frame(width: 8, height: 8)
+                // Show Claude-state-aware indicator
+                switch claudeState {
+                case .working:
+                    Circle()
+                        .fill(.green)
+                        .frame(width: 8, height: 8)
+                        .overlay(
+                            Circle()
+                                .stroke(.green.opacity(0.4), lineWidth: 2)
+                                .scaleEffect(1.6)
+                        )
+                case .waiting:
+                    Circle()
+                        .fill(.orange)
+                        .frame(width: 8, height: 8)
+                        .overlay(
+                            Circle()
+                                .stroke(.orange.opacity(0.4), lineWidth: 2)
+                                .scaleEffect(1.6)
+                        )
+                case .done:
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(CorveilTheme.gold)
+                        .font(.system(size: 10))
+                case .idle:
+                    Circle()
+                        .fill(.green)
+                        .frame(width: 8, height: 8)
+                }
             }
         case .paused:
             Circle()
@@ -310,19 +341,42 @@ struct SessionRow: View {
 
     @ViewBuilder
     private var claudeStateBadge: some View {
-        let (icon, color, label): (String, Color, String) = switch claudeState {
-        case .working: ("bolt.fill", .orange, "Working")
-        case .waiting: ("ellipsis.circle.fill", .blue, "Waiting")
-        case .done: ("checkmark.circle.fill", CorveilTheme.gold, "Done")
-        case .idle: ("circle", CorveilTheme.textMuted, "Idle")
+        let activity = appState.lastToolActivity[session.id]
+        let notification = appState.pendingNotification[session.id]
+
+        switch claudeState {
+        case .working:
+            HStack(spacing: 3) {
+                Image(systemName: "bolt.fill")
+                    .font(.caption2)
+                if let activity, activity.isActive {
+                    Text(activity.toolName)
+                        .font(.caption2)
+                } else {
+                    Text("Working")
+                        .font(.caption2)
+                }
+            }
+            .foregroundStyle(.orange)
+        case .waiting:
+            HStack(spacing: 3) {
+                Image(systemName: "ellipsis.circle.fill")
+                    .font(.caption2)
+                Text(notification?.notificationType == "permission_prompt" ? "Permission" : "Waiting")
+                    .font(.caption2)
+            }
+            .foregroundStyle(.blue)
+        case .done:
+            HStack(spacing: 3) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption2)
+                Text("Done")
+                    .font(.caption2)
+            }
+            .foregroundStyle(CorveilTheme.gold)
+        case .idle:
+            EmptyView()
         }
-        HStack(spacing: 3) {
-            Image(systemName: icon)
-                .font(.caption2)
-            Text(label)
-                .font(.caption2)
-        }
-        .foregroundStyle(color)
     }
 
     private func shortenBranch(_ branch: String) -> String {

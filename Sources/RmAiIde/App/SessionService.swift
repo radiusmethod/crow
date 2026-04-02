@@ -85,6 +85,20 @@ final class SessionService {
     /// Send `claude --continue` to a terminal and mark it as launched.
     func launchClaude(terminalID: UUID) {
         guard appState.terminalReadiness[terminalID] == .shellReady else { return }
+
+        // Write/refresh hook config for the session's worktree
+        if let sessionID = appState.terminals.first(where: { _, terminals in
+            terminals.contains(where: { $0.id == terminalID })
+        })?.key,
+           let worktree = appState.primaryWorktree(for: sessionID),
+           let ridePath = HookConfigGenerator.findRideBinary() {
+            try? HookConfigGenerator.writeHookConfig(
+                worktreePath: worktree.worktreePath,
+                sessionID: sessionID,
+                ridePath: ridePath
+            )
+        }
+
         let claudePath = Self.findClaudeBinary() ?? "claude"
         TerminalManager.shared.send(id: terminalID, text: "\(claudePath) --continue\n")
         appState.terminalReadiness[terminalID] = .claudeLaunched
@@ -154,6 +168,9 @@ final class SessionService {
                 continue
             }
 
+            // Remove our hook config from settings.local.json before deleting the worktree
+            HookConfigGenerator.removeHookConfig(worktreePath: wt.worktreePath)
+
             do {
                 // Remove the worktree
                 let removeResult = try await shell("git", "-C", wt.repoPath, "worktree", "remove", "--force", wt.worktreePath)
@@ -182,6 +199,10 @@ final class SessionService {
         appState.links.removeValue(forKey: id)
         appState.terminals.removeValue(forKey: id)
         appState.activeTerminalID.removeValue(forKey: id)
+        appState.hookEvents.removeValue(forKey: id)
+        appState.pendingNotification.removeValue(forKey: id)
+        appState.lastToolActivity.removeValue(forKey: id)
+        appState.claudeState.removeValue(forKey: id)
 
         store.mutate { data in
             data.sessions.removeAll { $0.id == id }
