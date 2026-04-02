@@ -391,7 +391,7 @@ struct SessionRow: View {
         if needsAttention {
             return Color.orange.opacity(0.12)
         } else if claudeState == .done && terminalReadiness == .claudeLaunched {
-            return Color.green.opacity(0.06)
+            return Color(red: 0.15, green: 0.22, blue: 0.16)
         }
         return CorveilTheme.bgCard
     }
