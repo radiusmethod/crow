@@ -25,6 +25,7 @@
       "Bash(GIT_SSL_NO_VERIFY=1 gh:*)",
       "Bash(GITLAB_HOST=* glab issue view:*)",
       "Bash(GITLAB_HOST=* glab mr view:*)",
+      "Bash(GITLAB_HOST=* glab mr list:*)",
       "Bash(GITLAB_HOST=* glab auth:*)",
       "Bash(git -C:*)",
       "Bash(git fetch:*)",

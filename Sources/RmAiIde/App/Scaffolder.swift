@@ -118,6 +118,7 @@ struct Scaffolder {
               "Bash(gh pr view:*)",
               "Bash(GITLAB_HOST=* glab issue view:*)",
               "Bash(GITLAB_HOST=* glab mr view:*)",
+              "Bash(GITLAB_HOST=* glab mr list:*)",
               "Bash(git -C:*)",
               "Bash(git fetch:*)",
               "Bash(git worktree:*)",

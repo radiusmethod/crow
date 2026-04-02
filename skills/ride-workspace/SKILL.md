@@ -93,13 +93,39 @@ GITLAB_HOST=repo1.dso.mil glab mr view {number} --repo {org/repo} --comments
 | `gitlab.com` | gitlab | glab | gitlab.com |
 | `code.il2.dso.mil` | gitlab | glab | code.il2.dso.mil |
 
+## PR Detection
+
+Before creating a worktree, check if the issue already has an open PR. If so, use the PR's branch instead of creating a new one.
+
+### GitHub
+```bash
+gh pr list --repo {owner}/{repo} --search "{issue_number}" --state open \
+  --json number,title,headRefName,url --limit 5
+```
+
+### GitLab
+```bash
+GITLAB_HOST={host} glab mr list --repo {org/repo} --search "{issue_number}" --state opened --output-format json
+```
+
+### Selection Logic
+
+If multiple PRs are found, prefer the one whose `headRefName` contains the issue number. If exactly one PR is returned, use it. If none are found, proceed with the normal new-branch flow.
+
+When a PR is found, capture:
+- `pr_number` — the PR/MR number
+- `pr_url` — the full URL to the PR/MR
+- `pr_branch` — the `headRefName` (branch name)
+
+These values are used in worktree creation, session linking, and the prompt template below.
+
 ## Worktree Management
 
 ### Naming Convention
 
 **CRITICAL: Worktrees go DIRECTLY under the workspace folder, at the same level as the main repo clone. NOT in a subfolder.**
 
-**For ticket URLs:**
+**For ticket URLs (no existing PR):**
 ```
 {devRoot}/{workspace}/{repo}-{ticket_number}-{brief_slug}
 ```
@@ -122,6 +148,16 @@ loki #252 "Update grafana-enterprise.md"    → {devRoot}/PlatformOne/loki-252-u
 citadel #45 "Add JWT validation endpoint"   → {devRoot}/RadiusMethod/citadel-45-jwt-validation
 ```
 
+**For ticket URLs with an existing PR:**
+
+Use the PR's `headRefName` as the branch — do NOT generate a new name. Derive the worktree directory from the branch name.
+
+```
+{devRoot}/{workspace}/{repo}-{pr_branch_slug}
+```
+
+Where `{pr_branch_slug}` is the `headRefName` with any `feature/` prefix stripped. For example, if the PR branch is `feature/citadel-45-jwt-validation`, the worktree path is `{devRoot}/RadiusMethod/citadel-45-jwt-validation`.
+
 **WRONG — do NOT create subdirectories:**
 ```
 WRONG: {devRoot}/{workspace}/{repo}-worktrees/{feature}
@@ -140,16 +176,21 @@ Branch: `feature/{feature-slug}`
 git -C {repo_path} fetch origin
 git -C {repo_path} ls-remote --heads origin feature/{name}
 
-# Existing remote branch:
+# Existing remote branch (no PR):
 git -C {repo_path} worktree add {path} \
   -b feature/{name} \
   --track origin/feature/{name}
 
-# New branch:
+# New branch (no PR, no remote branch):
 git -C {repo_path} worktree add {path} \
   -b feature/{name} \
   --no-track \
   origin/main
+
+# PR branch (existing PR detected):
+git -C {repo_path} worktree add {path} \
+  -b {pr_branch} \
+  --track origin/{pr_branch}
 ```
 
 **Important:** Always use `-b` to create a local branch. Without it, the worktree ends up in detached HEAD state. Use `--no-track` for new branches to prevent accidental push to main.
@@ -188,6 +229,12 @@ ride add-link --session {session_id} \
   --label "Issue" \
   --url "{ticket_url}" \
   --type ticket
+
+# 4a. Add PR link (only if an existing PR was detected)
+ride add-link --session {session_id} \
+  --label "PR #{pr_number}" \
+  --url "{pr_url}" \
+  --type pr
 
 # 4b. Auto-assign and set project status (GitHub issues only, best-effort)
 #     All gh commands require dangerouslyDisableSandbox: true.
@@ -276,7 +323,30 @@ gh issue view https://github.com/org/repo/issues/123 --comments
 2. Create an implementation plan
 ~~~
 
-For PlatformOne, add: `3. If any changes to bigbang are required, create a new worktree with a feature branch before making modifications`
+**When an existing PR was detected**, add this section to the prompt between `## Ticket` and `## Instructions`:
+
+~~~markdown
+## Existing Pull Request
+
+There is an existing open PR for this issue. Review it before planning:
+
+```bash
+gh pr view {pr_url} --comments
+```
+
+This workspace is checked out on the PR's branch. Review existing changes with `git log origin/main..HEAD` before adding new work.
+~~~
+
+And update the Instructions section to:
+
+~~~markdown
+## Instructions
+1. Review the existing PR and its changes — use dangerouslyDisableSandbox: true for ALL gh/glab commands
+2. Study the ticket thoroughly
+3. Create an implementation plan that builds on the existing work
+~~~
+
+For PlatformOne, add: `4. If any changes to bigbang are required, create a new worktree with a feature branch before making modifications`
 
 ### CLI Commands for Fetching Issues
 
