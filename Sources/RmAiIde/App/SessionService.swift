@@ -508,4 +508,37 @@ final class SessionService {
         }
         return nil
     }
+
+    // MARK: - VS Code Integration
+
+    /// Find the VS Code `code` CLI binary.
+    static func findVSCodeBinary() -> String? {
+        let candidates = [
+            "/usr/local/bin/code",
+            "/opt/homebrew/bin/code",
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/code").path,
+        ]
+        for path in candidates {
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return path
+            }
+        }
+        return nil
+    }
+
+    /// Check if VS Code CLI is available and cache the result in AppState.
+    func detectVSCode() {
+        appState.vsCodeAvailable = Self.findVSCodeBinary() != nil
+    }
+
+    /// Open the primary worktree for a session in VS Code.
+    func openInVSCode(sessionID: UUID) {
+        guard let codePath = Self.findVSCodeBinary() else { return }
+        guard let wt = appState.primaryWorktree(for: sessionID) else { return }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: codePath)
+        process.arguments = [wt.worktreePath]
+        try? process.run()
+    }
 }
