@@ -50,6 +50,9 @@ public final class AppState {
     /// PR status per session (pipeline, review, merge readiness).
     public var prStatus: [UUID: PRStatus] = [:]
 
+    /// Whether the VS Code `code` CLI is available on this system.
+    public var vsCodeAvailable: Bool = false
+
     /// Terminal readiness state per terminal ID.
     public var terminalReadiness: [UUID: TerminalReadiness] = [:]
 
@@ -66,6 +69,9 @@ public final class AppState {
 
     /// Called to mark a session as completed.
     public var onCompleteSession: ((UUID) -> Void)?
+
+    /// Called to open a session's primary worktree in VS Code.
+    public var onOpenInVSCode: ((UUID) -> Void)?
 
     // MARK: - Computed Properties
 

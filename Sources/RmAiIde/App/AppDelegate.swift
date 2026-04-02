@@ -119,6 +119,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             service?.launchClaude(terminalID: terminalID)
         }
 
+        // Detect VS Code CLI and wire open action
+        service.detectVSCode()
+        appState.onOpenInVSCode = { [weak service] sessionID in
+            service?.openInVSCode(sessionID: sessionID)
+        }
+
         // Wire "Work on" issue action — sends issue URL to Manager terminal
         appState.onWorkOnIssue = { [weak self] issueURL in
             guard let self, let managerTerminals = self.appState.terminals[AppState.managerSessionID],

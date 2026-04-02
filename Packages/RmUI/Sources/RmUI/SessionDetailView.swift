@@ -109,6 +109,18 @@ public struct SessionDetailView: View {
 
                 // Action buttons (not for Manager)
                 if session.id != AppState.managerSessionID {
+                    if appState.vsCodeAvailable, primaryWorktree != nil {
+                        Button {
+                            appState.onOpenInVSCode?(session.id)
+                        } label: {
+                            Label("Open in VS Code", systemImage: "chevron.left.forwardslash.chevron.right")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(CorveilTheme.gold)
+                    }
+
                     if session.status == .active {
                         Button {
                             appState.onCompleteSession?(session.id)
