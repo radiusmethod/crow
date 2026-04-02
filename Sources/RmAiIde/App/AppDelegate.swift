@@ -617,6 +617,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         // PermissionDenied, PreCompact, PostCompact — clear notification if present
                         if eventName == "PermissionDenied" {
                             capturedAppState.pendingNotification.removeValue(forKey: sessionID)
+                            capturedAppState.claudeState[sessionID] = .working
+                            capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
                         }
                     }
 
