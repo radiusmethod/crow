@@ -563,13 +563,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     case "Notification":
                         let message = payload["message"]?.stringValue ?? ""
                         let notifType = payload["notification_type"]?.stringValue ?? ""
-                        // Only treat permission_prompt as needing attention.
-                        // idle_prompt just means Claude is at the prompt (same as "done").
                         if notifType == "permission_prompt" {
+                            // Permission needed — show attention state
                             capturedAppState.pendingNotification[sessionID] = HookNotification(
                                 message: message, notificationType: notifType
                             )
                             capturedAppState.claudeState[sessionID] = .waiting
+                        } else if notifType == "idle_prompt" {
+                            // Claude is at the prompt — clear any stale permission notification
+                            // but don't change claudeState (Stop already set it to .done)
+                            capturedAppState.pendingNotification.removeValue(forKey: sessionID)
                         }
 
                     case "PermissionRequest":
