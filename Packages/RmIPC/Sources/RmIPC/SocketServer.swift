@@ -83,7 +83,9 @@ public final class SocketServer: @unchecked Sendable {
             close(serverFD)
             serverFD = -1
         }
-        unlink(socketPath)
+        // Don't unlink here — a newer instance may have already bound
+        // to the same path. Cleanup is handled by start() which unlinks
+        // before binding.
     }
 
     // MARK: - Accept Loop
