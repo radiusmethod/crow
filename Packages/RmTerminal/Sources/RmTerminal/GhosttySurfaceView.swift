@@ -106,30 +106,40 @@ public final class GhosttySurfaceView: NSView {
     public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         guard let surface else { return }
-        let scale = Double(window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0)
-        ghostty_surface_set_content_scale(surface, scale, scale)
-        ghostty_surface_set_size(surface, UInt32(newSize.width * scale), UInt32(newSize.height * scale))
+        let fbFrame = convertToBacking(NSRect(origin: .zero, size: newSize))
+        let xScale = fbFrame.size.width / newSize.width
+        let yScale = fbFrame.size.height / newSize.height
+        ghostty_surface_set_content_scale(surface, xScale, yScale)
+        ghostty_surface_set_size(surface, UInt32(fbFrame.size.width), UInt32(fbFrame.size.height))
     }
 
     public override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
-        guard let surface, let window else { return }
-        let scale = Double(window.backingScaleFactor)
-        ghostty_surface_set_content_scale(surface, scale, scale)
+        if let window {
+            layer?.contentsScale = window.backingScaleFactor
+        }
+        guard let surface else { return }
+        let fbFrame = convertToBacking(frame)
+        let xScale = fbFrame.size.width / frame.size.width
+        let yScale = fbFrame.size.height / frame.size.height
+        ghostty_surface_set_content_scale(surface, xScale, yScale)
         let size = frame.size
         if size.width > 0 && size.height > 0 {
-            ghostty_surface_set_size(surface, UInt32(size.width * scale), UInt32(size.height * scale))
+            let scaledSize = convertToBacking(size)
+            ghostty_surface_set_size(surface, UInt32(scaledSize.width), UInt32(scaledSize.height))
         }
     }
 
     public override func resize(withOldSuperviewSize oldSize: NSSize) {
         super.resize(withOldSuperviewSize: oldSize)
         guard let surface else { return }
-        let scale = Double(window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0)
         let size = frame.size
         if size.width > 0 && size.height > 0 {
-            ghostty_surface_set_content_scale(surface, scale, scale)
-            ghostty_surface_set_size(surface, UInt32(size.width * scale), UInt32(size.height * scale))
+            let fbFrame = convertToBacking(NSRect(origin: .zero, size: size))
+            let xScale = fbFrame.size.width / size.width
+            let yScale = fbFrame.size.height / size.height
+            ghostty_surface_set_content_scale(surface, xScale, yScale)
+            ghostty_surface_set_size(surface, UInt32(fbFrame.size.width), UInt32(fbFrame.size.height))
         }
     }
 
@@ -262,8 +272,7 @@ public final class GhosttySurfaceView: NSView {
     public override func mouseMoved(with event: NSEvent) {
         guard let surface else { return }
         let pos = convert(event.locationInWindow, from: nil)
-        let scale = Double(window?.backingScaleFactor ?? 2.0)
-        ghostty_surface_mouse_pos(surface, pos.x * scale, Double(frame.height - pos.y) * scale, translateMods(event.modifierFlags))
+        ghostty_surface_mouse_pos(surface, pos.x, frame.height - pos.y, translateMods(event.modifierFlags))
     }
 
     public override func mouseDragged(with event: NSEvent) {
