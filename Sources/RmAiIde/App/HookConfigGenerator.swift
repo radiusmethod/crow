@@ -23,12 +23,14 @@ struct HookConfigGenerator {
     // MARK: - Generate Hook Configuration
 
     /// Generate the hooks dictionary for a session.
-    static func generateHooks(sessionID: UUID, ridePath: String) -> [String: Any] {
+    /// The socketPath is embedded in the command so hooks connect to the correct socket
+    /// regardless of the subprocess's $TMPDIR (Claude Code overrides it).
+    static func generateHooks(sessionID: UUID, ridePath: String, socketPath: String) -> [String: Any] {
         let sid = sessionID.uuidString
         var hooks: [String: Any] = [:]
 
         for event in allEvents {
-            let command = "\(ridePath) hook-event --session \(sid) --event \(event)"
+            let command = "RIDE_SOCKET=\(socketPath) \(ridePath) hook-event --session \(sid) --event \(event)"
             var hookEntry: [String: Any] = [
                 "type": "command",
                 "command": command,
@@ -37,9 +39,9 @@ struct HookConfigGenerator {
             if asyncEvents.contains(event) {
                 hookEntry["async"] = true
             }
+            // Omit matcher to match all occurrences (avoids invalid regex "*")
             hooks[event] = [
                 [
-                    "matcher": "*",
                     "hooks": [hookEntry],
                 ] as [String: Any]
             ]
@@ -72,8 +74,11 @@ struct HookConfigGenerator {
         // Get existing hooks and preserve any non-ride-managed entries
         var existingHooks = settings["hooks"] as? [String: Any] ?? [:]
 
-        // Generate our hooks
-        let ourHooks = generateHooks(sessionID: sessionID, ridePath: ridePath)
+        // Resolve the socket path from the app's actual TMPDIR (not the hook subprocess's)
+        let socketPath = resolveSocketPath()
+
+        // Generate our hooks with the embedded socket path
+        let ourHooks = generateHooks(sessionID: sessionID, ridePath: ridePath, socketPath: socketPath)
 
         // Merge: our hooks overwrite matching event names, user hooks for other events are preserved
         for (eventName, hookConfig) in ourHooks {
@@ -140,5 +145,15 @@ struct HookConfigGenerator {
             }
         }
         return nil
+    }
+
+    /// Resolve the socket path using the app's real TMPDIR.
+    /// This is needed because Claude Code hooks run in a subprocess where
+    /// $TMPDIR is overridden (e.g., /tmp/claude), but the app's socket
+    /// is at the real macOS $TMPDIR (e.g., /var/folders/.../T/).
+    private static func resolveSocketPath() -> String {
+        let tmpDir = ProcessInfo.processInfo.environment["TMPDIR"]
+            ?? NSTemporaryDirectory()
+        return (tmpDir as NSString).appendingPathComponent("ride.sock")
     }
 }

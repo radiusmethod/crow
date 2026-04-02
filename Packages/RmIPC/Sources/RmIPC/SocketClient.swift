@@ -11,6 +11,11 @@ public struct SocketClient: Sendable {
 
     public init(socketPath: String? = nil) {
         self.socketPath = socketPath ?? {
+            // RIDE_SOCKET is set by hook commands to override the default path,
+            // since Claude Code hooks run with a different $TMPDIR than the app.
+            if let override = ProcessInfo.processInfo.environment["RIDE_SOCKET"] {
+                return override
+            }
             let tmpDir = ProcessInfo.processInfo.environment["TMPDIR"] ?? "/tmp"
             return (tmpDir as NSString).appendingPathComponent("ride.sock")
         }()
