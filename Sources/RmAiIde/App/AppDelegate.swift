@@ -401,6 +401,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if sessionID != AppState.managerSessionID {
                         capturedAppState.terminalReadiness[terminal.id] = .uninitialized
                         TerminalManager.shared.trackReadiness(for: terminal.id)
+
+                        // Write hook config for the session's worktree
+                        if let worktree = capturedAppState.primaryWorktree(for: sessionID),
+                           let ridePath = HookConfigGenerator.findRideBinary() {
+                            try? HookConfigGenerator.writeHookConfig(
+                                worktreePath: worktree.worktreePath,
+                                sessionID: sessionID,
+                                ridePath: ridePath
+                            )
+                        }
                     }
                     return ["terminal_id": .string(terminal.id.uuidString), "session_id": .string(idStr)]
                 }
@@ -465,6 +475,181 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     .object(["id": .string(l.id.uuidString), "label": .string(l.label), "url": .string(l.url), "type": .string(l.linkType.rawValue)])
                 }
                 return ["links": .array(items)]
+            },
+            "hook-event": { @Sendable params in
+                guard let sessionIDStr = params["session_id"]?.stringValue,
+                      let sessionID = UUID(uuidString: sessionIDStr),
+                      let eventName = params["event_name"]?.stringValue else {
+                    throw RPCError.invalidParams("session_id and event_name required")
+                }
+                let payload = params["payload"]?.objectValue ?? [:]
+
+                // Build a human-readable summary from the event
+                let summary: String = {
+                    switch eventName {
+                    case "PreToolUse", "PostToolUse", "PostToolUseFailure":
+                        let tool = payload["tool_name"]?.stringValue ?? "unknown"
+                        return "\(eventName): \(tool)"
+                    case "Notification":
+                        let msg = payload["message"]?.stringValue ?? ""
+                        return "Notification: \(msg.prefix(80))"
+                    case "Stop":
+                        return "Claude finished responding"
+                    case "StopFailure":
+                        return "Claude stopped with error"
+                    case "SessionStart":
+                        return "Session started"
+                    case "SessionEnd":
+                        return "Session ended"
+                    case "PermissionRequest":
+                        return "Permission requested"
+                    case "PermissionDenied":
+                        return "Permission denied"
+                    case "UserPromptSubmit":
+                        return "User submitted prompt"
+                    case "TaskCreated":
+                        return "Task created"
+                    case "TaskCompleted":
+                        return "Task completed"
+                    case "SubagentStart":
+                        let agentType = payload["agent_type"]?.stringValue ?? "agent"
+                        return "Subagent started: \(agentType)"
+                    case "SubagentStop":
+                        return "Subagent stopped"
+                    case "PreCompact":
+                        return "Context compaction starting"
+                    case "PostCompact":
+                        return "Context compaction finished"
+                    default:
+                        return eventName
+                    }
+                }()
+
+                let event = HookEvent(
+                    sessionID: sessionID,
+                    eventName: eventName,
+                    summary: summary
+                )
+
+                return await MainActor.run {
+                    // Append to ring buffer (keep last 50 events per session)
+                    var events = capturedAppState.hookEvents[sessionID, default: []]
+                    events.append(event)
+                    if events.count > 50 { events.removeFirst(events.count - 50) }
+                    capturedAppState.hookEvents[sessionID] = events
+
+                    // Update derived state based on event type.
+                    // Clear pending notification on ANY event that indicates
+                    // Claude moved past the waiting state (except Notification
+                    // itself, which may SET the pending state).
+                    if eventName != "Notification" && eventName != "PermissionRequest" {
+                        capturedAppState.pendingNotification.removeValue(forKey: sessionID)
+                    }
+
+                    switch eventName {
+                    case "PreToolUse":
+                        let toolName = payload["tool_name"]?.stringValue ?? "unknown"
+                        if toolName == "AskUserQuestion" {
+                            // Question for the user — set attention state
+                            capturedAppState.pendingNotification[sessionID] = HookNotification(
+                                message: "Claude has a question",
+                                notificationType: "question"
+                            )
+                            capturedAppState.claudeState[sessionID] = .waiting
+                            capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
+                        } else {
+                            capturedAppState.lastToolActivity[sessionID] = ToolActivity(
+                                toolName: toolName, isActive: true
+                            )
+                            capturedAppState.claudeState[sessionID] = .working
+                        }
+
+                    case "PostToolUse":
+                        let toolName = payload["tool_name"]?.stringValue ?? "unknown"
+                        capturedAppState.lastToolActivity[sessionID] = ToolActivity(
+                            toolName: toolName, isActive: false
+                        )
+
+                    case "PostToolUseFailure":
+                        let toolName = payload["tool_name"]?.stringValue ?? "unknown"
+                        capturedAppState.lastToolActivity[sessionID] = ToolActivity(
+                            toolName: toolName, isActive: false
+                        )
+
+                    case "Notification":
+                        let message = payload["message"]?.stringValue ?? ""
+                        let notifType = payload["notification_type"]?.stringValue ?? ""
+                        if notifType == "permission_prompt" {
+                            // Permission needed — show attention state
+                            capturedAppState.pendingNotification[sessionID] = HookNotification(
+                                message: message, notificationType: notifType
+                            )
+                            capturedAppState.claudeState[sessionID] = .waiting
+                        } else if notifType == "idle_prompt" {
+                            // Claude is at the prompt — clear any stale permission notification
+                            // but don't change claudeState (Stop already set it to .done)
+                            capturedAppState.pendingNotification.removeValue(forKey: sessionID)
+                        }
+
+                    case "PermissionRequest":
+                        // Don't override a "question" notification — AskUserQuestion
+                        // triggers both PreToolUse and PermissionRequest, and the
+                        // question badge is more specific than generic "Permission"
+                        if capturedAppState.pendingNotification[sessionID]?.notificationType != "question" {
+                            capturedAppState.pendingNotification[sessionID] = HookNotification(
+                                message: "Permission requested",
+                                notificationType: "permission_prompt"
+                            )
+                        }
+                        capturedAppState.claudeState[sessionID] = .waiting
+                        capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
+
+                    case "UserPromptSubmit":
+                        capturedAppState.claudeState[sessionID] = .working
+
+                    case "Stop":
+                        capturedAppState.claudeState[sessionID] = .done
+                        capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
+
+                    case "StopFailure":
+                        capturedAppState.claudeState[sessionID] = .waiting
+
+                    case "SessionStart":
+                        let source = payload["source"]?.stringValue ?? "startup"
+                        if source == "resume" {
+                            capturedAppState.claudeState[sessionID] = .done
+                        } else {
+                            capturedAppState.claudeState[sessionID] = .idle
+                        }
+
+                    case "SessionEnd":
+                        capturedAppState.claudeState[sessionID] = .idle
+                        capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
+
+                    case "SubagentStart":
+                        capturedAppState.claudeState[sessionID] = .working
+
+                    case "TaskCreated", "TaskCompleted", "SubagentStop":
+                        // Stay in working state
+                        if capturedAppState.claudeState[sessionID] != .waiting {
+                            capturedAppState.claudeState[sessionID] = .working
+                        }
+
+                    default:
+                        // PermissionDenied, PreCompact, PostCompact — state change
+                        // handled by blanket notification clear above
+                        if eventName == "PermissionDenied" {
+                            capturedAppState.claudeState[sessionID] = .working
+                            capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
+                        }
+                    }
+
+                    return [
+                        "received": .bool(true),
+                        "session_id": .string(sessionIDStr),
+                        "event_name": .string(eventName),
+                    ]
+                }
             },
         ])
 

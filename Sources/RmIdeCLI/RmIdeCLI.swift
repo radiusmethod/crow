@@ -25,6 +25,7 @@ struct Ride: ParsableCommand {
             Send.self,
             AddLink.self,
             ListLinks.self,
+            HookEventCmd.self,
         ]
     )
 }
@@ -249,6 +250,39 @@ struct ListLinks: ParsableCommand {
     func run() throws {
         let result = try rpc("list-links", params: ["session_id": .string(session)])
         printJSON(result)
+    }
+}
+
+// MARK: - Hook Event Command
+
+struct HookEventCmd: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "hook-event",
+        abstract: "Forward a Claude Code hook event to the app (reads JSON from stdin)"
+    )
+    @Option(name: .long, help: "Session UUID") var session: String
+    @Option(name: .long, help: "Event name (e.g., Stop, Notification, PreToolUse)") var event: String
+
+    func run() throws {
+        // Read JSON payload from stdin (Claude Code pipes event data here)
+        var payload: [String: JSONValue] = [:]
+        let stdinData = FileHandle.standardInput.readDataToEndOfFile()
+        if !stdinData.isEmpty {
+            if let parsed = try? JSONDecoder().decode([String: JSONValue].self, from: stdinData) {
+                payload = parsed
+            }
+        }
+
+        let result = try rpc("hook-event", params: [
+            "session_id": .string(session),
+            "event_name": .string(event),
+            "payload": .object(payload),
+        ])
+
+        // Silent on success — only print on error
+        if result["error"] != nil {
+            printJSON(result)
+        }
     }
 }
 

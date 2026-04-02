@@ -11,8 +11,11 @@ public struct SocketClient: Sendable {
 
     public init(socketPath: String? = nil) {
         self.socketPath = socketPath ?? {
-            let tmpDir = ProcessInfo.processInfo.environment["TMPDIR"] ?? "/tmp"
-            return (tmpDir as NSString).appendingPathComponent("ride.sock")
+            // RIDE_SOCKET overrides for hook subprocesses (legacy support)
+            if let override = ProcessInfo.processInfo.environment["RIDE_SOCKET"] {
+                return override
+            }
+            return SocketServer.defaultSocketPath()
         }()
     }
 

@@ -14,14 +14,21 @@ public final class SocketServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.radiusmethod.ride.socket", qos: .userInitiated)
 
     public init(socketPath: String? = nil, router: CommandRouter) {
-        self.socketPath = socketPath ?? {
-            let tmpDir = ProcessInfo.processInfo.environment["TMPDIR"] ?? "/tmp"
-            return (tmpDir as NSString).appendingPathComponent("ride.sock")
-        }()
+        self.socketPath = socketPath ?? Self.defaultSocketPath()
         self.router = router
     }
 
     public var path: String { socketPath }
+
+    /// Well-known socket path shared by server and client.
+    /// Uses ~/.local/share/rm-ai-ide/ride.sock instead of $TMPDIR
+    /// because $TMPDIR varies across processes (app, CLI, Claude Code hooks).
+    public static func defaultSocketPath() -> String {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/share/rm-ai-ide").path
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        return (dir as NSString).appendingPathComponent("ride.sock")
+    }
 
     // MARK: - Start / Stop
 
@@ -76,7 +83,9 @@ public final class SocketServer: @unchecked Sendable {
             close(serverFD)
             serverFD = -1
         }
-        unlink(socketPath)
+        // Don't unlink here — a newer instance may have already bound
+        // to the same path. Cleanup is handled by start() which unlinks
+        // before binding.
     }
 
     // MARK: - Accept Loop
