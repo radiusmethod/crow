@@ -16,8 +16,15 @@ public final class GhosttyApp {
         ghostty_init(0, nil)
 
         // Create and load config
-        let cfg = ghostty_config_new()
+        guard let cfg = ghostty_config_new() else {
+            NSLog("[GhosttyApp] Failed to create config")
+            return
+        }
         ghostty_config_load_default_files(cfg)
+
+        // Load our app-specific overrides
+        loadAppConfig(cfg)
+
         ghostty_config_finalize(cfg)
         self.config = cfg
 
@@ -89,5 +96,25 @@ public final class GhosttyApp {
         if let config { ghostty_config_free(config) }
         self.app = nil
         self.config = nil
+    }
+
+    /// Load app-specific Ghostty config overrides via a temp file.
+    private func loadAppConfig(_ cfg: ghostty_config_t) {
+        let overrides = """
+        scroll-to-bottom = keystroke, no-output
+        """
+
+        let tmpDir = ProcessInfo.processInfo.environment["TMPDIR"] ?? "/tmp"
+        let configPath = "\(tmpDir)/corveil-ghostty.conf"
+
+        do {
+            try overrides.write(toFile: configPath, atomically: true, encoding: .utf8)
+            configPath.withCString { ptr in
+                ghostty_config_load_file(cfg, ptr)
+            }
+            try? FileManager.default.removeItem(atPath: configPath)
+        } catch {
+            NSLog("[GhosttyApp] Failed to write config overrides: \(error)")
+        }
     }
 }
