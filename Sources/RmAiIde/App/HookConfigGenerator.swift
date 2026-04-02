@@ -12,9 +12,11 @@ struct HookConfigGenerator {
         "PreCompact", "PostCompact",
     ]
 
-    /// High-frequency events that should use async: true to avoid any latency.
+    /// Post-execution events that can safely run async (fire-and-forget).
+    /// PreToolUse is intentionally NOT async — it must arrive before
+    /// PermissionRequest so the state machine ordering is reliable.
     private static let asyncEvents: Set<String> = [
-        "PreToolUse", "PostToolUse", "PostToolUseFailure",
+        "PostToolUse", "PostToolUseFailure",
     ]
 
     /// Marker key to identify our hooks vs user hooks.

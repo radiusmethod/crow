@@ -572,6 +572,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                     case "PermissionRequest":
                         capturedAppState.claudeState[sessionID] = .waiting
+                        // Clear tool activity so badge shows "Permission" not tool name
+                        capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
 
                     case "UserPromptSubmit":
                         capturedAppState.claudeState[sessionID] = .working
@@ -586,7 +588,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         capturedAppState.claudeState[sessionID] = .waiting
 
                     case "SessionStart":
-                        capturedAppState.claudeState[sessionID] = .idle
+                        let source = payload["source"]?.stringValue ?? "startup"
+                        if source == "resume" {
+                            // Resuming a previous session — Claude is at the prompt
+                            // waiting for input, so show as "done" (previous turn finished)
+                            capturedAppState.claudeState[sessionID] = .done
+                        } else {
+                            capturedAppState.claudeState[sessionID] = .idle
+                        }
                         capturedAppState.pendingNotification.removeValue(forKey: sessionID)
 
                     case "SessionEnd":
