@@ -592,10 +592,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         }
 
                     case "PermissionRequest":
-                        capturedAppState.pendingNotification[sessionID] = HookNotification(
-                            message: "Permission requested",
-                            notificationType: "permission_prompt"
-                        )
+                        // Don't override a "question" notification — AskUserQuestion
+                        // triggers both PreToolUse and PermissionRequest, and the
+                        // question badge is more specific than generic "Permission"
+                        if capturedAppState.pendingNotification[sessionID]?.notificationType != "question" {
+                            capturedAppState.pendingNotification[sessionID] = HookNotification(
+                                message: "Permission requested",
+                                notificationType: "permission_prompt"
+                            )
+                        }
                         capturedAppState.claudeState[sessionID] = .waiting
                         capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
 
