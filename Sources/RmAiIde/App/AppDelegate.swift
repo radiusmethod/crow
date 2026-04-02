@@ -546,6 +546,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             toolName: toolName, isActive: true
                         )
                         capturedAppState.claudeState[sessionID] = .working
+                        capturedAppState.pendingNotification.removeValue(forKey: sessionID)
 
                     case "PostToolUse":
                         let toolName = payload["tool_name"]?.stringValue ?? "unknown"
@@ -595,6 +596,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                     case "SubagentStart":
                         capturedAppState.claudeState[sessionID] = .working
+                        capturedAppState.pendingNotification.removeValue(forKey: sessionID)
 
                     case "TaskCreated", "TaskCompleted", "SubagentStop":
                         // Stay in working state
@@ -603,7 +605,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         }
 
                     default:
-                        break // PermissionDenied, PreCompact, PostCompact — log only
+                        // PermissionDenied, PreCompact, PostCompact — clear notification if present
+                        if eventName == "PermissionDenied" {
+                            capturedAppState.pendingNotification.removeValue(forKey: sessionID)
+                        }
                     }
 
                     return [
