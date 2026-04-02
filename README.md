@@ -1,4 +1,4 @@
-# Corveil AI IDE
+# Crow
 
 A native macOS application for managing AI-powered development sessions. Orchestrates git worktrees, Claude Code instances, and GitHub/GitLab issue tracking in a unified interface with an embedded Ghostty terminal.
 
@@ -31,8 +31,8 @@ A native macOS application for managing AI-powered development sessions. Orchest
 
 ```bash
 # 1. Clone with submodules
-git clone --recurse-submodules https://github.com/radiusmethod/rm-ai-ide.git
-cd rm-ai-ide
+git clone --recurse-submodules https://github.com/radiusmethod/crow.git
+cd crow
 
 # 2. Build the Ghostty terminal framework
 ./scripts/build-ghostty.sh
@@ -45,7 +45,7 @@ gh auth login
 gh auth refresh -s read:project   # Required for project board status
 
 # 5. Run
-.build/debug/RmAiIde
+.build/debug/Crow
 ```
 
 On first launch, a setup wizard guides you through choosing your development root directory and configuring workspaces.
@@ -55,8 +55,8 @@ On first launch, a setup wizard guides you through choosing your development roo
 ### 1. Clone the Repository
 
 ```bash
-git clone --recurse-submodules https://github.com/radiusmethod/rm-ai-ide.git
-cd rm-ai-ide
+git clone --recurse-submodules https://github.com/radiusmethod/crow.git
+cd crow
 ```
 
 If you already cloned without `--recurse-submodules`:
@@ -95,8 +95,8 @@ swift build -c release
 ```
 
 The build produces two executables:
-- `RmAiIde` — the main application
-- `ride` — the CLI for session management
+- `Crow` — the main application
+- `crow` — the CLI for session management
 
 ### 4. GitHub Authentication
 
@@ -125,7 +125,7 @@ glab auth login --hostname gitlab.example.com
 ### 6. First Launch
 
 ```bash
-.build/debug/RmAiIde
+.build/debug/Crow
 ```
 
 The setup wizard will:
@@ -151,9 +151,9 @@ mise clean           # Clean build artifacts
 ### Package Structure
 
 ```
-rm-ai-ide/
+crow/
 ├── Sources/
-│   ├── RmAiIde/          # Main app target
+│   ├── Crow/              # Main app target
 │   │   ├── App/
 │   │   │   ├── main.swift           # Entry point
 │   │   │   ├── AppDelegate.swift    # Window management, IPC server, startup
@@ -163,24 +163,24 @@ rm-ai-ide/
 │   │   └── Resources/
 │   │       ├── AppIcon.png
 │   │       └── CorveilBrandmark.png
-│   └── RmIdeCLI/          # ride CLI target
-│       └── RmIdeCLI.swift
+│   └── CrowCLI/            # crow CLI target
+│       └── CrowCLI.swift
 ├── Packages/
-│   ├── RmCore/             # Data models, AppState (observable)
-│   ├── RmUI/               # SwiftUI views, Corveil theme
-│   ├── RmTerminal/         # Ghostty terminal surface management
-│   ├── RmGit/              # Git operations
-│   ├── RmProvider/         # GitHub/GitLab provider abstraction
-│   ├── RmPersistence/      # JSON store, config persistence
-│   ├── RmClaude/           # Claude binary resolution
-│   └── RmIPC/              # Unix socket RPC protocol
+│   ├── CrowCore/           # Data models, AppState (observable)
+│   ├── CrowUI/             # SwiftUI views, Corveil theme
+│   ├── CrowTerminal/       # Ghostty terminal surface management
+│   ├── CrowGit/            # Git operations
+│   ├── CrowProvider/       # GitHub/GitLab provider abstraction
+│   ├── CrowPersistence/    # JSON store, config persistence
+│   ├── CrowClaude/         # Claude binary resolution
+│   └── CrowIPC/            # Unix socket RPC protocol
 ├── Frameworks/              # Built GhosttyKit (gitignored)
 ├── vendor/ghostty/          # Ghostty submodule
 ├── scripts/
 │   ├── build-ghostty.sh     # Builds GhosttyKit from source
 │   └── bundle.sh            # Creates .app bundle
 └── skills/
-    └── ride-workspace/
+    └── crow-workspace/
         └── SKILL.md         # Claude Code skill for workspace setup
 ```
 
@@ -192,7 +192,7 @@ rm-ai-ide/
 | **SessionService** | CRUD for sessions/worktrees/terminals, terminal readiness tracking, orphan detection |
 | **IssueTracker** | Polls GitHub/GitLab every 60 seconds for assigned issues, PR status, project board status, auto-completes sessions on merged PRs |
 | **TerminalManager** | Manages Ghostty terminal surfaces with lifecycle tracking (uninitialized → surfaceCreated → shellReady → claudeLaunched) |
-| **SocketServer** | Unix socket at `$TMPDIR/ride.sock` — receives JSON-RPC commands from the `ride` CLI |
+| **SocketServer** | Unix socket at `$TMPDIR/crow.sock` — receives JSON-RPC commands from the `crow` CLI |
 
 ### Data Flow
 
@@ -206,9 +206,9 @@ User clicks session tab
 ```
 
 ```
-User invokes /ride-workspace in Manager tab
-  → Claude Code runs ride CLI commands via Unix socket
-  → ride new-session → ride add-worktree → ride new-terminal
+User invokes /crow-workspace in Manager tab
+  → Claude Code runs crow CLI commands via Unix socket
+  → crow new-session → crow add-worktree → crow new-terminal
   → App creates session, registers worktree, spawns terminal
   → User clicks new session tab → Claude launches automatically
 ```
@@ -219,12 +219,12 @@ User invokes /ride-workspace in Manager tab
 
 | Path | Purpose |
 |------|---------|
-| `~/Library/Application Support/rm-ai-ide/devroot` | Pointer to development root directory |
-| `~/Library/Application Support/rm-ai-ide/store.json` | Persisted sessions, worktrees, links, terminals |
+| `~/Library/Application Support/crow/devroot` | Pointer to development root directory |
+| `~/Library/Application Support/crow/store.json` | Persisted sessions, worktrees, links, terminals |
 | `{devRoot}/.claude/config.json` | Workspace configuration |
-| `{devRoot}/.claude/CLAUDE.md` | Manager tab context (ride CLI reference) |
+| `{devRoot}/.claude/CLAUDE.md` | Manager tab context (crow CLI reference) |
 | `{devRoot}/.claude/settings.json` | Claude Code permission settings |
-| `{devRoot}/.claude/skills/ride-workspace/SKILL.md` | Workspace setup skill |
+| `{devRoot}/.claude/skills/crow-workspace/SKILL.md` | Workspace setup skill |
 
 ### Workspace Configuration
 
@@ -279,7 +279,7 @@ Worktrees are created at the same level as the main repo, **not** in subdirector
 ### The Sidebar
 
 - **Tickets** — Shows assigned issues grouped by project board status (Backlog, Ready, In Progress, In Review, Done in last 24h). Click to open the full ticket board.
-- **Manager** — A persistent Claude Code terminal for orchestrating work. Use `/ride-workspace` here to create new sessions.
+- **Manager** — A persistent Claude Code terminal for orchestrating work. Use `/crow-workspace` here to create new sessions.
 - **Active Sessions** — One per work context. Shows repo, branch, issue/PR badges with pipeline and review status.
 - **Completed Sessions** — Sessions whose PRs have been merged or issues closed.
 
@@ -288,13 +288,13 @@ Worktrees are created at the same level as the main repo, **not** in subdirector
 In the Manager tab, tell Claude Code what you want to work on:
 
 ```
-/ride-workspace https://github.com/org/repo/issues/123
+/crow-workspace https://github.com/org/repo/issues/123
 ```
 
 Or use natural language:
 
 ```
-/ride-workspace "add authentication to the citadel API"
+/crow-workspace "add authentication to the citadel API"
 ```
 
 This will:
@@ -307,7 +307,7 @@ This will:
 
 | State | Trigger | Sidebar |
 |-------|---------|---------|
-| Active | Created via `/ride-workspace` | Green dot (or gray/yellow/blue during terminal init) |
+| Active | Created via `/crow-workspace` | Green dot (or gray/yellow/blue during terminal init) |
 | Completed | PR merged or issue closed (auto-detected), or manual "Mark as Completed" | Gold checkmark |
 | Archived | Manual | Gray archive icon |
 
@@ -321,52 +321,52 @@ When you click a session tab, the terminal goes through:
 
 A loading overlay shows during initialization and disappears when Claude launches.
 
-## ride CLI Reference
+## crow CLI Reference
 
-The `ride` CLI communicates with the running app via Unix socket. The app must be running for commands to work.
+The `crow` CLI communicates with the running app via Unix socket. The app must be running for commands to work.
 
 ### Session Commands
 
 ```bash
-ride new-session --name "feature-name"
-ride rename-session --session <uuid> "new-name"
-ride select-session --session <uuid>
-ride list-sessions
-ride get-session --session <uuid>
-ride set-status --session <uuid> active|completed|archived
-ride delete-session --session <uuid>
+crow new-session --name "feature-name"
+crow rename-session --session <uuid> "new-name"
+crow select-session --session <uuid>
+crow list-sessions
+crow get-session --session <uuid>
+crow set-status --session <uuid> active|completed|archived
+crow delete-session --session <uuid>
 ```
 
 ### Metadata Commands
 
 ```bash
-ride set-ticket --session <uuid> --url "..." [--title "..."] [--number N]
-ride add-link --session <uuid> --label "Issue" --url "..." --type ticket|pr|repo|custom
-ride list-links --session <uuid>
+crow set-ticket --session <uuid> --url "..." [--title "..."] [--number N]
+crow add-link --session <uuid> --label "Issue" --url "..." --type ticket|pr|repo|custom
+crow list-links --session <uuid>
 ```
 
 ### Worktree Commands
 
 ```bash
-ride add-worktree --session <uuid> \
+crow add-worktree --session <uuid> \
   --repo "repo-name" \
   --repo-path "/path/to/main/repo" \
   --path "/path/to/worktree" \
   --branch "feature/name" \
   [--workspace "WorkspaceName"] \
   [--primary]
-ride list-worktrees --session <uuid>
+crow list-worktrees --session <uuid>
 ```
 
 ### Terminal Commands
 
 ```bash
-ride new-terminal --session <uuid> --cwd "/path" [--name "Claude Code"]
-ride list-terminals --session <uuid>
-ride send --session <uuid> --terminal <uuid> "text to send\n"
+crow new-terminal --session <uuid> --cwd "/path" [--name "Claude Code"]
+crow list-terminals --session <uuid>
+crow send --session <uuid> --terminal <uuid> "text to send\n"
 ```
 
-All commands return JSON. The `ride send` command converts `\n` in the text to Enter keypresses.
+All commands return JSON. The `crow send` command converts `\n` in the text to Enter keypresses.
 
 ## Features
 
@@ -414,7 +414,7 @@ The app logs diagnostic information to stderr:
 
 Run with log filtering:
 ```bash
-.build/debug/RmAiIde 2>&1 | grep "\[TerminalManager\]\|\[SessionService\]"
+.build/debug/Crow 2>&1 | grep "\[TerminalManager\]\|\[SessionService\]"
 ```
 
 ## License

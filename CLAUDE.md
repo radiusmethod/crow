@@ -1,59 +1,59 @@
-# rm-ai-ide (ride) — Manager Context
+# Crow — Manager Context
 
-This is the development root managed by rm-ai-ide. The Manager tab runs Claude Code here to orchestrate work sessions via the `ride` CLI.
+This is the development root managed by Crow. The Manager tab runs Claude Code here to orchestrate work sessions via the `crow` CLI.
 
-## ride CLI Reference
+## crow CLI Reference
 
-The `ride` CLI communicates with the rm-ai-ide app via Unix socket at `$TMPDIR/ride.sock`. The app must be running for commands to work. **All `ride` commands require `dangerouslyDisableSandbox: true`** and return JSON.
+The `crow` CLI communicates with the Crow app via Unix socket at `$TMPDIR/crow.sock`. The app must be running for commands to work. **All `crow` commands require `dangerouslyDisableSandbox: true`** and return JSON.
 
 ### Session Commands
 ```
-ride new-session --name "feature-name"          → {"session_id":"<uuid>","name":"..."}
-ride rename-session --session <uuid> "new-name" → {"session_id":"...","name":"..."}
-ride select-session --session <uuid>            → {"session_id":"..."}
-ride list-sessions                              → {"sessions":[...]}
-ride get-session --session <uuid>               → {id, name, status, ticket_url, ...}
-ride set-status --session <uuid> active|completed|archived
-ride delete-session --session <uuid>            → {"deleted":true}
+crow new-session --name "feature-name"          → {"session_id":"<uuid>","name":"..."}
+crow rename-session --session <uuid> "new-name" → {"session_id":"...","name":"..."}
+crow select-session --session <uuid>            → {"session_id":"..."}
+crow list-sessions                              → {"sessions":[...]}
+crow get-session --session <uuid>               → {id, name, status, ticket_url, ...}
+crow set-status --session <uuid> active|completed|archived
+crow delete-session --session <uuid>            → {"deleted":true}
 ```
 
 ### Metadata Commands
 ```
-ride set-ticket --session <uuid> --url "..." [--title "..."] [--number N]
-ride add-link --session <uuid> --label "Issue" --url "..." --type ticket|pr|repo|custom
-ride list-links --session <uuid>
+crow set-ticket --session <uuid> --url "..." [--title "..."] [--number N]
+crow add-link --session <uuid> --label "Issue" --url "..." --type ticket|pr|repo|custom
+crow list-links --session <uuid>
 ```
 
 ### Worktree Commands
 ```
-ride add-worktree --session <uuid> --repo "name" --repo-path "/main/repo" --path "/worktree/path" --branch "feature/..." [--primary]
-ride list-worktrees --session <uuid>
+crow add-worktree --session <uuid> --repo "name" --repo-path "/main/repo" --path "/worktree/path" --branch "feature/..." [--primary]
+crow list-worktrees --session <uuid>
 ```
 
 ### Terminal Commands
 ```
-ride new-terminal --session <uuid> --cwd "/path" [--name "Claude Code"] [--command "claude ..."]
-ride list-terminals --session <uuid>
-ride send --session <uuid> --terminal <uuid> "text to send"
+crow new-terminal --session <uuid> --cwd "/path" [--name "Claude Code"] [--command "claude ..."]
+crow list-terminals --session <uuid>
+crow send --session <uuid> --terminal <uuid> "text to send"
 ```
 
-The `ride send` command writes text to the terminal. Newlines in the text are converted to Enter keypresses. To submit a command, include a newline at the end of the text.
+The `crow send` command writes text to the terminal. Newlines in the text are converted to Enter keypresses. To submit a command, include a newline at the end of the text.
 
 ## Important Notes
 
 - `--session` always expects a full UUID (e.g., `a1b2c3d4-e5f6-7890-abcd-ef1234567890`), not a session name
 - Always capture the `session_id` from `new-session` output before using it in subsequent commands
 - The Manager session UUID is always `00000000-0000-0000-0000-000000000000` — do not delete it
-- Use `/ride-workspace` skill for full workspace setup (worktrees + session + Claude Code)
+- Use `/crow-workspace` skill for full workspace setup (worktrees + session + Claude Code)
 - **Worktree paths go DIRECTLY under the workspace folder**: `{devRoot}/{workspace}/{repo}-{number}-{slug}` — NOT in a subfolder
 - The prompt for new Claude Code sessions must start with `/plan` to enter plan mode
 
 ## Sandbox & Network — CRITICAL
 
-### All `ride` and `gh`/`glab` commands MUST use `dangerouslyDisableSandbox: true`
+### All `crow` and `gh`/`glab` commands MUST use `dangerouslyDisableSandbox: true`
 
 The sandbox blocks:
-- Unix socket communication (`ride` commands)
+- Unix socket communication (`crow` commands)
 - Network/TLS access (`gh`, `glab`, `curl`)
 - Writing to `/tmp` (use `$TMPDIR` instead, which is sandbox-writable)
 
@@ -84,7 +84,7 @@ GITLAB_HOST=gitlab.example.com glab issue view {number} --repo {org/repo}
 ### Temporary Files
 - **DO NOT** write to `/tmp` — it's blocked by sandbox
 - **USE** `$TMPDIR` for temporary files (e.g., prompt files)
-- Example: `cat > $TMPDIR/ride-prompt-feature.md << 'EOF' ... EOF`
+- Example: `cat > $TMPDIR/crow-prompt-feature.md << 'EOF' ... EOF`
 
 ### Write-Before-Read Rule
 - You must Read a file before you can Write/Edit it (Claude Code requirement)
@@ -127,7 +127,7 @@ which -a claude | grep -v cmux | head -1
 # Common location: ~/.local/bin/claude
 ```
 
-When using `ride new-terminal --command`, the app automatically resolves `claude` to the full path. But for `ride send`, use the full path explicitly.
+When using `crow new-terminal --command`, the app automatically resolves `claude` to the full path. But for `crow send`, use the full path explicitly.
 
 ## Known Issues / Corrections
 

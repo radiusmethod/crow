@@ -1,22 +1,22 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ride *)",
-      "Bash(ride new-session:*)",
-      "Bash(ride rename-session:*)",
-      "Bash(ride select-session:*)",
-      "Bash(ride list-sessions:*)",
-      "Bash(ride get-session:*)",
-      "Bash(ride set-status:*)",
-      "Bash(ride delete-session:*)",
-      "Bash(ride set-ticket:*)",
-      "Bash(ride add-worktree:*)",
-      "Bash(ride list-worktrees:*)",
-      "Bash(ride new-terminal:*)",
-      "Bash(ride list-terminals:*)",
-      "Bash(ride send:*)",
-      "Bash(ride add-link:*)",
-      "Bash(ride list-links:*)",
+      "Bash(crow *)",
+      "Bash(crow new-session:*)",
+      "Bash(crow rename-session:*)",
+      "Bash(crow select-session:*)",
+      "Bash(crow list-sessions:*)",
+      "Bash(crow get-session:*)",
+      "Bash(crow set-status:*)",
+      "Bash(crow delete-session:*)",
+      "Bash(crow set-ticket:*)",
+      "Bash(crow add-worktree:*)",
+      "Bash(crow list-worktrees:*)",
+      "Bash(crow new-terminal:*)",
+      "Bash(crow list-terminals:*)",
+      "Bash(crow send:*)",
+      "Bash(crow add-link:*)",
+      "Bash(crow list-links:*)",
       "Bash(gh issue view:*)",
       "Bash(gh pr view:*)",
       "Bash(gh pr list:*)",
@@ -54,6 +54,6 @@
   },
   "sandbox": {
     "enabled": true,
-    "exclude_commands": ["git", "ride", "gh", "glab"]
+    "exclude_commands": ["git", "crow", "gh", "glab"]
   }
 }
