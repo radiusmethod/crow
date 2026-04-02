@@ -251,7 +251,7 @@ struct SessionRow: View {
                     if let pr = prLink {
                         PRBadge(label: pr.label, status: prStatus)
                     }
-                    if claudeState != .idle {
+                    if claudeState != .idle || appState.pendingNotification[session.id] != nil {
                         claudeStateBadge
                     }
                 }
@@ -261,17 +261,13 @@ struct SessionRow: View {
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(CorveilTheme.bgCard)
+                .fill(rowBackgroundColor)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(
-                            appState.pendingNotification[session.id] != nil
-                                ? Color.orange.opacity(0.6)
-                                : CorveilTheme.borderSubtle,
-                            lineWidth: appState.pendingNotification[session.id] != nil ? 1.5 : 1
-                        )
+                        .strokeBorder(rowBorderColor, lineWidth: 1)
                 )
         )
+        .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: needsAttention)
         .padding(.vertical, 1)
     }
 
@@ -294,18 +290,7 @@ struct SessionRow: View {
                     .fill(.blue)
                     .frame(width: 8, height: 8)
             case .claudeLaunched:
-                // Show Claude-state-aware indicator
-                switch claudeState {
-                case .working:
-                    Circle()
-                        .fill(.green)
-                        .frame(width: 8, height: 8)
-                        .overlay(
-                            Circle()
-                                .stroke(.green.opacity(0.4), lineWidth: 2)
-                                .scaleEffect(1.6)
-                        )
-                case .waiting:
+                if needsAttention {
                     Circle()
                         .fill(.orange)
                         .frame(width: 8, height: 8)
@@ -314,11 +299,17 @@ struct SessionRow: View {
                                 .stroke(.orange.opacity(0.4), lineWidth: 2)
                                 .scaleEffect(1.6)
                         )
-                case .done:
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(CorveilTheme.gold)
-                        .font(.system(size: 10))
-                case .idle:
+                } else if claudeState == .working {
+                    Circle()
+                        .fill(.green)
+                        .frame(width: 8, height: 8)
+                        .overlay(
+                            Circle()
+                                .stroke(.green.opacity(0.4), lineWidth: 2)
+                                .scaleEffect(1.6)
+                        )
+                } else {
+                    // done or idle — solid green
                     Circle()
                         .fill(.green)
                         .frame(width: 8, height: 8)
@@ -344,39 +335,72 @@ struct SessionRow: View {
         let activity = appState.lastToolActivity[session.id]
         let notification = appState.pendingNotification[session.id]
 
-        switch claudeState {
-        case .working:
-            HStack(spacing: 3) {
-                Image(systemName: "bolt.fill")
-                    .font(.caption2)
-                if let activity, activity.isActive {
-                    Text(activity.toolName)
+        if let notification {
+            // Attention badges
+            if notification.notificationType == "permission_prompt" {
+                HStack(spacing: 3) {
+                    Image(systemName: "lock.fill")
                         .font(.caption2)
-                } else {
-                    Text("Working")
+                    Text("Permission")
                         .font(.caption2)
                 }
+                .foregroundStyle(.orange)
+            } else if notification.notificationType == "question" {
+                HStack(spacing: 3) {
+                    Image(systemName: "questionmark.bubble.fill")
+                        .font(.caption2)
+                    Text("Question")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.orange)
             }
-            .foregroundStyle(.orange)
-        case .waiting:
-            HStack(spacing: 3) {
-                Image(systemName: "ellipsis.circle.fill")
-                    .font(.caption2)
-                Text(notification?.notificationType == "permission_prompt" ? "Permission" : "Waiting")
-                    .font(.caption2)
+        } else {
+            switch claudeState {
+            case .working:
+                HStack(spacing: 3) {
+                    Image(systemName: "bolt.fill")
+                        .font(.caption2)
+                    if let activity, activity.isActive {
+                        Text(activity.toolName)
+                            .font(.caption2)
+                    } else {
+                        Text("Working")
+                            .font(.caption2)
+                    }
+                }
+                .foregroundStyle(.orange)
+            case .done:
+                HStack(spacing: 3) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption2)
+                    Text("Done")
+                        .font(.caption2)
+                }
+                .foregroundStyle(CorveilTheme.gold)
+            case .waiting, .idle:
+                EmptyView()
             }
-            .foregroundStyle(.blue)
-        case .done:
-            HStack(spacing: 3) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.caption2)
-                Text("Done")
-                    .font(.caption2)
-            }
-            .foregroundStyle(CorveilTheme.gold)
-        case .idle:
-            EmptyView()
         }
+    }
+
+    private var needsAttention: Bool {
+        appState.pendingNotification[session.id] != nil
+    }
+
+    private var rowBackgroundColor: Color {
+        if needsAttention {
+            return Color.orange.opacity(0.12)
+        } else if claudeState == .done && terminalReadiness == .claudeLaunched {
+            return Color.green.opacity(0.06)
+        }
+        return CorveilTheme.bgCard
+    }
+
+    private var rowBorderColor: Color {
+        if needsAttention {
+            return Color.orange.opacity(0.4)
+        }
+        return CorveilTheme.borderSubtle
     }
 
     private func shortenBranch(_ branch: String) -> String {

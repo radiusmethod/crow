@@ -549,10 +549,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     switch eventName {
                     case "PreToolUse":
                         let toolName = payload["tool_name"]?.stringValue ?? "unknown"
-                        capturedAppState.lastToolActivity[sessionID] = ToolActivity(
-                            toolName: toolName, isActive: true
-                        )
-                        capturedAppState.claudeState[sessionID] = .working
+                        if toolName == "AskUserQuestion" {
+                            // Question for the user — set attention state
+                            capturedAppState.pendingNotification[sessionID] = HookNotification(
+                                message: "Claude has a question",
+                                notificationType: "question"
+                            )
+                            capturedAppState.claudeState[sessionID] = .waiting
+                            capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
+                        } else {
+                            capturedAppState.lastToolActivity[sessionID] = ToolActivity(
+                                toolName: toolName, isActive: true
+                            )
+                            capturedAppState.claudeState[sessionID] = .working
+                        }
 
                     case "PostToolUse":
                         let toolName = payload["tool_name"]?.stringValue ?? "unknown"
@@ -582,8 +592,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         }
 
                     case "PermissionRequest":
+                        capturedAppState.pendingNotification[sessionID] = HookNotification(
+                            message: "Permission requested",
+                            notificationType: "permission_prompt"
+                        )
                         capturedAppState.claudeState[sessionID] = .waiting
-                        // Clear tool activity so badge shows "Permission" not tool name
                         capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
 
                     case "UserPromptSubmit":
