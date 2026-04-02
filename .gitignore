@@ -1,0 +1,27 @@
+# Build
+.build/
+.derived-data/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+
+# App bundle
+*.app
+*.dmg
+
+# Frameworks (built locally)
+Frameworks/GhosttyKit.xcframework/
+Frameworks/ghostty-resources/
+
+# IDE
+.swiftpm/
+.idea/
+*.xcuserstate
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+Package.resolved

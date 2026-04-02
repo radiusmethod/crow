@@ -1,0 +1,83 @@
+import SwiftUI
+import RmCore
+
+// MARK: - Shared Delete Session Alert
+
+/// View modifier that attaches a delete-session confirmation alert.
+/// Used by both SessionListView (sidebar context menu) and SessionDetailView (header button).
+struct DeleteSessionAlert: ViewModifier {
+    @Binding var sessionToDelete: Session?
+    let appState: AppState
+
+    func body(content: Content) -> some View {
+        content.alert("Delete Session?", isPresented: Binding(
+            get: { sessionToDelete != nil },
+            set: { if !$0 { sessionToDelete = nil } }
+        )) {
+            Button("Cancel", role: .cancel) { sessionToDelete = nil }
+            Button(buttonLabel, role: .destructive) {
+                if let session = sessionToDelete {
+                    Task { try? await appState.onDeleteSession?(session.id) }
+                    sessionToDelete = nil
+                }
+            }
+        } message: {
+            Text(messageText)
+        }
+    }
+
+    private var buttonLabel: String {
+        guard let session = sessionToDelete else { return "Delete" }
+        let wts = appState.worktrees(for: session.id)
+        let hasRealWorktrees = wts.contains { !WorktreeClassification.isMainCheckout($0) }
+        return hasRealWorktrees ? "Delete Everything" : "Remove Session"
+    }
+
+    private var messageText: String {
+        guard let session = sessionToDelete else { return "" }
+        let wts = appState.worktrees(for: session.id)
+        let realWorktrees = wts.filter { !WorktreeClassification.isMainCheckout($0) }
+        let mainCheckouts = wts.filter { WorktreeClassification.isMainCheckout($0) }
+
+        if wts.isEmpty {
+            return "This will remove the session \"\(session.name)\"."
+        } else if realWorktrees.isEmpty {
+            return "This will remove the session \"\(session.name)\".\n\nThe repository folder and branch (\(mainCheckouts.map(\.branch).joined(separator: ", "))) will not be affected."
+        } else if mainCheckouts.isEmpty {
+            return "This will delete:\n\n" +
+                realWorktrees.map { "  \u{2022} Worktree: \($0.worktreePath)\n  \u{2022} Branch: \($0.branch)" }
+                    .joined(separator: "\n\n") +
+                "\n\nThe worktree folders and git branches will be removed from disk."
+        } else {
+            return "This will delete:\n\n" +
+                realWorktrees.map { "  \u{2022} Worktree: \($0.worktreePath)\n  \u{2022} Branch: \($0.branch)" }
+                    .joined(separator: "\n\n") +
+                "\n\nThe worktree folders and branches above will be removed.\n\nThe main repo (\(mainCheckouts.map(\.branch).joined(separator: ", "))) will not be affected."
+        }
+    }
+}
+
+extension View {
+    func deleteSessionAlert(session: Binding<Session?>, appState: AppState) -> some View {
+        modifier(DeleteSessionAlert(sessionToDelete: session, appState: appState))
+    }
+}
+
+// MARK: - Worktree Classification
+
+/// Shared logic for classifying worktrees as main checkouts vs real worktrees.
+enum WorktreeClassification {
+    /// Returns true if the worktree points at the main repo checkout (not a real git worktree).
+    static func isMainCheckout(_ wt: SessionWorktree) -> Bool {
+        let worktree = (wt.worktreePath as NSString).standardizingPath
+        let repo = (wt.repoPath as NSString).standardizingPath
+        if worktree == repo { return true }
+
+        let branch = wt.branch
+            .replacingOccurrences(of: "refs/heads/", with: "")
+            .replacingOccurrences(of: "origin/", with: "")
+            .lowercased()
+        let protectedNames: Set<String> = ["main", "master", "develop", "dev", "trunk", "release"]
+        return protectedNames.contains(branch)
+    }
+}
