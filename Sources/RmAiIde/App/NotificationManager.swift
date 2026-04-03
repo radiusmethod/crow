@@ -10,6 +10,7 @@ final class NotificationManager {
     private var settings: NotificationSettings
     private var soundCache: [String: NSSound] = [:]
     private var lastNotified: [UUID: (event: NotificationEvent, time: Date)] = [:]
+    private var hasRequestedPermission = false
 
     /// Available built-in macOS system sounds.
     static let builtInSounds = [
@@ -21,7 +22,6 @@ final class NotificationManager {
     init(appState: AppState, settings: NotificationSettings) {
         self.appState = appState
         self.settings = settings
-        requestNotificationPermission()
     }
 
     func updateSettings(_ settings: NotificationSettings) {
@@ -108,6 +108,9 @@ final class NotificationManager {
     // MARK: - System Notifications
 
     private func requestNotificationPermission() {
+        guard !hasRequestedPermission else { return }
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        hasRequestedPermission = true
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, error in
             if let error {
                 NSLog("Notification permission error: \(error)")
@@ -121,6 +124,10 @@ final class NotificationManager {
         sessionID: UUID,
         eventName: String
     ) {
+        // UNUserNotificationCenter requires a valid app bundle
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        requestNotificationPermission()
+
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
