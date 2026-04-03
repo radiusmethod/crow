@@ -12,7 +12,7 @@ struct AboutView: View {
                     .frame(width: 96, height: 96)
             }
 
-            Text("Corveil AI IDE")
+            Text("Crow")
                 .font(.title2)
                 .fontWeight(.bold)
 

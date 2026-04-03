@@ -192,7 +192,7 @@ crow/
 | **SessionService** | CRUD for sessions/worktrees/terminals, terminal readiness tracking, orphan detection |
 | **IssueTracker** | Polls GitHub/GitLab every 60 seconds for assigned issues, PR status, project board status, auto-completes sessions on merged PRs |
 | **TerminalManager** | Manages Ghostty terminal surfaces with lifecycle tracking (uninitialized → surfaceCreated → shellReady → claudeLaunched) |
-| **SocketServer** | Unix socket at `$TMPDIR/crow.sock` — receives JSON-RPC commands from the `crow` CLI |
+| **SocketServer** | Unix socket at `~/.local/share/crow/crow.sock` — receives JSON-RPC commands from the `crow` CLI |
 
 ### Data Flow
 

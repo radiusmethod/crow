@@ -8,7 +8,7 @@ This skill targets Crow's `crow` CLI. The original `/workspace` skill targeting 
 
 ## Important: Sandbox Bypass
 
-All `crow` CLI commands require `dangerouslyDisableSandbox: true` because they communicate via Unix socket at `$TMPDIR/crow.sock`.
+All `crow` CLI commands require `dangerouslyDisableSandbox: true` because they communicate via Unix socket at `~/.local/share/crow/crow.sock`.
 
 ## Activation
 
