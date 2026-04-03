@@ -69,15 +69,14 @@ Post "https://api.github.com/graphql": tls: failed to verify certificate: x509: 
 **Fix:** Always use `dangerouslyDisableSandbox: true` for ALL `gh` commands. There is no workaround.
 
 If `gh` still fails or returns empty output:
-1. Try with `GIT_SSL_NO_VERIFY=1 gh issue view ...`
-2. Use `--repo owner/repo` explicitly instead of relying on git remote detection
-3. Use full URL: `gh issue view https://github.com/owner/repo/issues/123` not just the number
+1. Use `--repo owner/repo` explicitly instead of relying on git remote detection
+2. Use full URL: `gh issue view https://github.com/owner/repo/issues/123` not just the number
 
 ### GitLab CLI (glab)
 
 Same TLS issue. Always use `dangerouslyDisableSandbox: true` and set `GITLAB_HOST`:
 ```bash
-GITLAB_HOST=repo1.dso.mil glab issue view {number} --repo {org/repo}
+GITLAB_HOST=gitlab.example.com glab issue view {number} --repo {org/repo}
 ```
 
 ## File System Rules

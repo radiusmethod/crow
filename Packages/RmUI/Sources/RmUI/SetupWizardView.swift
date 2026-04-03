@@ -126,7 +126,7 @@ public struct SetupWizardView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text("Each workspace is a folder under your dev root containing git repos.\nFor example: RadiusMethod (GitHub), PlatformOne (GitLab).")
+            Text("Each workspace is a folder under your dev root containing git repos.\nFor example: MyOrg (GitHub), MyGitLab (GitLab).")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -235,7 +235,7 @@ struct WorkspaceFormSheet: View {
             .pickerStyle(.segmented)
 
             if provider == "gitlab" {
-                TextField("GitLab host (e.g., repo1.dso.mil)", text: $host)
+                TextField("GitLab host (e.g., gitlab.example.com)", text: $host)
                     .textFieldStyle(.roundedBorder)
             }
 

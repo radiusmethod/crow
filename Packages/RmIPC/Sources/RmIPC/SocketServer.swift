@@ -13,6 +13,9 @@ public final class SocketServer: @unchecked Sendable {
     private var running = false
     private let queue = DispatchQueue(label: "com.radiusmethod.ride.socket", qos: .userInitiated)
 
+    /// Maximum size of a single JSON-RPC message (1 MB).
+    private static let maxMessageSize = 1_048_576
+
     public init(socketPath: String? = nil, router: CommandRouter) {
         self.socketPath = socketPath ?? Self.defaultSocketPath()
         self.router = router
@@ -27,6 +30,8 @@ public final class SocketServer: @unchecked Sendable {
         let dir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".local/share/rm-ai-ide").path
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        // Restrict directory to owner-only access
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir)
         return (dir as NSString).appendingPathComponent("ride.sock")
     }
 
@@ -62,6 +67,9 @@ public final class SocketServer: @unchecked Sendable {
             close(serverFD)
             throw SocketError.bindFailed(errno)
         }
+
+        // Restrict socket to owner-only access
+        chmod(socketPath, 0o600)
 
         // Listen
         guard listen(serverFD, 5) == 0 else {
@@ -108,7 +116,7 @@ public final class SocketServer: @unchecked Sendable {
     private func handleClient(fd: Int32) {
         defer { close(fd) }
 
-        // Read until newline
+        // Read until newline (with size limit to prevent memory exhaustion)
         var buffer = Data()
         var byte: UInt8 = 0
 
@@ -117,6 +125,11 @@ public final class SocketServer: @unchecked Sendable {
             if bytesRead <= 0 { return }
             if byte == UInt8(ascii: "\n") { break }
             buffer.append(byte)
+            if buffer.count >= Self.maxMessageSize {
+                let errorResponse = JSONRPCResponse.error(id: 0, code: RPCErrorCode.parseError, message: "Message too large")
+                writeResponse(errorResponse, to: fd)
+                return
+            }
         }
 
         guard !buffer.isEmpty else { return }

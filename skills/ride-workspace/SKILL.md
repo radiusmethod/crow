@@ -28,11 +28,11 @@ Configuration is at `{devRoot}/.claude/config.json` (managed by the rm-ai-ide ap
       "provider": "github",
       "cli": "gh"
     },
-    "PlatformOne": {
+    "MyGitLab": {
       "provider": "gitlab",
       "cli": "glab",
-      "host": "repo1.dso.mil",
-      "alwaysInclude": ["bigbang", "overrides"]
+      "host": "gitlab.example.com",
+      "alwaysInclude": []
     }
   },
   "defaults": {
@@ -80,8 +80,8 @@ gh pr view {url} --json title,body,labels
 
 ### GitLab (glab)
 ```bash
-GITLAB_HOST=repo1.dso.mil glab issue view {number} --repo {org/repo} --comments
-GITLAB_HOST=repo1.dso.mil glab mr view {number} --repo {org/repo} --comments
+GITLAB_HOST=gitlab.example.com glab issue view {number} --repo {org/repo} --comments
+GITLAB_HOST=gitlab.example.com glab mr view {number} --repo {org/repo} --comments
 ```
 
 ### Provider Detection from URL
@@ -89,9 +89,9 @@ GITLAB_HOST=repo1.dso.mil glab mr view {number} --repo {org/repo} --comments
 | URL Contains | Provider | CLI | GITLAB_HOST |
 |---|---|---|---|
 | `github.com` | github | gh | - |
-| `repo1.dso.mil` | gitlab | glab | repo1.dso.mil |
+| `gitlab.example.com` | gitlab | glab | gitlab.example.com |
 | `gitlab.com` | gitlab | glab | gitlab.com |
-| `code.il2.dso.mil` | gitlab | glab | code.il2.dso.mil |
+| `gitlab-il2.example.com` | gitlab | glab | gitlab-il2.example.com |
 
 ## PR Detection
 
@@ -144,7 +144,7 @@ Git command:   git -C /Users/jane/Dev/RadiusMethod/citadel worktree add /Users/j
 
 More examples:
 ```
-loki #252 "Update grafana-enterprise.md"    → {devRoot}/PlatformOne/loki-252-update-grafana-docs
+loki #252 "Update grafana-enterprise.md"    → {devRoot}/MyGitLab/loki-252-update-grafana-docs
 citadel #45 "Add JWT validation endpoint"   → {devRoot}/RadiusMethod/citadel-45-jwt-validation
 ```
 
@@ -215,7 +215,7 @@ ride set-ticket --session {session_id} \
 # 3. Register each worktree (after creating with git)
 #    IMPORTANT: --repo-path is the MAIN repo path (e.g., .../citadel)
 #    --path is the WORKTREE path (e.g., .../citadel-197-slug)
-#    --workspace is the workspace folder name (e.g., "RadiusMethod", "PlatformOne")
+#    --workspace is the workspace folder name (e.g., "RadiusMethod", "MyGitLab")
 ride add-worktree --session {session_id} \
   --repo "{repo_name}" \
   --repo-path "{main_repo_path}" \
@@ -294,21 +294,16 @@ The prompt is written to `{devRoot}/.claude/prompts/ride-prompt-{feature_name}.m
 
 **Repo descriptions for the prompt table:**
 
-Hardcoded descriptions:
-- `bigbang` → "Umbrella Helm chart that loads in specific product packages"
-- `overrides` → "Helm install overrides used for testing; create overrides here when testing changes"
-- `codename-spotlight` → "Infrastructure monorepo containing Citadel, SocketZero, and related services"
-
-For all other repos, extract dynamically from first non-heading line of CLAUDE.md or README.md.
+Extract dynamically from first non-heading line of CLAUDE.md or README.md. If no description is found, leave the Description column empty.
 
 ~~~markdown
 # Workspace Context
 
 | Repository | Path | Branch | Description |
 |------------|------|--------|-------------|
-| citadel | /Users/name/Dev/RadiusMethod/citadel-45-jwt | feature/citadel-45-jwt-validation | Auth gateway service |
-| bigbang | /Users/name/Dev/PlatformOne/bigbang | main | Umbrella Helm chart that loads in specific product packages |
-| overrides | /Users/name/Dev/PlatformOne/overrides | - | Helm install overrides used for testing; create overrides here when testing changes |
+| my-app | /Users/name/Dev/MyOrg/my-app-45-jwt | feature/my-app-45-jwt-validation | Auth gateway service |
+| my-project | /Users/name/Dev/MyGitLab/my-project | main | Infrastructure chart |
+| my-config | /Users/name/Dev/MyGitLab/my-config | - | Configuration overrides |
 
 ## Ticket
 
@@ -346,7 +341,7 @@ And update the Instructions section to:
 3. Create an implementation plan that builds on the existing work
 ~~~
 
-For PlatformOne, add: `4. If any changes to bigbang are required, create a new worktree with a feature branch before making modifications`
+For MyGitLab, add: `4. If any changes to my-project are required, create a new worktree with a feature branch before making modifications`
 
 ### CLI Commands for Fetching Issues
 
@@ -356,10 +351,10 @@ gh issue view {url} --comments
 gh pr view {url} --comments
 ```
 
-**GitLab (non-default host like repo1.dso.mil):**
+**GitLab (non-default host like gitlab.example.com):**
 ```bash
-GITLAB_HOST=repo1.dso.mil glab issue view {number} --repo {org/repo} --comments
-GITLAB_HOST=repo1.dso.mil glab mr view {number} --repo {org/repo} --comments
+GITLAB_HOST=gitlab.example.com glab issue view {number} --repo {org/repo} --comments
+GITLAB_HOST=gitlab.example.com glab mr view {number} --repo {org/repo} --comments
 ```
 
 ## Error Handling and Self-Correction
@@ -420,8 +415,8 @@ All commands return JSON and require `dangerouslyDisableSandbox: true`.
 
 ### Cross-Workspace
 ```
-/ride-workspace "integrate bigbang with citadel gateway"
+/ride-workspace "integrate my-project with citadel gateway"
 ```
-→ Matches bigbang (PlatformOne) + citadel (RadiusMethod)
+→ Matches my-project (MyGitLab) + citadel (RadiusMethod)
 → Creates worktrees for both, one ride session
 → Claude launches in highest-scoring repo

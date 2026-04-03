@@ -25,7 +25,12 @@ public final class ConfigStore: Sendable {
     /// Write the devRoot path.
     public static func saveDevRoot(_ path: String) throws {
         try FileManager.default.createDirectory(at: appSupportDir, withIntermediateDirectories: true)
+        // Restrict app support directory to owner-only access
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700], ofItemAtPath: appSupportDir.path)
         try path.write(to: devRootPointerPath, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: devRootPointerPath.path)
     }
 
     // MARK: - App Config
@@ -49,6 +54,8 @@ public final class ConfigStore: Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(config)
         try data.write(to: configURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: configURL.path)
     }
 
     // MARK: - Import from CMUX workspace-repos.json

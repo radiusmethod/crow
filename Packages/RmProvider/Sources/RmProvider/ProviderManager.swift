@@ -3,18 +3,25 @@ import RmCore
 
 /// Detects provider from URL and fetches ticket details.
 public actor ProviderManager {
-    public init() {}
+    /// Additional GitLab hosts beyond gitlab.com (user-configurable).
+    private let additionalGitLabHosts: [String]
+
+    public init(additionalGitLabHosts: [String] = []) {
+        self.additionalGitLabHosts = additionalGitLabHosts
+    }
 
     /// Detect provider from a URL string.
     public func detectProvider(from url: String) -> (provider: Provider, cli: String, host: String?) {
         if url.contains("github.com") {
             return (.github, "gh", nil)
-        } else if url.contains("repo1.dso.mil") {
-            return (.gitlab, "glab", "repo1.dso.mil")
-        } else if url.contains("code.il2.dso.mil") {
-            return (.gitlab, "glab", "code.il2.dso.mil")
         } else if url.contains("gitlab.com") {
             return (.gitlab, "glab", "gitlab.com")
+        }
+        // Check user-configured GitLab hosts
+        for host in additionalGitLabHosts {
+            if url.contains(host) {
+                return (.gitlab, "glab", host)
+            }
         }
         return (.github, "gh", nil)
     }

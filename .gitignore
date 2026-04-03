@@ -19,6 +19,9 @@ Frameworks/ghostty-resources/
 .idea/
 *.xcuserstate
 
+# Claude Code local settings (may contain absolute paths and session IDs)
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db

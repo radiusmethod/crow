@@ -331,7 +331,7 @@ struct Setup: ParsableCommand {
 
             var host: String? = nil
             if provider == "gitlab" {
-                print("  GitLab host (e.g., repo1.dso.mil): ", terminator: "")
+                print("  GitLab host (e.g., gitlab.example.com): ", terminator: "")
                 let hostInput = readLine()?.trimmingCharacters(in: .whitespaces) ?? ""
                 if !hostInput.isEmpty { host = hostInput }
             }

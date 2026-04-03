@@ -240,6 +240,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Socket Server
 
+    /// Maximum allowed length for session names.
+    private nonisolated static let maxSessionNameLength = 256
+
+    /// Validate that a path is within the configured devRoot to prevent path traversal.
+    private nonisolated static func isPathWithinDevRoot(_ path: String, devRoot: String) -> Bool {
+        let realPath = (path as NSString).standardizingPath
+        let realRoot = (devRoot as NSString).standardizingPath
+        return realPath.hasPrefix(realRoot + "/") || realPath == realRoot
+    }
+
+    /// Validate a session name contains no control characters and is within length limits.
+    private nonisolated static func isValidSessionName(_ name: String) -> Bool {
+        !name.isEmpty
+            && name.count <= maxSessionNameLength
+            && !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+    }
+
     private func startSocketServer(store: JSONStore, devRoot: String) {
         let capturedAppState = appState
         let capturedStore = store
@@ -247,6 +264,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let router = CommandRouter(handlers: [
             "new-session": { @Sendable params in
                 let name = params["name"]?.stringValue ?? "untitled"
+                guard AppDelegate.isValidSessionName(name) else {
+                    throw RPCError.invalidParams("Invalid session name (max \(AppDelegate.maxSessionNameLength) chars, no control characters)")
+                }
                 return await MainActor.run {
                     let session = Session(name: name)
                     capturedAppState.sessions.append(session)
@@ -350,11 +370,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             capturedAppState.sessions[idx].ticketURL = url
                             // Auto-detect provider from URL
                             if capturedAppState.sessions[idx].provider == nil {
-                                if url.contains("github.com") {
-                                    capturedAppState.sessions[idx].provider = .github
-                                } else if url.contains("gitlab.com") || url.contains("repo1.dso.mil") || url.contains("code.il2.dso.mil") {
-                                    capturedAppState.sessions[idx].provider = .gitlab
-                                }
+                                capturedAppState.sessions[idx].provider = SessionService.detectProviderFromURL(url)
                             }
                         }
                         if let title = params["title"]?.stringValue { capturedAppState.sessions[idx].ticketTitle = title }
@@ -371,6 +387,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                       let repo = params["repo"]?.stringValue, let path = params["path"]?.stringValue,
                       let branch = params["branch"]?.stringValue else {
                     throw RPCError.invalidParams("session_id, repo, path, branch required")
+                }
+                // Validate path is within devRoot to prevent path traversal
+                guard AppDelegate.isPathWithinDevRoot(path, devRoot: devRoot) else {
+                    throw RPCError.invalidParams("Worktree path must be within the configured devRoot")
                 }
                 // repo_path is the main repo (for git commands). Defaults to path if not provided.
                 let repoPath = params["repo_path"]?.stringValue ?? path
@@ -398,6 +418,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let idStr = params["session_id"]?.stringValue, let sessionID = UUID(uuidString: idStr),
                       let cwd = params["cwd"]?.stringValue else {
                     throw RPCError.invalidParams("session_id and cwd required")
+                }
+                // Validate cwd is within devRoot to prevent path traversal
+                guard AppDelegate.isPathWithinDevRoot(cwd, devRoot: devRoot) else {
+                    throw RPCError.invalidParams("Terminal cwd must be within the configured devRoot")
                 }
                 // Resolve claude binary path if command references claude
                 var command = params["command"]?.stringValue
