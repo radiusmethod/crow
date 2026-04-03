@@ -194,6 +194,11 @@ public final class GhosttySurfaceView: NSView {
         return false
     }
 
+    public override func doCommand(by selector: Selector) {
+        // Prevents NSBeep for unhandled commands dispatched by interpretKeyEvents
+        // (e.g. noop:, cancel:). Also satisfies NSTextInputClient.doCommand(by:).
+    }
+
     public override func keyDown(with event: NSEvent) {
         guard let surface else { return }
 
