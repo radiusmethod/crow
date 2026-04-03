@@ -46,6 +46,20 @@ public struct SessionListView: View {
                 }
             }
 
+            // In Review sessions
+            if !appState.inReviewSessions.isEmpty {
+                SectionDivider(title: "In Review")
+                ForEach(filteredSessions(appState.inReviewSessions)) { session in
+                    SessionRow(session: session, appState: appState)
+                        .tag(session.id)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .contextMenu {
+                            sessionContextMenu(session)
+                        }
+                }
+            }
+
             // Completed sessions
             if !appState.completedSessions.isEmpty {
                 SectionDivider(title: "Completed")
@@ -94,7 +108,7 @@ public struct SessionListView: View {
             .disabled(appState.isMarkingInReview[session.id] == true)
         }
 
-        if session.status == .active {
+        if session.status == .active || session.status == .inReview {
             Button {
                 appState.onCompleteSession?(session.id)
             } label: {
@@ -326,6 +340,10 @@ struct SessionRow: View {
                         .frame(width: 8, height: 8)
                 }
             }
+        case .inReview:
+            Image(systemName: "eye.circle.fill")
+                .foregroundStyle(CorveilTheme.gold)
+                .font(.caption)
         case .paused:
             Circle()
                 .fill(.yellow)

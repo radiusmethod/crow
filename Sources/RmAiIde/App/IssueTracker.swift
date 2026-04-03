@@ -659,6 +659,9 @@ final class IssueTracker {
         }
 
         print("[IssueTracker] Marked \(owner)/\(repoName)#\(number) as In Review")
+
+        // Update local session status to .inReview
+        appState.onSetSessionInReview?(sessionID)
     }
 
     // MARK: - Shell

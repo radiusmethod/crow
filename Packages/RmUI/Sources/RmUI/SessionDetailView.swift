@@ -141,7 +141,7 @@ public struct SessionDetailView: View {
                         }
                     }
 
-                    if session.status == .active {
+                    if session.status == .active || session.status == .inReview {
                         Button {
                             appState.onCompleteSession?(session.id)
                         } label: {
@@ -295,6 +295,7 @@ struct StatusBadge: View {
         switch status {
         case .active: .green
         case .paused: .yellow
+        case .inReview: CorveilTheme.gold
         case .completed: CorveilTheme.gold
         case .archived: CorveilTheme.textMuted
         }
