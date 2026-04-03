@@ -209,20 +209,28 @@ public struct SessionDetailView: View {
                 workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path
             )
             .id(session.id)
-        } else if sessionTerminals.count == 1 {
-            let terminal = sessionTerminals[0]
-            ReadinessAwareTerminal(terminal: terminal, appState: appState)
         } else {
             VStack(spacing: 0) {
                 TerminalTabBar(
                     terminals: sessionTerminals,
                     activeID: appState.activeTerminalID[session.id] ?? sessionTerminals[0].id,
-                    onSelect: { id in appState.activeTerminalID[session.id] = id }
+                    onSelect: { id in appState.activeTerminalID[session.id] = id },
+                    onClose: { id in appState.onCloseTerminal?(session.id, id) },
+                    onAdd: { appState.onAddTerminal?(session.id) }
                 )
                 Divider().overlay(CorveilTheme.borderSubtle)
                 let activeID = appState.activeTerminalID[session.id] ?? sessionTerminals[0].id
                 if let terminal = sessionTerminals.first(where: { $0.id == activeID }) {
-                    ReadinessAwareTerminal(terminal: terminal, appState: appState)
+                    if terminal.isManaged {
+                        ReadinessAwareTerminal(terminal: terminal, appState: appState)
+                    } else {
+                        TerminalSurfaceView(
+                            terminalID: terminal.id,
+                            workingDirectory: terminal.cwd,
+                            command: terminal.command
+                        )
+                        .id(terminal.id)
+                    }
                 }
             }
         }
@@ -269,20 +277,47 @@ public struct TerminalTabBar: View {
     let terminals: [SessionTerminal]
     let activeID: UUID
     let onSelect: (UUID) -> Void
+    let onClose: (UUID) -> Void
+    let onAdd: () -> Void
 
     public var body: some View {
         HStack(spacing: 0) {
             ForEach(terminals) { terminal in
                 Button { onSelect(terminal.id) } label: {
-                    Text(terminal.name)
-                        .font(.caption)
-                        .foregroundStyle(terminal.id == activeID ? CorveilTheme.gold : CorveilTheme.textSecondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(terminal.id == activeID ? CorveilTheme.gold.opacity(0.12) : Color.clear)
+                    HStack(spacing: 4) {
+                        Image(systemName: terminal.isManaged ? "sparkles" : "terminal")
+                            .font(.system(size: 9))
+                        Text(terminal.name)
+                            .font(.caption)
+                        if !terminal.isManaged {
+                            Button {
+                                onClose(terminal.id)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundStyle(CorveilTheme.textMuted)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.leading, 2)
+                        }
+                    }
+                    .foregroundStyle(terminal.id == activeID ? CorveilTheme.gold : CorveilTheme.textSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(terminal.id == activeID ? CorveilTheme.gold.opacity(0.12) : Color.clear)
                 }
                 .buttonStyle(.plain)
             }
+
+            Button { onAdd() } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(CorveilTheme.textMuted)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
+
             Spacer()
         }
         .background(CorveilTheme.bgSurface)

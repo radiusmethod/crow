@@ -32,18 +32,31 @@ final class SessionService {
             appState.worktrees[session.id] = data.worktrees.filter { $0.sessionID == session.id }
             appState.links[session.id] = data.links.filter { $0.sessionID == session.id }
 
-            // For work session terminals, clear the command so they start as plain shells.
-            // We'll send `claude --continue` after the surfaces are created.
             var terminals = data.terminals.filter { $0.sessionID == session.id }
             if session.id != AppState.managerSessionID {
+                // Backward-compat migration: if no terminal is marked managed,
+                // heuristically mark the first "Claude Code" terminal.
+                let hasManagedTerminal = terminals.contains { $0.isManaged }
+                if !hasManagedTerminal, let idx = terminals.firstIndex(where: {
+                    $0.name == "Claude Code" || ($0.command?.contains("claude") ?? false)
+                }) {
+                    terminals[idx] = SessionTerminal(
+                        id: terminals[idx].id, sessionID: terminals[idx].sessionID,
+                        name: terminals[idx].name, cwd: terminals[idx].cwd,
+                        command: terminals[idx].command, isManaged: true,
+                        createdAt: terminals[idx].createdAt
+                    )
+                }
+
+                // For managed terminals, clear the claude command so they start as plain shells.
+                // We'll send `claude --continue` after the surfaces are created.
                 for i in terminals.indices {
-                    if let cmd = terminals[i].command, cmd.contains("claude") {
+                    if terminals[i].isManaged,
+                       let cmd = terminals[i].command, cmd.contains("claude") {
                         terminals[i] = SessionTerminal(
-                            id: terminals[i].id,
-                            sessionID: terminals[i].sessionID,
-                            name: terminals[i].name,
-                            cwd: terminals[i].cwd,
-                            command: nil,  // Plain shell — claude --continue sent later
+                            id: terminals[i].id, sessionID: terminals[i].sessionID,
+                            name: terminals[i].name, cwd: terminals[i].cwd,
+                            command: nil, isManaged: true,
                             createdAt: terminals[i].createdAt
                         )
                     }
@@ -51,9 +64,9 @@ final class SessionService {
             }
             appState.terminals[session.id] = terminals
 
-            // Initialize readiness tracking for work session terminals
+            // Initialize readiness tracking for managed work session terminals only
             if session.id != AppState.managerSessionID {
-                for terminal in terminals {
+                for terminal in terminals where terminal.isManaged {
                     appState.terminalReadiness[terminal.id] = .uninitialized
                     TerminalManager.shared.trackReadiness(for: terminal.id)
                 }
@@ -453,7 +466,8 @@ final class SessionService {
         let terminal = SessionTerminal(
             sessionID: session.id,
             name: "Claude Code",
-            cwd: worktreePath
+            cwd: worktreePath,
+            isManaged: true
         )
 
         // Add to state and store
@@ -497,6 +511,37 @@ final class SessionService {
         }
 
         NSLog("[SessionService] Recovered session '\(dirName)' — ticket=#\(ticketNumber ?? 0) title=\(ticketTitle ?? "unknown")")
+    }
+
+    // MARK: - Terminal Tab Management
+
+    /// Add a new plain-shell terminal tab to a session.
+    func addTerminal(sessionID: UUID) {
+        let cwd = appState.primaryWorktree(for: sessionID)?.worktreePath
+            ?? FileManager.default.homeDirectoryForCurrentUser.path
+        let terminal = SessionTerminal(
+            sessionID: sessionID, name: "Shell", cwd: cwd, isManaged: false
+        )
+        appState.terminals[sessionID, default: []].append(terminal)
+        appState.activeTerminalID[sessionID] = terminal.id
+        store.mutate { data in data.terminals.append(terminal) }
+    }
+
+    /// Close a non-managed terminal tab.
+    func closeTerminal(sessionID: UUID, terminalID: UUID) {
+        guard let terminals = appState.terminals[sessionID],
+              let terminal = terminals.first(where: { $0.id == terminalID }),
+              !terminal.isManaged else { return }
+
+        TerminalManager.shared.destroy(id: terminalID)
+        appState.terminals[sessionID]?.removeAll { $0.id == terminalID }
+        appState.terminalReadiness.removeValue(forKey: terminalID)
+
+        if appState.activeTerminalID[sessionID] == terminalID {
+            appState.activeTerminalID[sessionID] = appState.terminals[sessionID]?.first?.id
+        }
+
+        store.mutate { data in data.terminals.removeAll { $0.id == terminalID } }
     }
 
     // MARK: - Complete Session
