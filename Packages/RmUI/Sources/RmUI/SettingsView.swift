@@ -26,8 +26,10 @@ public struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             workspacesTab
                 .tabItem { Label("Workspaces", systemImage: "rectangle.stack") }
+            NotificationSettingsView(settings: $config.notifications, onSave: { save() })
+                .tabItem { Label("Notifications", systemImage: "bell") }
         }
-        .frame(width: 520, height: 380)
+        .frame(width: 520, height: 480)
         .sheet(isPresented: $isAddingWorkspace) {
             WorkspaceEditorView(workspace: nil) { ws in
                 config.workspaces.append(ws)
@@ -82,67 +84,72 @@ public struct SettingsView: View {
                     .onSubmit { save() }
             }
         }
-        .padding()
+        .formStyle(.grouped)
     }
 
     // MARK: - Workspaces Tab
 
     private var workspacesTab: some View {
-        VStack {
-            List {
-                ForEach(config.workspaces) { ws in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(ws.name)
-                                .fontWeight(.medium)
-                            HStack(spacing: 4) {
-                                Text(ws.provider)
-                                    .font(.caption)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(ws.provider == "github" ? Color.purple.opacity(0.15) : Color.orange.opacity(0.15))
-                                    .clipShape(Capsule())
-                                if let host = ws.host {
-                                    Text(host)
+        Form {
+            Section {
+                if config.workspaces.isEmpty {
+                    Text("No workspaces configured")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(config.workspaces) { ws in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(ws.name)
+                                    .fontWeight(.medium)
+                                HStack(spacing: 4) {
+                                    Text(ws.provider)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(ws.provider == "github" ? Color.purple.opacity(0.15) : Color.orange.opacity(0.15))
+                                        .clipShape(Capsule())
+                                    if let host = ws.host {
+                                        Text(host)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
                                 }
                             }
-                        }
 
-                        Spacer()
+                            Spacer()
 
-                        Button {
-                            editingWorkspace = ws
-                        } label: {
-                            Image(systemName: "pencil")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.plain)
+                            Button {
+                                editingWorkspace = ws
+                            } label: {
+                                Image(systemName: "pencil")
+                            }
+                            .buttonStyle(.borderless)
 
-                        Button(role: .destructive) {
-                            config.workspaces.removeAll { $0.id == ws.id }
-                            save()
-                        } label: {
-                            Image(systemName: "trash")
-                                .font(.caption)
+                            Button(role: .destructive) {
+                                config.workspaces.removeAll { $0.id == ws.id }
+                                save()
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.borderless)
                         }
-                        .buttonStyle(.plain)
                     }
-                    .padding(.vertical, 4)
+                }
+            } header: {
+                HStack {
+                    Text("Workspaces")
+                    Spacer()
+                    Button {
+                        isAddingWorkspace = true
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.borderless)
                 }
             }
-
-            HStack {
-                Spacer()
-                Button {
-                    isAddingWorkspace = true
-                } label: {
-                    Label("Add Workspace", systemImage: "plus")
-                }
-            }
-            .padding()
         }
+        .formStyle(.grouped)
     }
 
     private func save() {
@@ -172,28 +179,27 @@ public struct WorkspaceEditorView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 16) {
-            Text(existingID == nil ? "Add Workspace" : "Edit Workspace")
-                .font(.title3)
-                .fontWeight(.semibold)
+        Form {
+            Section("Workspace") {
+                TextField("Name", text: $name)
+                    .textFieldStyle(.roundedBorder)
 
-            TextField("Name (e.g., RadiusMethod)", text: $name)
-                .textFieldStyle(.roundedBorder)
+                Picker("Provider", selection: $provider) {
+                    Text("GitHub").tag("github")
+                    Text("GitLab").tag("gitlab")
+                }
 
-            Picker("Provider", selection: $provider) {
-                Text("GitHub").tag("github")
-                Text("GitLab").tag("gitlab")
-            }
-            .pickerStyle(.segmented)
+                if provider == "gitlab" {
+                    TextField("GitLab Host (e.g., gitlab.example.com)", text: $host)
+                        .textFieldStyle(.roundedBorder)
+                }
 
-            if provider == "gitlab" {
-                TextField("GitLab host (e.g., gitlab.example.com)", text: $host)
+                TextField("Always Include Repos", text: $alwaysIncludeText)
                     .textFieldStyle(.roundedBorder)
             }
-
-            TextField("Always include repos (comma-separated)", text: $alwaysIncludeText)
-                .textFieldStyle(.roundedBorder)
-
+        }
+        .formStyle(.grouped)
+        .safeAreaInset(edge: .bottom) {
             HStack {
                 Button("Cancel") { dismiss() }
                 Spacer()
@@ -217,8 +223,8 @@ public struct WorkspaceEditorView: View {
                 .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 .keyboardShortcut(.defaultAction)
             }
+            .padding()
         }
-        .padding(20)
-        .frame(width: 380)
+        .frame(width: 400, height: 280)
     }
 }

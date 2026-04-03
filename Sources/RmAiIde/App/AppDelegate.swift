@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sessionService: SessionService?
     private var socketServer: SocketServer?
     private var issueTracker: IssueTracker?
+    private var notificationManager: NotificationManager?
     private var devRoot: String?
     private var appConfig: AppConfig?
 
@@ -155,6 +156,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await tracker?.markInReview(sessionID: id) }
         }
 
+        // Initialize notification manager
+        let notifManager = NotificationManager(appState: appState, settings: config.notifications)
+        self.notificationManager = notifManager
+
+        // Hydrate mute state from config and wire toggle
+        appState.soundMuted = config.notifications.globalMute
+        appState.onSoundMutedChanged = { [weak self] muted in
+            self?.appConfig?.notifications.globalMute = muted
+            if let settings = self?.appConfig?.notifications {
+                self?.notificationManager?.updateSettings(settings)
+            }
+            if let devRoot = self?.devRoot, let cfg = self?.appConfig {
+                try? ConfigStore.saveConfig(cfg, devRoot: devRoot)
+            }
+        }
+
         // Start socket server
         startSocketServer(store: store, devRoot: devRoot)
 
@@ -187,14 +204,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Settings
 
     private func setupMenu() {
-        // The Settings menu item is handled by the system when we implement
-        // the settings window. For now, we can add a manual menu item.
-        if let appMenu = NSApp.mainMenu?.item(at: 0)?.submenu {
-            let settingsItem = NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ",")
-            settingsItem.target = self
-            appMenu.insertItem(settingsItem, at: 2)
-            appMenu.insertItem(NSMenuItem.separator(), at: 3)
-        }
+        let mainMenu = NSMenu()
+
+        // App menu
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About Corveil AI IDE", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(NSMenuItem.separator())
+        let settingsItem = NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: "Hide Corveil AI IDE", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthersItem = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthersItem)
+        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: "Quit Corveil AI IDE", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+
+        NSApp.mainMenu = mainMenu
     }
 
     @objc private func showSettings() {
@@ -219,12 +250,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hostingView = NSHostingView(rootView: settingsView)
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 380),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 480),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
         win.title = "Settings"
+        win.appearance = NSAppearance(named: .darkAqua)
         win.contentView = hostingView
         win.center()
         win.makeKeyAndOrderFront(nil)
@@ -236,6 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.appConfig = config
         try? ConfigStore.saveDevRoot(devRoot)
         try? ConfigStore.saveConfig(config, devRoot: devRoot)
+        notificationManager?.updateSettings(config.notifications)
     }
 
     // MARK: - Socket Server
@@ -260,6 +293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startSocketServer(store: JSONStore, devRoot: String) {
         let capturedAppState = appState
         let capturedStore = store
+        let capturedNotifManager = notificationManager
 
         let router = CommandRouter(handlers: [
             "new-session": { @Sendable params in
@@ -679,6 +713,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
                         }
                     }
+
+                    // Trigger notification/sound for this event
+                    capturedNotifManager?.handleEvent(
+                        sessionID: sessionID,
+                        eventName: eventName,
+                        payload: payload,
+                        summary: summary
+                    )
 
                     return [
                         "received": .bool(true),

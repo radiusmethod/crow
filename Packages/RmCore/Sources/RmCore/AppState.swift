@@ -6,7 +6,9 @@ import Foundation
 public final class AppState {
     public var sessions: [Session] = []
     public var selectedSessionID: UUID?
-    public var isCreatingSession: Bool = false
+
+    /// Whether notification sounds are muted (toggled via sidebar speaker icon).
+    public var soundMuted: Bool = false
 
     /// Worktrees keyed by session ID.
     public var worktrees: [UUID: [SessionWorktree]] = [:]
@@ -95,6 +97,9 @@ public final class AppState {
 
     /// Called to open a terminal at a session's primary worktree path.
     public var onOpenTerminal: ((UUID) -> Void)?
+
+    /// Called when the sound mute toggle is changed.
+    public var onSoundMutedChanged: ((Bool) -> Void)?
 
     // MARK: - Computed Properties
 
