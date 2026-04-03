@@ -198,10 +198,7 @@ final class SessionService {
         appState.links.removeValue(forKey: id)
         appState.terminals.removeValue(forKey: id)
         appState.activeTerminalID.removeValue(forKey: id)
-        appState.hookEvents.removeValue(forKey: id)
-        appState.pendingNotification.removeValue(forKey: id)
-        appState.lastToolActivity.removeValue(forKey: id)
-        appState.claudeState.removeValue(forKey: id)
+        appState.removeHookState(for: id)
 
         store.mutate { data in
             data.sessions.removeAll { $0.id == id }

@@ -215,7 +215,7 @@ struct SessionRow: View {
     }
 
     private var claudeState: ClaudeState {
-        appState.claudeState[session.id] ?? .idle
+        appState.hookState(for: session.id).claudeState
     }
 
     /// Readiness of the primary terminal for this session.
@@ -274,7 +274,7 @@ struct SessionRow: View {
                     if let pr = prLink {
                         PRBadge(label: pr.label, status: prStatus)
                     }
-                    if claudeState != .idle || appState.pendingNotification[session.id] != nil {
+                    if claudeState != .idle || appState.hookState(for: session.id).pendingNotification != nil {
                         claudeStateBadge
                     }
                 }
@@ -359,8 +359,8 @@ struct SessionRow: View {
 
     @ViewBuilder
     private var claudeStateBadge: some View {
-        let activity = appState.lastToolActivity[session.id]
-        let notification = appState.pendingNotification[session.id]
+        let activity = appState.hookState(for: session.id).lastToolActivity
+        let notification = appState.hookState(for: session.id).pendingNotification
 
         if let notification {
             // Attention badges
@@ -411,7 +411,7 @@ struct SessionRow: View {
     }
 
     private var needsAttention: Bool {
-        appState.pendingNotification[session.id] != nil
+        appState.hookState(for: session.id).pendingNotification != nil
     }
 
     private var rowBackgroundColor: Color {

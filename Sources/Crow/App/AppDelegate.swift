@@ -625,18 +625,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
 
                 return await MainActor.run {
+                    let state = capturedAppState.hookState(for: sessionID)
+
                     // Append to ring buffer (keep last 50 events per session)
-                    var events = capturedAppState.hookEvents[sessionID, default: []]
-                    events.append(event)
-                    if events.count > 50 { events.removeFirst(events.count - 50) }
-                    capturedAppState.hookEvents[sessionID] = events
+                    state.hookEvents.append(event)
+                    if state.hookEvents.count > 50 { state.hookEvents.removeFirst(state.hookEvents.count - 50) }
 
                     // Update derived state based on event type.
                     // Clear pending notification on ANY event that indicates
                     // Claude moved past the waiting state (except Notification
                     // itself, which may SET the pending state).
                     if eventName != "Notification" && eventName != "PermissionRequest" {
-                        capturedAppState.pendingNotification.removeValue(forKey: sessionID)
+                        state.pendingNotification = nil
                     }
 
                     switch eventName {
@@ -644,28 +644,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         let toolName = payload["tool_name"]?.stringValue ?? "unknown"
                         if toolName == "AskUserQuestion" {
                             // Question for the user — set attention state
-                            capturedAppState.pendingNotification[sessionID] = HookNotification(
+                            state.pendingNotification = HookNotification(
                                 message: "Claude has a question",
                                 notificationType: "question"
                             )
-                            capturedAppState.claudeState[sessionID] = .waiting
-                            capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
+                            state.claudeState = .waiting
+                            state.lastToolActivity = nil
                         } else {
-                            capturedAppState.lastToolActivity[sessionID] = ToolActivity(
+                            state.lastToolActivity = ToolActivity(
                                 toolName: toolName, isActive: true
                             )
-                            capturedAppState.claudeState[sessionID] = .working
+                            state.claudeState = .working
                         }
 
                     case "PostToolUse":
                         let toolName = payload["tool_name"]?.stringValue ?? "unknown"
-                        capturedAppState.lastToolActivity[sessionID] = ToolActivity(
+                        state.lastToolActivity = ToolActivity(
                             toolName: toolName, isActive: false
                         )
 
                     case "PostToolUseFailure":
                         let toolName = payload["tool_name"]?.stringValue ?? "unknown"
-                        capturedAppState.lastToolActivity[sessionID] = ToolActivity(
+                        state.lastToolActivity = ToolActivity(
                             toolName: toolName, isActive: false
                         )
 
@@ -674,66 +674,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         let notifType = payload["notification_type"]?.stringValue ?? ""
                         if notifType == "permission_prompt" {
                             // Permission needed — show attention state
-                            capturedAppState.pendingNotification[sessionID] = HookNotification(
+                            state.pendingNotification = HookNotification(
                                 message: message, notificationType: notifType
                             )
-                            capturedAppState.claudeState[sessionID] = .waiting
+                            state.claudeState = .waiting
                         } else if notifType == "idle_prompt" {
                             // Claude is at the prompt — clear any stale permission notification
                             // but don't change claudeState (Stop already set it to .done)
-                            capturedAppState.pendingNotification.removeValue(forKey: sessionID)
+                            state.pendingNotification = nil
                         }
 
                     case "PermissionRequest":
                         // Don't override a "question" notification — AskUserQuestion
                         // triggers both PreToolUse and PermissionRequest, and the
                         // question badge is more specific than generic "Permission"
-                        if capturedAppState.pendingNotification[sessionID]?.notificationType != "question" {
-                            capturedAppState.pendingNotification[sessionID] = HookNotification(
+                        if state.pendingNotification?.notificationType != "question" {
+                            state.pendingNotification = HookNotification(
                                 message: "Permission requested",
                                 notificationType: "permission_prompt"
                             )
                         }
-                        capturedAppState.claudeState[sessionID] = .waiting
-                        capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
+                        state.claudeState = .waiting
+                        state.lastToolActivity = nil
 
                     case "UserPromptSubmit":
-                        capturedAppState.claudeState[sessionID] = .working
+                        state.claudeState = .working
 
                     case "Stop":
-                        capturedAppState.claudeState[sessionID] = .done
-                        capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
+                        state.claudeState = .done
+                        state.lastToolActivity = nil
 
                     case "StopFailure":
-                        capturedAppState.claudeState[sessionID] = .waiting
+                        state.claudeState = .waiting
 
                     case "SessionStart":
                         let source = payload["source"]?.stringValue ?? "startup"
                         if source == "resume" {
-                            capturedAppState.claudeState[sessionID] = .done
+                            state.claudeState = .done
                         } else {
-                            capturedAppState.claudeState[sessionID] = .idle
+                            state.claudeState = .idle
                         }
 
                     case "SessionEnd":
-                        capturedAppState.claudeState[sessionID] = .idle
-                        capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
+                        state.claudeState = .idle
+                        state.lastToolActivity = nil
 
                     case "SubagentStart":
-                        capturedAppState.claudeState[sessionID] = .working
+                        state.claudeState = .working
 
                     case "TaskCreated", "TaskCompleted", "SubagentStop":
                         // Stay in working state
-                        if capturedAppState.claudeState[sessionID] != .waiting {
-                            capturedAppState.claudeState[sessionID] = .working
+                        if state.claudeState != .waiting {
+                            state.claudeState = .working
                         }
 
                     default:
                         // PermissionDenied, PreCompact, PostCompact — state change
                         // handled by blanket notification clear above
                         if eventName == "PermissionDenied" {
-                            capturedAppState.claudeState[sessionID] = .working
-                            capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
+                            state.claudeState = .working
+                            state.lastToolActivity = nil
                         }
                     }
 

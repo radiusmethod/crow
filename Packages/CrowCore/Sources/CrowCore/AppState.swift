@@ -46,9 +46,6 @@ public final class AppState {
     /// Currently selected pipeline filter on the ticket board.
     public var selectedTicketStatus: TicketStatus = .inProgress
 
-    /// Claude Code state per session (idle, working, waiting, done).
-    public var claudeState: [UUID: ClaudeState] = [:]
-
     /// PR status per session (pipeline, review, merge readiness).
     public var prStatus: [UUID: PRStatus] = [:]
 
@@ -58,16 +55,26 @@ public final class AppState {
     /// Terminal readiness state per terminal ID.
     public var terminalReadiness: [UUID: TerminalReadiness] = [:]
 
-    // MARK: - Hook Events
+    // MARK: - Hook Events (per-session Observable wrappers)
 
-    /// Recent hook events per session (ring buffer, last 50 events).
-    public var hookEvents: [UUID: [HookEvent]] = [:]
+    /// Per-session hook state. Using @Observable class wrappers so mutations to one
+    /// session's state only invalidate views reading THAT session — not all sessions.
+    /// (Plain dictionaries with @Observable cause ALL readers to re-render on any key change.)
+    private var _sessionState: [UUID: SessionHookState] = [:]
 
-    /// Pending notification requiring user attention, per session.
-    public var pendingNotification: [UUID: HookNotification] = [:]
+    /// Get or create the hook state for a session. Views should hold the returned reference
+    /// to benefit from scoped observation.
+    public func hookState(for sessionID: UUID) -> SessionHookState {
+        if let existing = _sessionState[sessionID] { return existing }
+        let new = SessionHookState()
+        _sessionState[sessionID] = new
+        return new
+    }
 
-    /// Last tool activity per session (what Claude is currently doing).
-    public var lastToolActivity: [UUID: ToolActivity] = [:]
+    /// Remove hook state for a deleted session.
+    public func removeHookState(for sessionID: UUID) {
+        _sessionState.removeValue(forKey: sessionID)
+    }
 
     /// Called when user clicks "Work on" for an assigned issue.
     public var onWorkOnIssue: ((String) -> Void)?  // receives issue URL
@@ -157,6 +164,22 @@ public final class AppState {
     private func effectiveStatus(_ issue: AssignedIssue) -> TicketStatus {
         issue.projectStatus == .unknown ? .backlog : issue.projectStatus
     }
+
+    public init() {}
+}
+
+// MARK: - Per-Session Hook State
+
+/// Observable wrapper for per-session hook/Claude state.
+/// Using a reference-type @Observable class ensures that mutations to one session's
+/// state only invalidate views observing THAT session's instance — not all sessions.
+@MainActor
+@Observable
+public final class SessionHookState {
+    public var claudeState: ClaudeState = .idle
+    public var pendingNotification: HookNotification?
+    public var lastToolActivity: ToolActivity?
+    public var hookEvents: [HookEvent] = []
 
     public init() {}
 }
