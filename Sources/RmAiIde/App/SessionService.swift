@@ -578,4 +578,14 @@ final class SessionService {
         process.arguments = [wt.worktreePath]
         try? process.run()
     }
+
+    /// Open a terminal window at the primary worktree path for a session.
+    func openTerminal(sessionID: UUID) {
+        guard let wt = appState.primaryWorktree(for: sessionID) else { return }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-a", "Terminal", wt.worktreePath]
+        try? process.run()
+    }
 }

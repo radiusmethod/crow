@@ -128,6 +128,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             service?.openInVSCode(sessionID: sessionID)
         }
 
+        // Wire open terminal action
+        appState.onOpenTerminal = { [weak service] sessionID in
+            service?.openTerminal(sessionID: sessionID)
+        }
+
         // Wire "Work on" issue action — sends issue URL to Manager terminal
         appState.onWorkOnIssue = { [weak self] issueURL in
             guard let self, let managerTerminals = self.appState.terminals[AppState.managerSessionID],

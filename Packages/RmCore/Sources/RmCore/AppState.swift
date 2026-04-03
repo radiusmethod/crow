@@ -93,6 +93,9 @@ public final class AppState {
     /// Called to open a session's primary worktree in VS Code.
     public var onOpenInVSCode: ((UUID) -> Void)?
 
+    /// Called to open a terminal at a session's primary worktree path.
+    public var onOpenTerminal: ((UUID) -> Void)?
+
     // MARK: - Computed Properties
 
     public var selectedSession: Session? {
