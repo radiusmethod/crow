@@ -5,7 +5,7 @@ import RmIPC
 
 /// Manages sound playback and macOS notification center alerts for hook events.
 @MainActor
-final class NotificationManager {
+final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private let appState: AppState
     private var settings: NotificationSettings
     private var soundCache: [String: NSSound] = [:]
@@ -22,10 +22,27 @@ final class NotificationManager {
     init(appState: AppState, settings: NotificationSettings) {
         self.appState = appState
         self.settings = settings
+        super.init()
+
+        if Bundle.main.bundleIdentifier != nil {
+            UNUserNotificationCenter.current().delegate = self
+            requestNotificationPermission()
+        }
     }
 
     func updateSettings(_ settings: NotificationSettings) {
         self.settings = settings
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    /// Allow notifications to display even when the app is in the foreground.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound])
     }
 
     // MARK: - Event Handling
@@ -111,9 +128,9 @@ final class NotificationManager {
         guard !hasRequestedPermission else { return }
         guard Bundle.main.bundleIdentifier != nil else { return }
         hasRequestedPermission = true
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, error in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, error in
             if let error {
-                NSLog("Notification permission error: \(error)")
+                NSLog("[NotificationManager] Permission error: \(error)")
             }
         }
     }
@@ -124,9 +141,7 @@ final class NotificationManager {
         sessionID: UUID,
         eventName: String
     ) {
-        // UNUserNotificationCenter requires a valid app bundle
         guard Bundle.main.bundleIdentifier != nil else { return }
-        requestNotificationPermission()
 
         let content = UNMutableNotificationContent()
         content.title = title
@@ -139,7 +154,7 @@ final class NotificationManager {
 
         UNUserNotificationCenter.current().add(request) { error in
             if let error {
-                NSLog("Failed to post notification: \(error)")
+                NSLog("[NotificationManager] Failed to post notification: \(error)")
             }
         }
     }
