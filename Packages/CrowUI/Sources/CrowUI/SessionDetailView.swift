@@ -203,12 +203,22 @@ public struct SessionDetailView: View {
     @ViewBuilder
     private var terminalArea: some View {
         let sessionTerminals = appState.terminals(for: session.id)
+        let isManager = session.id == AppState.managerSessionID
         if sessionTerminals.isEmpty {
             TerminalSurfaceView(
                 terminalID: session.id,
                 workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path
             )
             .id(session.id)
+        } else if isManager {
+            // Manager session: single terminal, no tab bar
+            let terminal = sessionTerminals[0]
+            TerminalSurfaceView(
+                terminalID: terminal.id,
+                workingDirectory: terminal.cwd,
+                command: terminal.command
+            )
+            .id(terminal.id)
         } else {
             VStack(spacing: 0) {
                 TerminalTabBar(
