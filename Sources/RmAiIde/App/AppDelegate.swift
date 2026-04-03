@@ -10,6 +10,7 @@ import RmIPC
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var settingsWindow: NSWindow?
+    private var aboutWindow: NSWindow?
     private let appState = AppState()
     private var store: JSONStore?
     private var sessionService: SessionService?
@@ -209,7 +210,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // App menu
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About Corveil AI IDE", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "About Corveil AI IDE", action: #selector(showAbout), keyEquivalent: "")
+        appMenu.items.last?.target = self
         appMenu.addItem(NSMenuItem.separator())
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ",")
         settingsItem.target = self
@@ -226,6 +228,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appMenuItem)
 
         NSApp.mainMenu = mainMenu
+    }
+
+    @objc private func showAbout() {
+        if let existing = aboutWindow, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let hostingView = NSHostingView(rootView: AboutView())
+        let win = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 340),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        win.title = "About Corveil AI IDE"
+        win.appearance = NSAppearance(named: .darkAqua)
+        win.contentView = hostingView
+        win.center()
+        win.makeKeyAndOrderFront(nil)
+        self.aboutWindow = win
     }
 
     @objc private func showSettings() {
