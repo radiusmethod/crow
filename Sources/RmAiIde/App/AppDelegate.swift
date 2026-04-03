@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sessionService: SessionService?
     private var socketServer: SocketServer?
     private var issueTracker: IssueTracker?
+    private var notificationManager: NotificationManager?
     private var devRoot: String?
     private var appConfig: AppConfig?
 
@@ -155,6 +156,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await tracker?.markInReview(sessionID: id) }
         }
 
+        // Initialize notification manager
+        let notifManager = NotificationManager(appState: appState, settings: config.notifications)
+        self.notificationManager = notifManager
+
         // Start socket server
         startSocketServer(store: store, devRoot: devRoot)
 
@@ -236,6 +241,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.appConfig = config
         try? ConfigStore.saveDevRoot(devRoot)
         try? ConfigStore.saveConfig(config, devRoot: devRoot)
+        notificationManager?.updateSettings(config.notifications)
     }
 
     // MARK: - Socket Server
@@ -260,6 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startSocketServer(store: JSONStore, devRoot: String) {
         let capturedAppState = appState
         let capturedStore = store
+        let capturedNotifManager = notificationManager
 
         let router = CommandRouter(handlers: [
             "new-session": { @Sendable params in
@@ -679,6 +686,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             capturedAppState.lastToolActivity.removeValue(forKey: sessionID)
                         }
                     }
+
+                    // Trigger notification/sound for this event
+                    capturedNotifManager?.handleEvent(
+                        sessionID: sessionID,
+                        eventName: eventName,
+                        payload: payload,
+                        summary: summary
+                    )
 
                     return [
                         "received": .bool(true),

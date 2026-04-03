@@ -4,13 +4,27 @@ import Foundation
 public struct AppConfig: Codable, Sendable {
     public var workspaces: [WorkspaceInfo]
     public var defaults: ConfigDefaults
+    public var notifications: NotificationSettings
 
     public init(
         workspaces: [WorkspaceInfo] = [],
-        defaults: ConfigDefaults = ConfigDefaults()
+        defaults: ConfigDefaults = ConfigDefaults(),
+        notifications: NotificationSettings = NotificationSettings()
     ) {
         self.workspaces = workspaces
         self.defaults = defaults
+        self.notifications = notifications
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        workspaces = try container.decodeIfPresent([WorkspaceInfo].self, forKey: .workspaces) ?? []
+        defaults = try container.decodeIfPresent(ConfigDefaults.self, forKey: .defaults) ?? ConfigDefaults()
+        notifications = try container.decodeIfPresent(NotificationSettings.self, forKey: .notifications) ?? NotificationSettings()
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case workspaces, defaults, notifications
     }
 }
 

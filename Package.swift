@@ -43,6 +43,7 @@ let package = Package(
                 .linkedFramework("QuartzCore"),
                 .linkedFramework("CoreText"),
                 .linkedFramework("IOSurface"),
+                .linkedFramework("UserNotifications"),
                 .linkedLibrary("c++"),
                 .unsafeFlags(["-Xlinker", "-ld_classic"]),
             ]

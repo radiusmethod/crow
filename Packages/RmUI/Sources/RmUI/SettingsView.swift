@@ -26,8 +26,10 @@ public struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             workspacesTab
                 .tabItem { Label("Workspaces", systemImage: "rectangle.stack") }
+            NotificationSettingsView(settings: $config.notifications)
+                .tabItem { Label("Notifications", systemImage: "bell") }
         }
-        .frame(width: 520, height: 380)
+        .frame(width: 520, height: 480)
         .sheet(isPresented: $isAddingWorkspace) {
             WorkspaceEditorView(workspace: nil) { ws in
                 config.workspaces.append(ws)
