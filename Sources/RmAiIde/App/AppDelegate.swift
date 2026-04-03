@@ -102,6 +102,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         service.wireTerminalReadiness()
         self.sessionService = service
 
+        // Start activity intensity tracker for fire effect
+        let activityTracker = ActivityIntensityTracker(appState: appState)
+        appState.activityTracker = activityTracker
+        activityTracker.start()
+
         // Detect orphaned worktrees (runs async, updates UI when done)
         Task { await service.detectOrphanedWorktrees() }
 

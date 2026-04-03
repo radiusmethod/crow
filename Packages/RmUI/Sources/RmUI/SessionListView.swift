@@ -6,6 +6,7 @@ public struct SessionListView: View {
     @Bindable var appState: AppState
     @State private var searchText = ""
     @State private var sessionToDelete: Session?
+    @AppStorage("fireEffectEnabled") private var fireEnabled = true
 
     public init(appState: AppState) {
         self.appState = appState
@@ -14,7 +15,10 @@ public struct SessionListView: View {
     public var body: some View {
         List(selection: $appState.selectedSessionID) {
             // Brandmark header
-            SidebarBrandmark()
+            SidebarBrandmark(
+                intensity: appState.activityTracker?.intensity ?? 0.0,
+                fireEnabled: fireEnabled
+            )
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
 
@@ -130,14 +134,28 @@ public struct SessionListView: View {
 // MARK: - Sidebar Brandmark
 
 struct SidebarBrandmark: View {
+    var intensity: Double = 0.0
+    var fireEnabled: Bool = true
+
+    private let logoWidth: CGFloat = 120
+    private let effectSize = CGSize(width: 160, height: 110)
+
     var body: some View {
         VStack(spacing: 0) {
-            if let image = loadBrandmark() {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 120)
-                    .opacity(0.7)
+            ZStack {
+                if fireEnabled {
+                    FireEffectView(intensity: intensity, size: effectSize)
+                        .frame(width: effectSize.width, height: effectSize.height)
+                        .offset(y: 8) // flames rise from beneath logo
+                }
+
+                if let image = loadBrandmark() {
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: logoWidth)
+                        .opacity(0.7 + intensity * 0.2)
+                }
             }
         }
         .frame(maxWidth: .infinity)

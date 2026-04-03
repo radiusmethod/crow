@@ -7,6 +7,7 @@ public struct SettingsView: View {
     @State var config: AppConfig
     @State private var isAddingWorkspace = false
     @State private var editingWorkspace: WorkspaceInfo?
+    @AppStorage("fireEffectEnabled") private var fireEffectEnabled = true
 
     public var onSave: ((String, AppConfig) -> Void)?
     public var onRescaffold: ((String) -> Void)?
@@ -82,6 +83,10 @@ public struct SettingsView: View {
                 TextField("Branch Prefix", text: $config.defaults.branchPrefix)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { save() }
+            }
+
+            Section("Appearance") {
+                Toggle("Show fire effect behind logo", isOn: $fireEffectEnabled)
             }
         }
         .formStyle(.grouped)

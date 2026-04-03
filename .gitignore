@@ -10,9 +10,8 @@ xcuserdata/
 *.app
 *.dmg
 
-# Frameworks (built locally)
-Frameworks/GhosttyKit.xcframework/
-Frameworks/ghostty-resources/
+# Frameworks (built locally or symlinked from main repo)
+Frameworks/
 
 # IDE
 .swiftpm/

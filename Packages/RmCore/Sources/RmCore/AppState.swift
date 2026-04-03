@@ -69,6 +69,9 @@ public final class AppState {
     /// Last tool activity per session (what Claude is currently doing).
     public var lastToolActivity: [UUID: ToolActivity] = [:]
 
+    /// Tracks aggregate session activity intensity for the fire effect.
+    public var activityTracker: ActivityIntensityTracker?
+
     /// Called when user clicks "Work on" for an assigned issue.
     public var onWorkOnIssue: ((String) -> Void)?  // receives issue URL
 

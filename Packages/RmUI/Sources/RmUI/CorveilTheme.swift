@@ -11,6 +11,12 @@ enum CorveilTheme {
     static let gold = Color(hex: 0xDDC482)
     static let goldDark = Color(hex: 0xB38E46)
 
+    // Fire effect palette
+    static let fireCore = Color(hex: 0xFFE4B5)
+    static let fireOrange = Color(hex: 0xE8943A)
+    static let fireDeep = Color(hex: 0xCC5500)
+    static let fireEmber = Color(hex: 0x8B2500)
+
     // Borders
     static let borderSubtle = Color(hex: 0xDDC482, opacity: 0.12)
     static let borderStrong = Color(hex: 0xDDC482, opacity: 0.25)
