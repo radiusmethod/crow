@@ -104,7 +104,9 @@ final class SessionService {
 
     func ensureManagerSession(devRoot: String) {
         let managerID = AppState.managerSessionID
-        if !appState.sessions.contains(where: { $0.id == managerID }) {
+        let isFirstLaunch = !appState.sessions.contains(where: { $0.id == managerID })
+
+        if isFirstLaunch {
             let manager = Session(
                 id: managerID,
                 name: "Manager",
@@ -117,6 +119,9 @@ final class SessionService {
                     data.sessions.insert(manager, at: 0)
                 }
             }
+
+            // Auto-select Manager only on first launch
+            appState.selectedSessionID = managerID
         }
 
         // Ensure manager has a terminal
@@ -136,10 +141,6 @@ final class SessionService {
                     data.terminals.append(terminal)
                 }
             }
-        }
-
-        if appState.selectedSessionID == nil {
-            appState.selectedSessionID = managerID
         }
     }
 
@@ -297,6 +298,9 @@ final class SessionService {
         guard let devRoot = ConfigStore.loadDevRoot(),
               let config = ConfigStore.loadConfig(devRoot: devRoot) else { return }
 
+        // Save current selection so orphan mutations don't reset it
+        let savedSelection = appState.selectedSessionID
+
         // Collect all known worktree paths from the store
         let knownPaths = Set(
             appState.worktrees.values.flatMap { $0 }
@@ -344,6 +348,11 @@ final class SessionService {
                     await recoverOrphan(worktreePath: wt.path, branch: wt.branch, repoName: repoDir, repoPath: repoPath, workspace: wsDir)
                 }
             }
+        }
+
+        // Restore selection if orphan mutations reset it
+        if savedSelection != nil && appState.selectedSessionID != savedSelection {
+            appState.selectedSessionID = savedSelection
         }
     }
 
