@@ -296,6 +296,26 @@ struct Setup: ParsableCommand {
     func run() throws {
         print("Welcome to Crow setup.\n")
 
+        // Check for runtime dependencies
+        let tools: [(name: String, install: String)] = [
+            ("git", "xcode-select --install"),
+            ("gh", "brew install gh"),
+            ("claude", "https://claude.ai/download"),
+        ]
+        for tool in tools {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+            proc.arguments = [tool.name]
+            proc.standardOutput = FileHandle.nullDevice
+            proc.standardError = FileHandle.nullDevice
+            try? proc.run()
+            proc.waitUntilExit()
+            if proc.terminationStatus != 0 {
+                print("  WARNING: \(tool.name) not found. Install: \(tool.install)")
+            }
+        }
+        print()
+
         // Determine devRoot
         let root: String
         if let devRoot {
@@ -387,7 +407,11 @@ struct Setup: ParsableCommand {
 
         print("Configuration saved to: \(configPath)")
         print("Workspace scaffolded at: \(claudeDir)/")
-        print("\nLaunch Crow to get started.")
+        print()
+        print("Next steps:")
+        print("  1. Build:  make build")
+        print("  2. Launch: .build/debug/CrowApp")
+        print("  3. CLI:    crow --help")
     }
 }
 

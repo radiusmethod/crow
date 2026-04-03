@@ -1,4 +1,4 @@
-.PHONY: build setup ghostty app release clean clean-all help
+.PHONY: build setup ghostty app release clean clean-all check help
 
 FRAMEWORKS_DIR := Frameworks
 XCFW := $(FRAMEWORKS_DIR)/GhosttyKit.xcframework
@@ -12,7 +12,8 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  build      Full build: submodules + ghostty + swift build (default)"
-	@echo "  setup      Init submodules and check prerequisites"
+	@echo "  setup      Init submodules and check build prerequisites"
+	@echo "  check      Verify all build and runtime prerequisites"
 	@echo "  ghostty    Build GhosttyKit framework"
 	@echo "  app        Swift build only (debug)"
 	@echo "  release    Release build + .app bundle"
@@ -59,3 +60,10 @@ clean:
 
 clean-all: clean
 	rm -rf $(FRAMEWORKS_DIR)
+
+# --- Check ---
+
+check: setup
+	@command -v gh >/dev/null 2>&1 || echo "WARNING: gh (GitHub CLI) not found. Install with: brew install gh"
+	@command -v claude >/dev/null 2>&1 || echo "WARNING: claude (Claude Code) not found. Install from: https://claude.ai/download"
+	@echo "All checks complete."

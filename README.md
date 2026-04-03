@@ -50,6 +50,12 @@ gh auth refresh -s read:project   # Required for project board status
 
 On first launch, a setup wizard guides you through choosing your development root directory and configuring workspaces.
 
+Alternatively, configure via the CLI without launching the GUI:
+
+```bash
+.build/debug/crow setup
+```
+
 ## Detailed Setup
 
 ### 1. Clone the Repository
@@ -274,6 +280,14 @@ The app expects repos organized under workspace folders:
 
 Worktrees are created at the same level as the main repo, **not** in subdirectories.
 
+## Environment Variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `CROW_SOCKET` | Override the Unix socket path for CLI ↔ App IPC | `~/.local/share/crow/crow.sock` |
+| `TMPDIR` | Temporary file directory (used by the terminal subsystem) | System default |
+| `GITLAB_HOST` | GitLab instance hostname (set automatically per workspace config) | — |
+
 ## Usage
 
 ### The Sidebar
@@ -333,7 +347,7 @@ crow rename-session --session <uuid> "new-name"
 crow select-session --session <uuid>
 crow list-sessions
 crow get-session --session <uuid>
-crow set-status --session <uuid> active|completed|archived
+crow set-status --session <uuid> active|paused|inReview|completed|archived
 crow delete-session --session <uuid>
 ```
 
@@ -353,7 +367,6 @@ crow add-worktree --session <uuid> \
   --repo-path "/path/to/main/repo" \
   --path "/path/to/worktree" \
   --branch "feature/name" \
-  [--workspace "WorkspaceName"] \
   [--primary]
 crow list-worktrees --session <uuid>
 ```
@@ -403,6 +416,14 @@ All commands return JSON. The `crow send` command converts `\n` in the text to E
 2. Add it to the root `Package.swift` dependencies and target
 3. Import in the targets that need it
 
+### Testing
+
+```bash
+swift test        # or: mise test
+```
+
+Tests use the [Swift Testing](https://developer.apple.com/documentation/testing/) framework (`@Test` macros). Test files are under `Packages/*/Tests/`.
+
 ### Debugging
 
 The app logs diagnostic information to stderr:
@@ -417,6 +438,31 @@ Run with log filtering:
 .build/debug/CrowApp 2>&1 | grep "\[TerminalManager\]\|\[SessionService\]"
 ```
 
+## Troubleshooting
+
+### Build Issues
+
+| Problem | Solution |
+|---------|----------|
+| `zig` not found | Install with `brew install zig` or from [ziglang.org](https://ziglang.org/download/) |
+| Zig version mismatch | Version 0.15.2 is required. Check with `zig version` |
+| Metal toolchain not found | Run `xcodebuild -downloadComponent MetalToolchain` |
+| Ghostty submodule missing | Run `git submodule update --init vendor/ghostty` |
+| Swift build fails with linker errors | Ensure GhosttyKit is built first: `./scripts/build-ghostty.sh` |
+
+### Runtime Issues
+
+| Problem | Solution |
+|---------|----------|
+| `crow` CLI: "Connection refused" | The Crow app must be running — the CLI communicates via Unix socket |
+| GitHub API errors / empty responses | Check auth: `gh auth status`. Add project scope: `gh auth refresh -s read:project` |
+| Terminal not starting | Check stderr logs for `[TerminalManager]` or `[Ghostty]` messages |
+| Issue tracker shows no tickets | Verify `gh auth status` shows `repo`, `read:org`, `read:project` scopes |
+
+## Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on reporting bugs, suggesting features, and submitting pull requests.
+
 ## License
 
-Proprietary — Radius Method, Inc.
+Apache 2.0 — see [LICENSE](LICENSE) for details.

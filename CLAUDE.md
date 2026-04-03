@@ -1,10 +1,13 @@
+<!-- This file is both repo documentation and Manager tab context.
+     Crow scaffolds it into {devRoot}/.claude/CLAUDE.md on launch (see Scaffolder.swift). -->
+
 # Crow — Manager Context
 
 This is the development root managed by Crow. The Manager tab runs Claude Code here to orchestrate work sessions via the `crow` CLI.
 
 ## crow CLI Reference
 
-The `crow` CLI communicates with the Crow app via Unix socket at `~/.local/share/crow/crow.sock`. The app must be running for commands to work. **All `crow` commands require `dangerouslyDisableSandbox: true`** and return JSON.
+The `crow` CLI communicates with the Crow app via Unix socket at `~/.local/share/crow/crow.sock`. The app must be running for commands to work. **All `crow`, `gh`, and `glab` commands require `dangerouslyDisableSandbox: true`** and return JSON.
 
 ### Session Commands
 ```
@@ -13,7 +16,7 @@ crow rename-session --session <uuid> "new-name" → {"session_id":"...","name":"
 crow select-session --session <uuid>            → {"session_id":"..."}
 crow list-sessions                              → {"sessions":[...]}
 crow get-session --session <uuid>               → {id, name, status, ticket_url, ...}
-crow set-status --session <uuid> active|completed|archived
+crow set-status --session <uuid> active|paused|inReview|completed|archived
 crow delete-session --session <uuid>            → {"deleted":true}
 ```
 
@@ -47,48 +50,7 @@ The `crow send` command writes text to the terminal. Newlines in the text are co
 - Use `/crow-workspace` skill for full workspace setup (worktrees + session + Claude Code)
 - **Worktree paths go DIRECTLY under the workspace folder**: `{devRoot}/{workspace}/{repo}-{number}-{slug}` — NOT in a subfolder
 - The prompt for new Claude Code sessions must start with `/plan` to enter plan mode
-
-## Sandbox & Network — CRITICAL
-
-### All `crow` and `gh`/`glab` commands MUST use `dangerouslyDisableSandbox: true`
-
-The sandbox blocks:
-- Unix socket communication (`crow` commands)
-- Network/TLS access (`gh`, `glab`, `curl`)
-- Writing to `/tmp` (use `$TMPDIR` instead, which is sandbox-writable)
-
-**ALWAYS use `dangerouslyDisableSandbox: true` for these commands. Do NOT attempt them sandboxed first — they will always fail.**
-
-### GitHub CLI (gh) — TLS Certificate Errors
-
-The `gh` CLI fails with TLS certificate errors in sandbox mode:
-```
-Post "https://api.github.com/graphql": tls: failed to verify certificate: x509: OSStatus -26276
-```
-
-**Fix:** Always use `dangerouslyDisableSandbox: true` for ALL `gh` commands. There is no workaround.
-
-If `gh` still fails or returns empty output:
-1. Use `--repo owner/repo` explicitly instead of relying on git remote detection
-2. Use full URL: `gh issue view https://github.com/owner/repo/issues/123` not just the number
-
-### GitLab CLI (glab)
-
-Same TLS issue. Always use `dangerouslyDisableSandbox: true` and set `GITLAB_HOST`:
-```bash
-GITLAB_HOST=gitlab.example.com glab issue view {number} --repo {org/repo}
-```
-
-## File System Rules
-
-### Temporary Files
-- **DO NOT** write to `/tmp` — it's blocked by sandbox
-- **USE** `$TMPDIR` for temporary files (e.g., prompt files)
-- Example: `cat > $TMPDIR/crow-prompt-feature.md << 'EOF' ... EOF`
-
-### Write-Before-Read Rule
-- You must Read a file before you can Write/Edit it (Claude Code requirement)
-- If creating a new file, just use Write directly
+- Use `$TMPDIR` (not `/tmp`) for temporary files
 
 ## Git Worktree Best Practices
 
@@ -117,22 +79,6 @@ Prevents accidental push to main:
 git worktree add /path -b feature/name --no-track origin/main
 ```
 
-## Claude Binary Path
-
-The CMUX app installs a `claude` wrapper at `/Applications/cmux.app/Contents/Resources/bin/claude` that breaks when called from outside CMUX. Always use the real binary:
-
-```bash
-# Find the real claude binary:
-which -a claude | grep -v cmux | head -1
-# Common location: ~/.local/bin/claude
-```
-
-When using `crow new-terminal --command`, the app automatically resolves `claude` to the full path. But for `crow send`, use the full path explicitly.
-
 ## Known Issues / Corrections
 
-- Worktree path must be at `{devRoot}/{workspace}/{repo}-{feature}`, NOT in a subdirectory
-- Use full claude binary path (find with `which -a claude | grep -v cmux | head -1`), not just `claude`
-- All `gh`/`glab` commands fail without `dangerouslyDisableSandbox: true` — never try sandboxed first
-- Write temp files to `$TMPDIR`, not `/tmp`
-- When `gh issue view` returns empty, add `--repo owner/repo` explicitly
+<!-- Auto-maintained by Claude Code during workspace setup -->

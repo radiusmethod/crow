@@ -4,11 +4,9 @@
 
 Orchestrates work sessions in **Crow** by setting up git worktrees and creating a crow session with auto-launched Claude Code and ticket metadata. Supports multiple organizations/workspaces with different Git providers.
 
-This skill targets Crow's `crow` CLI. The original `/workspace` skill targeting CMUX remains unchanged and both can run in parallel.
-
 ## Important: Sandbox Bypass
 
-All `crow` CLI commands require `dangerouslyDisableSandbox: true` because they communicate via Unix socket at `~/.local/share/crow/crow.sock`.
+All `crow`, `gh`, and `glab` commands require `dangerouslyDisableSandbox: true` because they communicate via Unix socket or need network/TLS access.
 
 ## Activation
 
@@ -18,7 +16,7 @@ This skill activates when:
 
 ## Configuration
 
-Configuration in `~/.claude/workspace-repos.json` (shared with the CMUX workspace skill):
+Configuration is at `{devRoot}/.claude/config.json` (managed by the Crow app). The format is:
 
 ```json
 {
