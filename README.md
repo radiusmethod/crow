@@ -116,10 +116,10 @@ Verify with: `gh auth status`
 
 ### 5. GitLab Authentication (Optional)
 
-For GitLab repositories (e.g., Platform One):
+For self-hosted GitLab instances:
 
 ```bash
-glab auth login --hostname repo1.dso.mil
+glab auth login --hostname gitlab.example.com
 ```
 
 ### 6. First Launch
@@ -242,10 +242,10 @@ User invokes /ride-workspace in Manager tab
     },
     {
       "id": "uuid",
-      "name": "PlatformOne",
+      "name": "MyGitLab",
       "provider": "gitlab",
       "cli": "glab",
-      "host": "repo1.dso.mil"
+      "host": "gitlab.example.com"
     }
   ],
   "defaults": {
@@ -267,8 +267,8 @@ The app expects repos organized under workspace folders:
 │   ├── citadel/                # Main repo checkout
 │   ├── citadel-134-sensor/     # Worktree for issue #134
 │   └── citadel-209-review/     # Worktree for issue #209
-└── PlatformOne/                # Workspace (GitLab)
-    ├── bigbang/
+└── MyGitLab/                # Workspace (GitLab)
+    ├── my-project/
     └── overrides/
 ```
 

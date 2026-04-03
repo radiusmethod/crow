@@ -20,7 +20,7 @@ public struct WorkspaceInfo: Identifiable, Codable, Sendable {
     public var name: String
     public var provider: String       // "github" or "gitlab"
     public var cli: String            // "gh" or "glab"
-    public var host: String?          // GitLab host (e.g., "repo1.dso.mil")
+    public var host: String?          // GitLab host (e.g., "gitlab.example.com")
     public var alwaysInclude: [String] // repos to always list in prompt table
 
     public init(

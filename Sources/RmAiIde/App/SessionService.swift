@@ -24,11 +24,7 @@ final class SessionService {
         // Backfill provider from ticketURL for sessions that predate provider tracking
         for i in appState.sessions.indices {
             if appState.sessions[i].provider == nil, let url = appState.sessions[i].ticketURL {
-                if url.contains("github.com") {
-                    appState.sessions[i].provider = .github
-                } else if url.contains("gitlab.com") || url.contains("repo1.dso.mil") || url.contains("code.il2.dso.mil") {
-                    appState.sessions[i].provider = .gitlab
-                }
+                appState.sessions[i].provider = Self.detectProviderFromURL(url)
             }
         }
 
@@ -214,6 +210,18 @@ final class SessionService {
         if appState.selectedSessionID == id {
             appState.selectedSessionID = appState.sessions.first?.id
         }
+    }
+
+    // MARK: - Provider Detection
+
+    /// Detect provider from a ticket URL without hardcoding specific hosts.
+    static func detectProviderFromURL(_ url: String) -> Provider? {
+        if url.contains("github.com") {
+            return .github
+        } else if url.contains("gitlab.com") || url.contains("gitlab") || url.contains("/-/issues") || url.contains("/-/merge_requests") {
+            return .gitlab
+        }
+        return nil
     }
 
     // MARK: - Worktree Safety Checks

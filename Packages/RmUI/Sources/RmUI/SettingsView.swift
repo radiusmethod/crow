@@ -187,7 +187,7 @@ public struct WorkspaceEditorView: View {
             .pickerStyle(.segmented)
 
             if provider == "gitlab" {
-                TextField("GitLab host (e.g., repo1.dso.mil)", text: $host)
+                TextField("GitLab host (e.g., gitlab.example.com)", text: $host)
                     .textFieldStyle(.roundedBorder)
             }
 

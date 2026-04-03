@@ -55,15 +55,20 @@ public actor ClaudeLauncher {
         let tmpDir = FileManager.default.temporaryDirectory
         let promptPath = tmpDir.appendingPathComponent("rmide-\(sessionID.uuidString)-prompt.md")
         try prompt.write(to: promptPath, atomically: true, encoding: .utf8)
-        return "cd \(worktreePath) && claude \"$(cat \(promptPath.path))\"\n"
+        // Restrict prompt file to owner-only access
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600], ofItemAtPath: promptPath.path)
+        return "cd \(Self.shellEscape(worktreePath)) && claude \"$(cat \(Self.shellEscape(promptPath.path)))\"\n"
+    }
+
+    /// Escape a string for safe inclusion in a shell command by wrapping in single quotes.
+    private static func shellEscape(_ str: String) -> String {
+        // Replace each single quote with: end-quote, escaped-quote, start-quote
+        let escaped = str.replacingOccurrences(of: "'", with: "'\\''")
+        return "'\(escaped)'"
     }
 
     private func descriptionFor(_ repoName: String) -> String {
-        switch repoName {
-        case "bigbang": "Umbrella Helm chart that loads in specific product packages"
-        case "overrides": "Helm install overrides used for testing; create overrides here when testing changes"
-        case "codename-spotlight": "Infrastructure monorepo containing Citadel, SocketZero, and related services"
-        default: ""
-        }
+        ""
     }
 }

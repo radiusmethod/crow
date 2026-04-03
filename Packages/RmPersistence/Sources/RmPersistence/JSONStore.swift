@@ -77,6 +77,9 @@ public final class JSONStore: Sendable {
         }
         do {
             try jsonData.write(to: url, options: .atomic)
+            // Restrict store file to owner-only access
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: url.path)
         } catch {
             NSLog("[JSONStore] ERROR: Failed to write store.json: \(error.localizedDescription)")
         }
