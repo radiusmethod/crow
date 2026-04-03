@@ -143,6 +143,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tracker.start()
         self.issueTracker = tracker
 
+        appState.onMarkInReview = { [weak tracker] id in
+            Task { await tracker?.markInReview(sessionID: id) }
+        }
+
         // Start socket server
         startSocketServer(store: store, devRoot: devRoot)
 

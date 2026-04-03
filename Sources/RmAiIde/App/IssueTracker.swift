@@ -510,6 +510,157 @@ final class IssueTracker {
         }
     }
 
+    // MARK: - Mark In Review
+
+    func markInReview(sessionID: UUID) async {
+        guard let session = appState.sessions.first(where: { $0.id == sessionID }),
+              let ticketURL = session.ticketURL,
+              session.provider == .github else { return }
+
+        // Parse owner/repo/number from URL like "https://github.com/org/repo/issues/123"
+        let components = ticketURL.split(separator: "/")
+        guard components.count >= 5,
+              let number = Int(components.last ?? "") else {
+            print("[IssueTracker] Could not parse ticket URL: \(ticketURL)")
+            return
+        }
+        let owner = String(components[components.count - 4])
+        let repoName = String(components[components.count - 3])
+
+        appState.isMarkingInReview[sessionID] = true
+        defer { appState.isMarkingInReview[sessionID] = false }
+
+        // Step 1: Query for project item ID, project ID, field ID, and "In Review" option ID
+        let query = """
+        query($owner: String!, $repo: String!, $number: Int!) {
+          repository(owner: $owner, name: $repo) {
+            issue(number: $number) {
+              projectItems(first: 10) {
+                nodes {
+                  id
+                  project { id }
+                  fieldValueByName(name: "Status") {
+                    ... on ProjectV2ItemFieldSingleSelectValue {
+                      name
+                      field {
+                        ... on ProjectV2SingleSelectField {
+                          id
+                          options { id name }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+
+        let queryResult = await shellWithStatus(
+            "gh", "api", "graphql",
+            "-f", "query=\(query)",
+            "-F", "owner=\(owner)",
+            "-F", "repo=\(repoName)",
+            "-F", "number=\(number)"
+        )
+
+        if queryResult.exitCode != 0 {
+            if queryResult.stderr.contains("INSUFFICIENT_SCOPES") || queryResult.stderr.contains("read:project") || queryResult.stderr.contains("project") {
+                print("[IssueTracker] GitHub token missing 'project' scope — run 'gh auth refresh -s project'")
+            } else {
+                print("[IssueTracker] GraphQL query failed: \(queryResult.stderr.prefix(200))")
+            }
+            return
+        }
+
+        // Parse the query response
+        guard let data = queryResult.stdout.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let dataObj = json["data"] as? [String: Any],
+              let repository = dataObj["repository"] as? [String: Any],
+              let issueObj = repository["issue"] as? [String: Any],
+              let projectItems = issueObj["projectItems"] as? [String: Any],
+              let nodes = projectItems["nodes"] as? [[String: Any]],
+              !nodes.isEmpty else {
+            print("[IssueTracker] Issue \(owner)/\(repoName)#\(number) is not in any GitHub Project")
+            return
+        }
+
+        // Find a project item that has a Status field with an "In Review" option
+        var itemID: String?
+        var projectID: String?
+        var fieldID: String?
+        var optionID: String?
+
+        for node in nodes {
+            guard let nodeID = node["id"] as? String,
+                  let project = node["project"] as? [String: Any],
+                  let projID = project["id"] as? String,
+                  let fieldValue = node["fieldValueByName"] as? [String: Any],
+                  let field = fieldValue["field"] as? [String: Any],
+                  let fID = field["id"] as? String,
+                  let options = field["options"] as? [[String: Any]] else { continue }
+
+            // Find the "In Review" option (case-insensitive)
+            for option in options {
+                guard let optName = option["name"] as? String,
+                      let optID = option["id"] as? String else { continue }
+                let normalized = optName.lowercased().trimmingCharacters(in: .whitespaces)
+                if normalized == "in review" || normalized == "review" {
+                    itemID = nodeID
+                    projectID = projID
+                    fieldID = fID
+                    optionID = optID
+                    break
+                }
+            }
+            if optionID != nil { break }
+        }
+
+        guard let itemID, let projectID, let fieldID, let optionID else {
+            print("[IssueTracker] No 'In Review' status option found in project for \(owner)/\(repoName)#\(number)")
+            return
+        }
+
+        // Step 2: Mutation to update the status
+        let mutation = """
+        mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+          updateProjectV2ItemFieldValue(input: {
+            projectId: $projectId, itemId: $itemId, fieldId: $fieldId,
+            value: { singleSelectOptionId: $optionId }
+          }) { projectV2Item { id } }
+        }
+        """
+
+        let mutationResult = await shellWithStatus(
+            "gh", "api", "graphql",
+            "-f", "query=\(mutation)",
+            "-F", "projectId=\(projectID)",
+            "-F", "itemId=\(itemID)",
+            "-F", "fieldId=\(fieldID)",
+            "-F", "optionId=\(optionID)"
+        )
+
+        if mutationResult.exitCode != 0 {
+            if mutationResult.stderr.contains("INSUFFICIENT_SCOPES") {
+                print("[IssueTracker] GitHub token missing 'project' scope — run 'gh auth refresh -s project'")
+            } else {
+                print("[IssueTracker] Failed to update project status: \(mutationResult.stderr.prefix(200))")
+            }
+            return
+        }
+
+        // Update local state
+        if let idx = appState.assignedIssues.firstIndex(where: {
+            $0.repo == "\(owner)/\(repoName)" && $0.number == number
+        }) {
+            appState.assignedIssues[idx].projectStatus = .inReview
+        }
+
+        print("[IssueTracker] Marked \(owner)/\(repoName)#\(number) as In Review")
+    }
+
     // MARK: - Shell
 
     private func shell(env: [String: String] = [:], _ args: String...) async throws -> String {

@@ -83,6 +83,17 @@ public struct SessionListView: View {
 
     @ViewBuilder
     private func sessionContextMenu(_ session: Session) -> some View {
+        if session.status == .active,
+           session.ticketURL != nil,
+           session.provider == .github {
+            Button {
+                appState.onMarkInReview?(session.id)
+            } label: {
+                Label("Mark as In Review", systemImage: "eye.circle")
+            }
+            .disabled(appState.isMarkingInReview[session.id] == true)
+        }
+
         if session.status == .active {
             Button {
                 appState.onCompleteSession?(session.id)
