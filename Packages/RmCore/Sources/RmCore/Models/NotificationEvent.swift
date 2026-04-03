@@ -30,7 +30,7 @@ public enum NotificationEvent: String, Codable, Sendable, CaseIterable, Identifi
     public var defaultSound: String {
         switch self {
         case .taskComplete: "Glass"
-        case .agentWaiting: "Ping"
+        case .agentWaiting: "Funk"
         case .sessionError: "Basso"
         case .sessionLifecycle: "Pop"
         }
