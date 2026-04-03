@@ -45,9 +45,11 @@ ghostty: setup $(XCFW)
 # --- App ---
 
 app: $(XCFW)
+	bash scripts/generate-build-info.sh
 	swift build
 
 release: $(XCFW)
+	bash scripts/generate-build-info.sh
 	bash scripts/bundle.sh
 
 # --- Clean ---

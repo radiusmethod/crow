@@ -8,6 +8,9 @@ BUILD_DIR="$ROOT_DIR/.build/release"
 APP_DIR="$ROOT_DIR/RmAiIde.app"
 FRAMEWORKS_DIR="$ROOT_DIR/Frameworks"
 
+echo "==> Generating build info..."
+bash "$SCRIPT_DIR/generate-build-info.sh"
+
 echo "==> Building release..."
 cd "$ROOT_DIR"
 swift build -c release

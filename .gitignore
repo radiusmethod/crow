@@ -6,6 +6,9 @@ DerivedData/
 *.xcworkspace
 xcuserdata/
 
+# Generated sources
+Sources/RmAiIde/Generated/
+
 # App bundle
 *.app
 *.dmg
