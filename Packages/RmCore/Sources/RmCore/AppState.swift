@@ -81,6 +81,15 @@ public final class AppState {
     /// Called to mark a session as completed.
     public var onCompleteSession: ((UUID) -> Void)?
 
+    /// Called to mark a session's ticket as "In Review" on the GitHub Project board.
+    public var onMarkInReview: ((UUID) -> Void)?
+
+    /// Called to update session status to .inReview (persists to store).
+    public var onSetSessionInReview: ((UUID) -> Void)?
+
+    /// Whether a given session is currently being marked as "In Review" (loading state).
+    public var isMarkingInReview: [UUID: Bool] = [:]
+
     /// Called to open a session's primary worktree in VS Code.
     public var onOpenInVSCode: ((UUID) -> Void)?
 
@@ -93,6 +102,10 @@ public final class AppState {
 
     public var activeSessions: [Session] {
         sessions.filter { $0.status == .active && $0.id != Self.managerSessionID }
+    }
+
+    public var inReviewSessions: [Session] {
+        sessions.filter { $0.status == .inReview && $0.id != Self.managerSessionID }
     }
 
     public var completedSessions: [Session] {

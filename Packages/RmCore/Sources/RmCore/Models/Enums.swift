@@ -4,6 +4,7 @@ import Foundation
 public enum SessionStatus: String, Codable, Sendable {
     case active
     case paused
+    case inReview
     case completed
     case archived
 }

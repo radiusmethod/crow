@@ -121,7 +121,27 @@ public struct SessionDetailView: View {
                         .tint(CorveilTheme.gold)
                     }
 
-                    if session.status == .active {
+                    if session.status == .active,
+                       session.ticketURL != nil,
+                       session.provider == .github {
+                        if appState.isMarkingInReview[session.id] == true {
+                            ProgressView()
+                                .controlSize(.small)
+                                .padding(.horizontal, 8)
+                        } else {
+                            Button {
+                                appState.onMarkInReview?(session.id)
+                            } label: {
+                                Label("In Review", systemImage: "eye.circle")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .tint(CorveilTheme.gold)
+                        }
+                    }
+
+                    if session.status == .active || session.status == .inReview {
                         Button {
                             appState.onCompleteSession?(session.id)
                         } label: {
@@ -275,6 +295,7 @@ struct StatusBadge: View {
         switch status {
         case .active: .green
         case .paused: .yellow
+        case .inReview: CorveilTheme.gold
         case .completed: CorveilTheme.gold
         case .archived: CorveilTheme.textMuted
         }

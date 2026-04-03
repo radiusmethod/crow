@@ -501,6 +501,22 @@ final class SessionService {
         }
     }
 
+    func setSessionInReview(id: UUID) {
+        guard id != AppState.managerSessionID else { return }
+
+        if let idx = appState.sessions.firstIndex(where: { $0.id == id }) {
+            appState.sessions[idx].status = .inReview
+            appState.sessions[idx].updatedAt = Date()
+        }
+
+        store.mutate { data in
+            if let idx = data.sessions.firstIndex(where: { $0.id == id }) {
+                data.sessions[idx].status = .inReview
+                data.sessions[idx].updatedAt = Date()
+            }
+        }
+    }
+
     // MARK: - Persist Current State
 
     func persistState() {

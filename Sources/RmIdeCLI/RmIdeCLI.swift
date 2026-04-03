@@ -104,7 +104,7 @@ struct GetSession: ParsableCommand {
 struct SetStatus: ParsableCommand {
     static let configuration = CommandConfiguration(commandName: "set-status", abstract: "Set session status")
     @Option(name: .long, help: "Session UUID") var session: String
-    @Argument(help: "Status: active, paused, completed, archived") var status: String
+    @Argument(help: "Status: active, paused, inReview, completed, archived") var status: String
 
     func run() throws {
         let result = try rpc("set-status", params: ["session_id": .string(session), "status": .string(status)])

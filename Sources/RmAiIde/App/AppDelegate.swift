@@ -114,6 +114,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.onCompleteSession = { [weak service] id in
             service?.completeSession(id: id)
         }
+        appState.onSetSessionInReview = { [weak service] id in
+            service?.setSessionInReview(id: id)
+        }
 
         appState.onLaunchClaude = { [weak service] terminalID in
             service?.launchClaude(terminalID: terminalID)
@@ -142,6 +145,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let tracker = IssueTracker(appState: appState)
         tracker.start()
         self.issueTracker = tracker
+
+        appState.onMarkInReview = { [weak tracker] id in
+            Task { await tracker?.markInReview(sessionID: id) }
+        }
 
         // Start socket server
         startSocketServer(store: store, devRoot: devRoot)
