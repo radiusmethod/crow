@@ -250,12 +250,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hostingView = NSHostingView(rootView: settingsView)
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 380),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 480),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
         win.title = "Settings"
+        win.appearance = NSAppearance(named: .darkAqua)
         win.contentView = hostingView
         win.center()
         win.makeKeyAndOrderFront(nil)
