@@ -81,16 +81,14 @@ public struct SessionListView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    appState.isCreatingSession = true
+                    appState.soundMuted.toggle()
+                    appState.onSoundMutedChanged?(appState.soundMuted)
                 } label: {
-                    Label("New Session", systemImage: "plus")
-                        .foregroundStyle(CorveilTheme.gold)
+                    Image(systemName: appState.soundMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .foregroundStyle(appState.soundMuted ? CorveilTheme.textMuted : CorveilTheme.gold)
                 }
-                .keyboardShortcut("n", modifiers: .command)
+                .help(appState.soundMuted ? "Unmute notifications" : "Mute notifications")
             }
-        }
-        .sheet(isPresented: $appState.isCreatingSession) {
-            CreateSessionView(appState: appState)
         }
         .deleteSessionAlert(session: $sessionToDelete, appState: appState)
     }

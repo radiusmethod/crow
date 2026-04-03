@@ -160,6 +160,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let notifManager = NotificationManager(appState: appState, settings: config.notifications)
         self.notificationManager = notifManager
 
+        // Hydrate mute state from config and wire toggle
+        appState.soundMuted = config.notifications.globalMute
+        appState.onSoundMutedChanged = { [weak self] muted in
+            self?.appConfig?.notifications.globalMute = muted
+            if let settings = self?.appConfig?.notifications {
+                self?.notificationManager?.updateSettings(settings)
+            }
+            if let devRoot = self?.devRoot, let cfg = self?.appConfig {
+                try? ConfigStore.saveConfig(cfg, devRoot: devRoot)
+            }
+        }
+
         // Start socket server
         startSocketServer(store: store, devRoot: devRoot)
 
