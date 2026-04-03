@@ -104,9 +104,7 @@ final class SessionService {
 
     func ensureManagerSession(devRoot: String) {
         let managerID = AppState.managerSessionID
-        let isFirstLaunch = !appState.sessions.contains(where: { $0.id == managerID })
-
-        if isFirstLaunch {
+        if !appState.sessions.contains(where: { $0.id == managerID }) {
             let manager = Session(
                 id: managerID,
                 name: "Manager",
@@ -119,9 +117,6 @@ final class SessionService {
                     data.sessions.insert(manager, at: 0)
                 }
             }
-
-            // Auto-select Manager only on first launch
-            appState.selectedSessionID = managerID
         }
 
         // Ensure manager has a terminal
@@ -141,6 +136,11 @@ final class SessionService {
                     data.terminals.append(terminal)
                 }
             }
+        }
+
+        // Select Manager on launch (selectedSessionID isn't persisted)
+        if appState.selectedSessionID == nil {
+            appState.selectedSessionID = managerID
         }
     }
 
