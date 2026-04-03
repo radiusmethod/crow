@@ -29,7 +29,14 @@ struct Scaffolder {
            let existing = try? String(contentsOfFile: claudeMDPath, encoding: .utf8),
            let range = existing.range(of: "## Known Issues / Corrections") {
             // Preserve user corrections, replace everything above
-            let userCorrections = String(existing[range.lowerBound...])
+            var userCorrections = String(existing[range.lowerBound...])
+            // Sanitize stale references from pre-rename installations
+            userCorrections = userCorrections
+                .replacingOccurrences(of: "ride ", with: "crow ")
+                .replacingOccurrences(of: "`ride`", with: "`crow`")
+                .replacingOccurrences(of: "ride.sock", with: "crow.sock")
+                .replacingOccurrences(of: "/ride-workspace", with: "/crow-workspace")
+                .replacingOccurrences(of: "rm-ai-ide", with: "Crow")
             let templateBase: String
             if let templateRange = template.range(of: "## Known Issues / Corrections") {
                 templateBase = String(template[..<templateRange.lowerBound])

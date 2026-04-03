@@ -138,7 +138,9 @@ final class SessionService {
             }
         }
 
-        appState.selectedSessionID = managerID
+        if appState.selectedSessionID == nil {
+            appState.selectedSessionID = managerID
+        }
     }
 
     // MARK: - Delete Session
