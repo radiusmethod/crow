@@ -2,37 +2,37 @@
 import PackageDescription
 
 let package = Package(
-    name: "RmAiIde",
+    name: "Crow",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "RmAiIde", targets: ["RmAiIde"]),
-        .executable(name: "ride", targets: ["RmIdeCLI"]),
+        .executable(name: "CrowApp", targets: ["Crow"]),
+        .executable(name: "crow", targets: ["CrowCLI"]),
     ],
     dependencies: [
-        .package(path: "Packages/RmCore"),
-        .package(path: "Packages/RmUI"),
-        .package(path: "Packages/RmTerminal"),
-        .package(path: "Packages/RmGit"),
-        .package(path: "Packages/RmProvider"),
-        .package(path: "Packages/RmPersistence"),
-        .package(path: "Packages/RmClaude"),
-        .package(path: "Packages/RmIPC"),
+        .package(path: "Packages/CrowCore"),
+        .package(path: "Packages/CrowUI"),
+        .package(path: "Packages/CrowTerminal"),
+        .package(path: "Packages/CrowGit"),
+        .package(path: "Packages/CrowProvider"),
+        .package(path: "Packages/CrowPersistence"),
+        .package(path: "Packages/CrowClaude"),
+        .package(path: "Packages/CrowIPC"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],
     targets: [
         .executableTarget(
-            name: "RmAiIde",
+            name: "Crow",
             dependencies: [
-                "RmCore",
-                "RmUI",
-                "RmTerminal",
-                "RmGit",
-                "RmProvider",
-                "RmPersistence",
-                "RmClaude",
-                "RmIPC",
+                "CrowCore",
+                "CrowUI",
+                "CrowTerminal",
+                "CrowGit",
+                "CrowProvider",
+                "CrowPersistence",
+                "CrowClaude",
+                "CrowIPC",
             ],
-            path: "Sources/RmAiIde",
+            path: "Sources/Crow",
             resources: [
                 .copy("Resources/AppIcon.png"),
                 .copy("Resources/CorveilBrandmark.png"),
@@ -49,12 +49,12 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "RmIdeCLI",
+            name: "CrowCLI",
             dependencies: [
-                "RmIPC",
+                "CrowIPC",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
-            path: "Sources/RmIdeCLI"
+            path: "Sources/CrowCLI"
         ),
     ]
 )

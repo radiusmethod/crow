@@ -1,5 +1,5 @@
 [env]
-PROJECT_NAME = "RmAiIde"
+PROJECT_NAME = "Crow"
 DERIVED_DATA = "{{cwd}}/.derived-data"
 
 [tools]
@@ -7,7 +7,7 @@ zig = "0.15.2"
 
 [tasks.dev]
 description = "Run the app in debug mode"
-run = "swift run RmAiIde"
+run = "swift run CrowApp"
 
 [tasks.build]
 description = "Build debug"
@@ -31,7 +31,7 @@ run = "bash scripts/bundle.sh"
 
 [tasks.clean]
 description = "Clean build artifacts"
-run = "rm -rf .build .derived-data RmAiIde.app"
+run = "rm -rf .build .derived-data Crow.app"
 
 [tasks."xcode:generate"]
 description = "Generate Xcode project"

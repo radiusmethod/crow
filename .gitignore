@@ -7,7 +7,7 @@ DerivedData/
 xcuserdata/
 
 # Generated sources
-Sources/RmAiIde/Generated/
+Sources/Crow/Generated/
 
 # App bundle
 *.app
@@ -22,7 +22,7 @@ Frameworks/ghostty-resources/
 .idea/
 *.xcuserstate
 
-# Claude Code local settings (may contain absolute paths and session IDs)
+# Claude Code (session-specific, generated at runtime)
 .claude/settings.local.json
 
 # OS

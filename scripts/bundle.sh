@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Bundle rm-ai-ide into a .app
+# Bundle Crow into a .app
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$ROOT_DIR/.build/release"
-APP_DIR="$ROOT_DIR/RmAiIde.app"
+APP_DIR="$ROOT_DIR/Crow.app"
 FRAMEWORKS_DIR="$ROOT_DIR/Frameworks"
 
 echo "==> Generating build info..."
@@ -21,7 +21,7 @@ mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
 # Copy binary
-cp "$BUILD_DIR/RmAiIde" "$APP_DIR/Contents/MacOS/"
+cp "$BUILD_DIR/CrowApp" "$APP_DIR/Contents/MacOS/"
 
 # Copy Ghostty resources if available
 if [ -d "$FRAMEWORKS_DIR/ghostty-resources" ]; then
@@ -36,13 +36,13 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>RmAiIde</string>
+    <string>CrowApp</string>
     <key>CFBundleIdentifier</key>
-    <string>com.radiusmethod.rm-ai-ide</string>
+    <string>com.radiusmethod.crow</string>
     <key>CFBundleName</key>
-    <string>rm-ai-ide</string>
+    <string>Crow</string>
     <key>CFBundleDisplayName</key>
-    <string>rm-ai-ide</string>
+    <string>Crow</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
