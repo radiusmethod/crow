@@ -119,6 +119,7 @@ public struct SessionDetailView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .tint(CorveilTheme.gold)
+                        .fixedSize()
                     }
 
                     if primaryWorktree != nil {
@@ -131,6 +132,7 @@ public struct SessionDetailView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .tint(CorveilTheme.gold)
+                        .fixedSize()
                     }
 
                     if session.status == .active,
@@ -150,6 +152,7 @@ public struct SessionDetailView: View {
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                             .tint(CorveilTheme.gold)
+                            .fixedSize()
                         }
                     }
 
@@ -163,6 +166,7 @@ public struct SessionDetailView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                         .tint(CorveilTheme.gold)
+                        .fixedSize()
                     }
 
                     Button(role: .destructive) {
@@ -173,6 +177,7 @@ public struct SessionDetailView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .fixedSize()
                 }
             }
             .padding(.horizontal, 16)
