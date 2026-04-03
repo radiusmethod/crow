@@ -79,6 +79,9 @@ final class IssueTracker {
 
         appState.assignedIssues = allIssues
 
+        // Sync session status for tickets that are "In Review" on the project board
+        syncInReviewSessions(issues: allIssues)
+
         // Fetch count of issues closed in last 24h
         if checkedGitHub {
             appState.doneIssuesLast24h = await fetchDoneIssuesLast24h()
@@ -354,6 +357,19 @@ final class IssueTracker {
     }
 
     // MARK: - Auto-Complete Finished Sessions
+
+    /// Sync active sessions whose linked ticket has "In Review" project status to .inReview session status.
+    private func syncInReviewSessions(issues: [AssignedIssue]) {
+        let inReviewURLs = Set(issues.filter { $0.projectStatus == .inReview }.map(\.url))
+
+        for session in appState.activeSessions {
+            guard let ticketURL = session.ticketURL else { continue }
+            if inReviewURLs.contains(ticketURL) {
+                print("[IssueTracker] Session '\(session.name)' — ticket is In Review on project board, updating session status")
+                appState.onSetSessionInReview?(session.id)
+            }
+        }
+    }
 
     /// Check active sessions whose linked ticket is no longer in the open issues list.
     /// If the session has a PR link and that PR was merged, mark the session as completed.
