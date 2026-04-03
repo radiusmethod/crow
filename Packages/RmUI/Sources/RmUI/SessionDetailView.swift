@@ -121,6 +121,18 @@ public struct SessionDetailView: View {
                         .tint(CorveilTheme.gold)
                     }
 
+                    if primaryWorktree != nil {
+                        Button {
+                            appState.onOpenTerminal?(session.id)
+                        } label: {
+                            Label("Open Terminal", systemImage: "terminal")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(CorveilTheme.gold)
+                    }
+
                     if session.status == .active,
                        session.ticketURL != nil,
                        session.provider == .github {
