@@ -1,7 +1,7 @@
 import AppKit
 import UserNotifications
-import RmCore
-import RmIPC
+import CrowCore
+import CrowIPC
 
 /// Manages sound playback and macOS notification center alerts for hook events.
 @MainActor

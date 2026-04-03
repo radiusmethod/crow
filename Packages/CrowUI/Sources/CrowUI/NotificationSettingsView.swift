@@ -1,6 +1,6 @@
 import SwiftUI
 import AppKit
-import RmCore
+import CrowCore
 
 /// Settings view for configuring notification sounds and macOS system notifications.
 public struct NotificationSettingsView: View {

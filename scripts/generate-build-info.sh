@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-OUTPUT_DIR="$ROOT_DIR/Sources/RmAiIde/Generated"
+OUTPUT_DIR="$ROOT_DIR/Sources/Crow/Generated"
 OUTPUT_FILE="$OUTPUT_DIR/BuildInfo.swift"
 
 mkdir -p "$OUTPUT_DIR"
