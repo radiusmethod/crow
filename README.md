@@ -45,7 +45,7 @@ gh auth login
 gh auth refresh -s read:project   # Required for project board status
 
 # 5. Run
-.build/debug/Crow
+.build/debug/CrowApp
 ```
 
 On first launch, a setup wizard guides you through choosing your development root directory and configuring workspaces.
@@ -95,7 +95,7 @@ swift build -c release
 ```
 
 The build produces two executables:
-- `Crow` — the main application
+- `CrowApp` — the main application
 - `crow` — the CLI for session management
 
 ### 4. GitHub Authentication
@@ -125,7 +125,7 @@ glab auth login --hostname gitlab.example.com
 ### 6. First Launch
 
 ```bash
-.build/debug/Crow
+.build/debug/CrowApp
 ```
 
 The setup wizard will:
@@ -414,7 +414,7 @@ The app logs diagnostic information to stderr:
 
 Run with log filtering:
 ```bash
-.build/debug/Crow 2>&1 | grep "\[TerminalManager\]\|\[SessionService\]"
+.build/debug/CrowApp 2>&1 | grep "\[TerminalManager\]\|\[SessionService\]"
 ```
 
 ## License

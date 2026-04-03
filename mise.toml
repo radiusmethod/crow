@@ -7,7 +7,7 @@ zig = "0.15.2"
 
 [tasks.dev]
 description = "Run the app in debug mode"
-run = "swift run Crow"
+run = "swift run CrowApp"
 
 [tasks.build]
 description = "Build debug"

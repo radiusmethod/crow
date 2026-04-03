@@ -5,7 +5,7 @@ let package = Package(
     name: "Crow",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "Crow", targets: ["Crow"]),
+        .executable(name: "CrowApp", targets: ["Crow"]),
         .executable(name: "crow", targets: ["CrowCLI"]),
     ],
     dependencies: [

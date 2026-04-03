@@ -21,7 +21,7 @@ mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
 # Copy binary
-cp "$BUILD_DIR/Crow" "$APP_DIR/Contents/MacOS/"
+cp "$BUILD_DIR/CrowApp" "$APP_DIR/Contents/MacOS/"
 
 # Copy Ghostty resources if available
 if [ -d "$FRAMEWORKS_DIR/ghostty-resources" ]; then
@@ -36,7 +36,7 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>Crow</string>
+    <string>CrowApp</string>
     <key>CFBundleIdentifier</key>
     <string>com.radiusmethod.crow</string>
     <key>CFBundleName</key>
