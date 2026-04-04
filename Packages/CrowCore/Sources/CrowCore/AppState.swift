@@ -82,6 +82,12 @@ public final class AppState {
     /// Called to launch Claude in a terminal that just became ready.
     public var onLaunchClaude: ((UUID) -> Void)?  // receives terminal ID
 
+    /// Called to add a new plain-shell terminal tab to a session.
+    public var onAddTerminal: ((UUID) -> Void)?  // receives session ID
+
+    /// Called to close a non-managed terminal tab.
+    public var onCloseTerminal: ((UUID, UUID) -> Void)?  // receives (sessionID, terminalID)
+
     // MARK: - Closures wired by AppDelegate
 
     /// Called to delete a session and clean up its worktrees.

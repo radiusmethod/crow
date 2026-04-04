@@ -22,6 +22,7 @@ struct Crow: ParsableCommand {
             ListWorktrees.self,
             NewTerminal.self,
             ListTerminals.self,
+            CloseTerminal.self,
             Send.self,
             AddLink.self,
             ListLinks.self,
@@ -184,6 +185,7 @@ struct NewTerminal: ParsableCommand {
     @Option(name: .long, help: "Working directory") var cwd: String
     @Option(name: .long, help: "Terminal name") var name: String?
     @Option(name: .long, help: "Command to run") var command: String?
+    @Flag(name: .long, help: "Mark as managed Claude Code terminal") var managed: Bool = false
 
     func run() throws {
         var params: [String: JSONValue] = [
@@ -192,6 +194,7 @@ struct NewTerminal: ParsableCommand {
         ]
         if let name { params["name"] = .string(name) }
         if let command { params["command"] = .string(command) }
+        if managed { params["managed"] = .bool(true) }
         let result = try rpc("new-terminal", params: params)
         printJSON(result)
     }
@@ -203,6 +206,20 @@ struct ListTerminals: ParsableCommand {
 
     func run() throws {
         let result = try rpc("list-terminals", params: ["session_id": .string(session)])
+        printJSON(result)
+    }
+}
+
+struct CloseTerminal: ParsableCommand {
+    static let configuration = CommandConfiguration(commandName: "close-terminal", abstract: "Close a terminal tab in a session")
+    @Option(name: .long, help: "Session UUID") var session: String
+    @Option(name: .long, help: "Terminal UUID") var terminal: String
+
+    func run() throws {
+        let result = try rpc("close-terminal", params: [
+            "session_id": .string(session),
+            "terminal_id": .string(terminal),
+        ])
         printJSON(result)
     }
 }

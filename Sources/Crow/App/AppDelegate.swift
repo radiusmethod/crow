@@ -124,6 +124,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             service?.launchClaude(terminalID: terminalID)
         }
 
+        // Wire terminal tab management
+        appState.onAddTerminal = { [weak service] sessionID in
+            service?.addTerminal(sessionID: sessionID)
+        }
+        appState.onCloseTerminal = { [weak service] sessionID, terminalID in
+            service?.closeTerminal(sessionID: sessionID, terminalID: terminalID)
+        }
+
         // Detect VS Code CLI and wire open action
         service.detectVSCode()
         appState.onOpenInVSCode = { [weak service] sessionID in
@@ -485,13 +493,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let cmd = command, cmd.contains("claude") {
                     command = AppDelegate.resolveClaudeInCommand(cmd)
                 }
-                let terminal = SessionTerminal(sessionID: sessionID, name: params["name"]?.stringValue ?? "Shell",
-                                               cwd: cwd, command: command)
+                let isManaged = params["managed"]?.boolValue ?? false
+                let defaultName = isManaged ? "Claude Code" : "Shell"
+                let terminal = SessionTerminal(sessionID: sessionID, name: params["name"]?.stringValue ?? defaultName,
+                                               cwd: cwd, command: command, isManaged: isManaged)
                 return await MainActor.run {
                     capturedAppState.terminals[sessionID, default: []].append(terminal)
                     capturedStore.mutate { $0.terminals.append(terminal) }
-                    // Track readiness for work session terminals (not Manager)
-                    if sessionID != AppState.managerSessionID {
+                    // Track readiness only for managed work session terminals
+                    if isManaged && sessionID != AppState.managerSessionID {
                         capturedAppState.terminalReadiness[terminal.id] = .uninitialized
                         TerminalManager.shared.trackReadiness(for: terminal.id)
 
@@ -514,9 +524,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 let terms = await MainActor.run { capturedAppState.terminals(for: id) }
                 let items: [JSONValue] = terms.map { t in
-                    .object(["id": .string(t.id.uuidString), "name": .string(t.name), "session_id": .string(t.sessionID.uuidString)])
+                    .object(["id": .string(t.id.uuidString), "name": .string(t.name), "session_id": .string(t.sessionID.uuidString), "managed": .bool(t.isManaged)])
                 }
                 return ["terminals": .array(items)]
+            },
+            "close-terminal": { @Sendable params in
+                guard let sessionIDStr = params["session_id"]?.stringValue,
+                      let sessionID = UUID(uuidString: sessionIDStr),
+                      let terminalIDStr = params["terminal_id"]?.stringValue,
+                      let terminalID = UUID(uuidString: terminalIDStr) else {
+                    throw RPCError.invalidParams("session_id and terminal_id required")
+                }
+                return await MainActor.run {
+                    guard let terminals = capturedAppState.terminals[sessionID],
+                          let terminal = terminals.first(where: { $0.id == terminalID }) else {
+                        return ["error": .string("Terminal not found")]
+                    }
+                    guard !terminal.isManaged else {
+                        return ["error": .string("Cannot close managed terminal")]
+                    }
+                    TerminalManager.shared.destroy(id: terminalID)
+                    capturedAppState.terminals[sessionID]?.removeAll { $0.id == terminalID }
+                    capturedAppState.terminalReadiness.removeValue(forKey: terminalID)
+                    if capturedAppState.activeTerminalID[sessionID] == terminalID {
+                        capturedAppState.activeTerminalID[sessionID] = capturedAppState.terminals[sessionID]?.first?.id
+                    }
+                    capturedStore.mutate { data in data.terminals.removeAll { $0.id == terminalID } }
+                    return ["deleted": .bool(true)]
+                }
             },
             "send": { @Sendable params in
                 guard let sessionIDStr = params["session_id"]?.stringValue,
