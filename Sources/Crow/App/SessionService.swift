@@ -110,7 +110,7 @@ final class SessionService {
         }
     }
 
-    /// Send `claude --continue` to a terminal and mark it as launched.
+    /// Send `claude --continue` (or a review prompt for review sessions) to a terminal and mark it as launched.
     ///
     /// Writes hook configuration to the session's worktree first so that
     /// Claude Code picks up the hooks on startup.
@@ -119,10 +119,13 @@ final class SessionService {
         // Only auto-launch for restored/recovered terminals, not brand-new ones
         guard appState.autoLaunchTerminals.remove(terminalID) != nil else { return }
 
-        // Write/refresh hook config for the session's worktree
-        if let sessionID = appState.terminals.first(where: { _, terminals in
+        // Find the session this terminal belongs to
+        let sessionID = appState.terminals.first(where: { _, terminals in
             terminals.contains(where: { $0.id == terminalID })
-        })?.key,
+        })?.key
+
+        // Write/refresh hook config for the session's worktree
+        if let sessionID,
            let worktree = appState.primaryWorktree(for: sessionID),
            let crowPath = HookConfigGenerator.findCrowBinary() {
             do {
@@ -138,7 +141,18 @@ final class SessionService {
         }
 
         let claudePath = Self.findClaudeBinary() ?? "claude"
-        TerminalManager.shared.send(id: terminalID, text: "\(claudePath) --continue\n")
+
+        // For review sessions, launch claude with the review prompt file
+        if let sessionID,
+           let session = appState.sessions.first(where: { $0.id == sessionID }),
+           session.kind == .review,
+           let worktree = appState.primaryWorktree(for: sessionID) {
+            let promptPath = (worktree.worktreePath as NSString).appendingPathComponent(".crow-review-prompt.md")
+            TerminalManager.shared.send(id: terminalID, text: "\(claudePath) \"$(cat \(promptPath))\"\n")
+        } else {
+            TerminalManager.shared.send(id: terminalID, text: "\(claudePath) --continue\n")
+        }
+
         appState.terminalReadiness[terminalID] = .claudeLaunched
     }
 
@@ -200,6 +214,7 @@ final class SessionService {
     func deleteSession(id: UUID) async {
         guard id != AppState.managerSessionID else { return }
 
+        let session = appState.sessions.first(where: { $0.id == id })
         let wts = appState.worktrees(for: id)
         let terminals = appState.terminals(for: id)
 
@@ -208,56 +223,64 @@ final class SessionService {
             TerminalManager.shared.destroy(id: terminal.id)
         }
 
-        // Remove worktrees from disk: git worktree remove + branch delete
-        // Skip cleanup for worktrees that point at the main repo checkout (not a real worktree)
-        for wt in wts {
-            let isMainCheckout = wt.isMainRepoCheckout
-
-            if isMainCheckout {
-                NSLog("Skipping worktree cleanup for main checkout: \(wt.worktreePath) (branch: \(wt.branch))")
-                continue
+        if session?.kind == .review {
+            // For review sessions, clean up the clone directory
+            for wt in wts {
+                try? FileManager.default.removeItem(atPath: wt.worktreePath)
+                NSLog("[SessionService] Cleaned up review clone: \(wt.worktreePath)")
             }
+        } else {
+            // Remove worktrees from disk: git worktree remove + branch delete
+            // Skip cleanup for worktrees that point at the main repo checkout (not a real worktree)
+            for wt in wts {
+                let isMainCheckout = wt.isMainRepoCheckout
 
-            // Remove our hook config from settings.local.json before deleting the worktree
-            HookConfigGenerator.removeHookConfig(worktreePath: wt.worktreePath)
-
-            do {
-                // Remove the worktree
-                let removeResult = try await shell("git", "-C", wt.repoPath, "worktree", "remove", "--force", wt.worktreePath)
-                NSLog("Removed worktree: \(wt.worktreePath) \(removeResult)")
-
-                // Delete the local branch (only if not a protected branch)
-                if !SessionWorktree.isProtectedBranch(wt.branch) {
-                    do {
-                        _ = try await shell("git", "-C", wt.repoPath, "branch", "-D", wt.branch)
-                    } catch {
-                        NSLog("[SessionService] Failed to delete branch \(wt.branch): \(error)")
-                    }
+                if isMainCheckout {
+                    NSLog("Skipping worktree cleanup for main checkout: \(wt.worktreePath) (branch: \(wt.branch))")
+                    continue
                 }
 
-                // Prune worktree metadata
+                // Remove our hook config from settings.local.json before deleting the worktree
+                HookConfigGenerator.removeHookConfig(worktreePath: wt.worktreePath)
+
                 do {
-                    _ = try await shell("git", "-C", wt.repoPath, "worktree", "prune")
-                } catch {
-                    NSLog("[SessionService] Failed to prune worktree metadata: \(error)")
-                }
+                    // Remove the worktree
+                    let removeResult = try await shell("git", "-C", wt.repoPath, "worktree", "remove", "--force", wt.worktreePath)
+                    NSLog("Removed worktree: \(wt.worktreePath) \(removeResult)")
 
-                // Remove the directory if it still exists
-                if FileManager.default.fileExists(atPath: wt.worktreePath) {
-                    do {
-                        try FileManager.default.removeItem(atPath: wt.worktreePath)
-                    } catch {
-                        NSLog("[SessionService] Failed to remove directory \(wt.worktreePath): \(error)")
+                    // Delete the local branch (only if not a protected branch)
+                    if !SessionWorktree.isProtectedBranch(wt.branch) {
+                        do {
+                            _ = try await shell("git", "-C", wt.repoPath, "branch", "-D", wt.branch)
+                        } catch {
+                            NSLog("[SessionService] Failed to delete branch \(wt.branch): \(error)")
+                        }
                     }
-                }
-            } catch {
-                NSLog("[SessionService] Failed to remove worktree \(wt.worktreePath): \(error)")
-                // Still try to remove the directory (but not if it's the main repo)
-                if FileManager.default.fileExists(atPath: wt.worktreePath) {
+
+                    // Prune worktree metadata
                     do {
-                        try FileManager.default.removeItem(atPath: wt.worktreePath)
+                        _ = try await shell("git", "-C", wt.repoPath, "worktree", "prune")
                     } catch {
-                        NSLog("[SessionService] Failed to remove directory \(wt.worktreePath): \(error)")
+                        NSLog("[SessionService] Failed to prune worktree metadata: \(error)")
+                    }
+
+                    // Remove the directory if it still exists
+                    if FileManager.default.fileExists(atPath: wt.worktreePath) {
+                        do {
+                            try FileManager.default.removeItem(atPath: wt.worktreePath)
+                        } catch {
+                            NSLog("[SessionService] Failed to remove directory \(wt.worktreePath): \(error)")
+                        }
+                    }
+                } catch {
+                    NSLog("[SessionService] Failed to remove worktree \(wt.worktreePath): \(error)")
+                    // Still try to remove the directory (but not if it's the main repo)
+                    if FileManager.default.fileExists(atPath: wt.worktreePath) {
+                        do {
+                            try FileManager.default.removeItem(atPath: wt.worktreePath)
+                        } catch {
+                            NSLog("[SessionService] Failed to remove directory \(wt.worktreePath): \(error)")
+                        }
                     }
                 }
             }
@@ -594,6 +617,150 @@ final class SessionService {
         }
 
         store.mutate { data in data.terminals.removeAll { $0.id == terminalID } }
+    }
+
+    // MARK: - Review Session
+
+    /// Create a review session for an incoming PR review request.
+    func createReviewSession(prURL: String) async {
+        // Parse org/repo and PR number from URL like "https://github.com/org/repo/pull/123"
+        let components = prURL.split(separator: "/")
+        guard components.count >= 5,
+              let prNumber = Int(components.last ?? "") else {
+            NSLog("[SessionService] Could not parse PR URL: \(prURL)")
+            return
+        }
+        let owner = String(components[components.count - 4])
+        let repoName = String(components[components.count - 3])
+        let repoSlug = "\(owner)/\(repoName)"
+
+        // Fetch PR metadata
+        guard let prOutput = try? await shell(
+            "gh", "pr", "view", prURL,
+            "--json", "title,headRefName,baseRefName,number"
+        ) else {
+            NSLog("[SessionService] Failed to fetch PR metadata for \(prURL)")
+            return
+        }
+
+        guard let prData = prOutput.data(using: .utf8),
+              let prJSON = try? JSONSerialization.jsonObject(with: prData) as? [String: Any],
+              let prTitle = prJSON["title"] as? String,
+              let headBranch = prJSON["headRefName"] as? String else {
+            NSLog("[SessionService] Failed to parse PR metadata for \(prURL)")
+            return
+        }
+
+        // Determine clone path
+        guard let devRoot = ConfigStore.loadDevRoot() else {
+            NSLog("[SessionService] No devRoot configured")
+            return
+        }
+        let reviewsDir = (devRoot as NSString).appendingPathComponent("crow-reviews")
+        let cloneDirName = "\(repoName)-pr-\(prNumber)"
+        let clonePath = (reviewsDir as NSString).appendingPathComponent(cloneDirName)
+
+        let fm = FileManager.default
+
+        // Ensure reviews directory exists
+        try? fm.createDirectory(atPath: reviewsDir, withIntermediateDirectories: true)
+
+        // Clone or update the repo
+        if !fm.fileExists(atPath: (clonePath as NSString).appendingPathComponent(".git")) {
+            NSLog("[SessionService] Cloning \(repoSlug) into \(clonePath)")
+            _ = try? await shell("gh", "repo", "clone", repoSlug, clonePath)
+        }
+
+        // Fetch and checkout the PR branch
+        _ = try? await shell("git", "-C", clonePath, "fetch", "origin", headBranch)
+        _ = try? await shell("git", "-C", clonePath, "checkout", headBranch)
+        _ = try? await shell("git", "-C", clonePath, "pull", "origin", headBranch)
+
+        // Write review prompt file into the clone directory
+        let promptPath = (clonePath as NSString).appendingPathComponent(".crow-review-prompt.md")
+        let reviewPrompt = Self.buildReviewPrompt(prURL: prURL, prTitle: prTitle, repoSlug: repoSlug, prNumber: prNumber)
+        try? reviewPrompt.write(toFile: promptPath, atomically: true, encoding: .utf8)
+
+        // Copy the crow-review-pr skill into the clone's .claude/skills/ so Claude Code can find it
+        let cloneSkillsDir = (clonePath as NSString).appendingPathComponent(".claude/skills/crow-review-pr")
+        try? fm.createDirectory(atPath: cloneSkillsDir, withIntermediateDirectories: true)
+        let skillContent = Scaffolder.bundledReviewSkill()
+        try? skillContent.write(
+            toFile: (cloneSkillsDir as NSString).appendingPathComponent("SKILL.md"),
+            atomically: true, encoding: .utf8
+        )
+
+        // Copy settings.json into the clone's .claude/ for permissions
+        let cloneSettingsDir = (clonePath as NSString).appendingPathComponent(".claude")
+        let settingsContent = Scaffolder.bundledSettings()
+        try? settingsContent.write(
+            toFile: (cloneSettingsDir as NSString).appendingPathComponent("settings.json"),
+            atomically: true, encoding: .utf8
+        )
+
+        // Create session
+        let session = Session(
+            name: "review-\(repoName)-\(prNumber)",
+            kind: .review,
+            ticketTitle: prTitle,
+            provider: .github
+        )
+
+        let worktree = SessionWorktree(
+            sessionID: session.id,
+            repoName: repoName,
+            repoPath: clonePath,
+            worktreePath: clonePath,
+            branch: headBranch,
+            isPrimary: true
+        )
+
+        let terminal = SessionTerminal(
+            sessionID: session.id,
+            name: "Claude Code",
+            cwd: clonePath,
+            isManaged: true
+        )
+
+        let prLink = SessionLink(
+            sessionID: session.id,
+            label: "PR #\(prNumber)",
+            url: prURL,
+            linkType: .pr
+        )
+
+        // Add to state
+        appState.sessions.append(session)
+        appState.worktrees[session.id] = [worktree]
+        appState.terminals[session.id] = [terminal]
+        appState.links[session.id] = [prLink]
+        appState.terminalReadiness[terminal.id] = .uninitialized
+        TerminalManager.shared.trackReadiness(for: terminal.id)
+
+        // Pre-initialize terminal surface in offscreen window
+        TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: clonePath, command: nil)
+
+        // Persist
+        store.mutate { data in
+            data.sessions.append(session)
+            data.worktrees.append(worktree)
+            data.terminals.append(terminal)
+            data.links.append(prLink)
+        }
+
+        // Select the new session
+        appState.selectedSessionID = session.id
+
+        NSLog("[SessionService] Created review session '\(session.name)' for \(prURL)")
+    }
+
+    // MARK: - Review Prompt
+
+    /// Build the initial prompt for a review session.
+    private static func buildReviewPrompt(prURL: String, prTitle: String, repoSlug: String, prNumber: Int) -> String {
+        """
+        /crow-review-pr \(prURL)
+        """
     }
 
     // MARK: - Session Status

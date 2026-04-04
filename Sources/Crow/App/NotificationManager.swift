@@ -98,6 +98,31 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    // MARK: - Review Request Notifications
+
+    /// Notify the user about a new PR review request.
+    func notifyReviewRequest(_ request: ReviewRequest) {
+        guard !settings.globalMute else { return }
+
+        let config = settings.config(for: .reviewRequested)
+        guard config.enabled else { return }
+
+        // Play sound
+        if settings.soundEnabled && config.soundEnabled {
+            playSound(named: config.soundName)
+        }
+
+        // Post system notification
+        if settings.systemNotificationsEnabled && config.systemNotificationEnabled {
+            postSystemNotification(
+                title: "Review Requested \u{2014} \(request.repo)",
+                body: "PR #\(request.prNumber): \(request.title) (by @\(request.author))",
+                sessionID: UUID(),
+                eventName: "ReviewRequested"
+            )
+        }
+    }
+
     // MARK: - Sound Playback
 
     private func playSound(named name: String) {

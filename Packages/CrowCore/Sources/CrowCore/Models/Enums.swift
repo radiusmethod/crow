@@ -1,5 +1,11 @@
 import Foundation
 
+/// Whether a session is a normal work session or a PR review session.
+public enum SessionKind: String, Codable, Sendable {
+    case work    // Normal development session (default)
+    case review  // PR review session
+}
+
 /// Status of a development session.
 public enum SessionStatus: String, Codable, Sendable {
     case active

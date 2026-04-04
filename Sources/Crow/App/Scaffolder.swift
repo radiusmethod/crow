@@ -22,6 +22,13 @@ struct Scaffolder {
         let skillsDir = (claudeDir as NSString).appendingPathComponent("skills/crow-workspace")
         try fm.createDirectory(atPath: skillsDir, withIntermediateDirectories: true)
 
+        let reviewSkillsDir = (claudeDir as NSString).appendingPathComponent("skills/crow-review-pr")
+        try fm.createDirectory(atPath: reviewSkillsDir, withIntermediateDirectories: true)
+
+        // Create crow-reviews directory for PR review clones
+        let reviewsDir = (devRoot as NSString).appendingPathComponent("crow-reviews")
+        try fm.createDirectory(atPath: reviewsDir, withIntermediateDirectories: true)
+
         // Always update CLAUDE.md — but preserve the "Known Issues / Corrections" section
         let claudeMDPath = (claudeDir as NSString).appendingPathComponent("CLAUDE.md")
         let template = Self.bundledCLAUDEMD()
@@ -52,6 +59,11 @@ struct Scaffolder {
         let skillPath = (skillsDir as NSString).appendingPathComponent("SKILL.md")
         let skillTemplate = Self.bundledSkill()
         try skillTemplate.write(toFile: skillPath, atomically: true, encoding: .utf8)
+
+        // Always overwrite the review-pr skill with the latest version
+        let reviewSkillPath = (reviewSkillsDir as NSString).appendingPathComponent("SKILL.md")
+        let reviewSkillTemplate = Self.bundledReviewSkill()
+        try reviewSkillTemplate.write(toFile: reviewSkillPath, atomically: true, encoding: .utf8)
 
         // Always overwrite settings.json (permissions for crow, gh, git commands)
         let settingsPath = (claudeDir as NSString).appendingPathComponent("settings.json")
@@ -106,6 +118,26 @@ struct Scaffolder {
         ## Important
         All `crow` CLI and `git worktree` commands require `dangerouslyDisableSandbox: true`.
         See the CLAUDE.md in this directory for the full crow CLI reference.
+        """
+    }
+
+    /// The crow-review-pr SKILL.md template bundled with the app.
+    static func bundledReviewSkill() -> String {
+        if let content = loadFromRepo("skills/crow-review-pr/SKILL.md") {
+            return content
+        }
+        if let url = Bundle.main.url(forResource: "crow-review-pr-SKILL.md", withExtension: "template"),
+           let content = try? String(contentsOf: url) {
+            return content
+        }
+        return """
+        # Crow Review PR Skill
+
+        ## Activation
+        This skill activates when user invokes `/crow-review-pr` command or in a review session.
+
+        ## Important
+        All `gh` commands require `dangerouslyDisableSandbox: true`.
         """
     }
 
