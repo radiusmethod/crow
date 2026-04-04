@@ -5,15 +5,18 @@ public struct AppConfig: Codable, Sendable {
     public var workspaces: [WorkspaceInfo]
     public var defaults: ConfigDefaults
     public var notifications: NotificationSettings
+    public var sidebar: SidebarSettings
 
     public init(
         workspaces: [WorkspaceInfo] = [],
         defaults: ConfigDefaults = ConfigDefaults(),
-        notifications: NotificationSettings = NotificationSettings()
+        notifications: NotificationSettings = NotificationSettings(),
+        sidebar: SidebarSettings = SidebarSettings()
     ) {
         self.workspaces = workspaces
         self.defaults = defaults
         self.notifications = notifications
+        self.sidebar = sidebar
     }
 
     public init(from decoder: Decoder) throws {
@@ -21,10 +24,11 @@ public struct AppConfig: Codable, Sendable {
         workspaces = try container.decodeIfPresent([WorkspaceInfo].self, forKey: .workspaces) ?? []
         defaults = try container.decodeIfPresent(ConfigDefaults.self, forKey: .defaults) ?? ConfigDefaults()
         notifications = try container.decodeIfPresent(NotificationSettings.self, forKey: .notifications) ?? NotificationSettings()
+        sidebar = try container.decodeIfPresent(SidebarSettings.self, forKey: .sidebar) ?? SidebarSettings()
     }
 
     private enum CodingKeys: String, CodingKey {
-        case workspaces, defaults, notifications
+        case workspaces, defaults, notifications, sidebar
     }
 }
 
@@ -71,5 +75,14 @@ public struct ConfigDefaults: Codable, Sendable {
         self.cli = cli
         self.branchPrefix = branchPrefix
         self.excludeDirs = excludeDirs
+    }
+}
+
+/// Sidebar display preferences.
+public struct SidebarSettings: Codable, Sendable {
+    public var hideSessionDetails: Bool
+
+    public init(hideSessionDetails: Bool = false) {
+        self.hideSessionDetails = hideSessionDetails
     }
 }

@@ -203,6 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Hydrate mute state from config and wire toggle
         appState.soundMuted = config.notifications.globalMute
+        appState.hideSessionDetails = config.sidebar.hideSessionDetails
         appState.onSoundMutedChanged = { [weak self] muted in
             self?.appConfig?.notifications.globalMute = muted
             if let settings = self?.appConfig?.notifications {
@@ -334,6 +335,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         try? ConfigStore.saveDevRoot(devRoot)
         try? ConfigStore.saveConfig(config, devRoot: devRoot)
         notificationManager?.updateSettings(config.notifications)
+        appState.hideSessionDetails = config.sidebar.hideSessionDetails
     }
 
     // MARK: - Socket Server

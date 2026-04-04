@@ -10,6 +10,9 @@ public final class AppState {
     /// Whether notification sounds are muted (toggled via sidebar speaker icon).
     public var soundMuted: Bool = false
 
+    /// Whether subtitle rows (ticket title, repo/branch) are hidden in sidebar session rows.
+    public var hideSessionDetails: Bool = false
+
     /// Worktrees keyed by session ID.
     public var worktrees: [UUID: [SessionWorktree]] = [:]
 
