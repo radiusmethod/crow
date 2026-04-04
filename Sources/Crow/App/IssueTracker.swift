@@ -207,6 +207,7 @@ final class IssueTracker {
 
             if let output = try? await shell(
                 "gh", "pr", "list", "--repo", repoSlug, "--head", branch,
+                "--state", "all",
                 "--json", "number,url,state", "--limit", "1"
             ), let data = output.data(using: .utf8),
                let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
