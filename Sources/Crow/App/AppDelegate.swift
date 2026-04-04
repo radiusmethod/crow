@@ -260,7 +260,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showAbout() {
-        if let existing = aboutWindow, existing.isVisible {
+        if let existing = aboutWindow {
             existing.makeKeyAndOrderFront(nil)
             return
         }
@@ -274,6 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         win.title = "About Crow"
         win.appearance = NSAppearance(named: .darkAqua)
+        win.isReleasedWhenClosed = false
         win.contentView = hostingView
         win.center()
         win.makeKeyAndOrderFront(nil)
@@ -283,7 +284,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showSettings() {
         guard let devRoot, let appConfig else { return }
 
-        if let existing = settingsWindow, existing.isVisible {
+        if let existing = settingsWindow {
             existing.makeKeyAndOrderFront(nil)
             return
         }
@@ -309,6 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         win.title = "Settings"
         win.appearance = NSAppearance(named: .darkAqua)
+        win.isReleasedWhenClosed = false
         win.contentView = hostingView
         win.center()
         win.makeKeyAndOrderFront(nil)
