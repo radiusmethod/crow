@@ -83,6 +83,14 @@ public struct SettingsView: View {
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { save() }
             }
+
+            Section("Sidebar") {
+                Toggle("Hide session details", isOn: $config.sidebar.hideSessionDetails)
+                    .onChange(of: config.sidebar.hideSessionDetails) { _, _ in save() }
+                Text("Hides ticket title and repo/branch lines in sidebar rows.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }

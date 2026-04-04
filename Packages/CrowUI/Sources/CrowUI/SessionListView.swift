@@ -260,7 +260,7 @@ struct SessionRow: View {
             }
 
             // Row 2: Ticket title (if any)
-            if let title = session.ticketTitle {
+            if !appState.hideSessionDetails, let title = session.ticketTitle {
                 Text(title)
                     .font(.caption)
                     .foregroundStyle(CorveilTheme.textSecondary)
@@ -268,7 +268,7 @@ struct SessionRow: View {
             }
 
             // Row 3: Repo + branch
-            if let wt = primaryWorktree {
+            if !appState.hideSessionDetails, let wt = primaryWorktree {
                 Text("\(wt.repoName) / \(shortenBranch(wt.branch))")
                     .font(.caption2)
                     .foregroundStyle(CorveilTheme.textMuted)
@@ -313,6 +313,7 @@ struct SessionRow: View {
                 )
         )
         .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: needsAttention)
+        .animation(.easeInOut(duration: 0.2), value: appState.hideSessionDetails)
         .padding(.vertical, 1)
     }
 
