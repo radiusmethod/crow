@@ -4,11 +4,9 @@
 
 Orchestrates work sessions in **Crow** by setting up git worktrees and creating a crow session with auto-launched Claude Code and ticket metadata. Supports multiple organizations/workspaces with different Git providers.
 
-This skill targets Crow's `crow` CLI. The original `/workspace` skill targeting CMUX remains unchanged and both can run in parallel.
-
 ## Important: Sandbox Bypass
 
-All `crow` CLI commands require `dangerouslyDisableSandbox: true` because they communicate via Unix socket at `~/.local/share/crow/crow.sock`.
+All `crow`, `gh`, and `glab` commands require `dangerouslyDisableSandbox: true` because they communicate via Unix socket or need network/TLS access.
 
 ## Activation
 
@@ -282,7 +280,7 @@ sleep 3
 #    CRITICAL: End the text with literal \n — the app converts \n to Enter.
 #    Use single quotes so the shell doesn't expand $(cat ...).
 #    Use --permission-mode plan to start Claude in plan mode.
-#    Use full path to claude binary (avoid CMUX wrapper).
+#    Use full path to claude binary.
 crow send --session {session_id} --terminal {terminal_id} 'cd {primary_worktree_path} && {claude_binary_path} --permission-mode plan "$(cat {devRoot}/.claude/prompts/crow-prompt-{feature_name}.md)"\n'
 ```
 

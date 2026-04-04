@@ -106,6 +106,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Detect orphaned worktrees (runs async, updates UI when done)
         Task { await service.detectOrphanedWorktrees() }
 
+        // Check for runtime dependencies (non-blocking)
+        Task.detached {
+            let tools = ["gh", "git", "claude"]
+            for tool in tools {
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+                proc.arguments = [tool]
+                proc.standardOutput = FileHandle.nullDevice
+                proc.standardError = FileHandle.nullDevice
+                do {
+                    try proc.run()
+                    proc.waitUntilExit()
+                    if proc.terminationStatus != 0 {
+                        NSLog("[Crow] Runtime dependency not found: %@", tool)
+                    }
+                } catch {
+                    NSLog("[Crow] Could not check for %@: %@", tool, error.localizedDescription)
+                }
+            }
+        }
+
         // Ensure manager session exists
         service.ensureManagerSession(devRoot: devRoot)
 
