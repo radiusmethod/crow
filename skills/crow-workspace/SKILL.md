@@ -266,7 +266,8 @@ PROMPT
 # 6. Create a shell terminal in the primary worktree (NO command — just a shell)
 crow new-terminal --session {session_id} \
   --cwd "{primary_worktree_path}" \
-  --name "Claude Code"
+  --name "Claude Code" \
+  --managed
 # Output: {"terminal_id":"<uuid>","session_id":"..."}
 # IMPORTANT: Capture the terminal_id from the output!
 

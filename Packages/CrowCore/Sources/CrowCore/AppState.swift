@@ -46,8 +46,14 @@ public final class AppState {
     /// Number of issues completed (closed) in the last 24 hours.
     public var doneIssuesLast24h: Int = 0
 
-    /// Currently selected pipeline filter on the ticket board.
-    public var selectedTicketStatus: TicketStatus = .inProgress
+    /// Currently selected pipeline filter on the ticket board (nil = show all).
+    public var selectedTicketStatus: TicketStatus? = .inProgress
+
+    /// Text search for ticket board filtering.
+    public var ticketSearchText: String = ""
+
+    /// Sort order for the ticket board.
+    public var ticketSortOrder: TicketSortOrder = .updatedDesc
 
     // MARK: - Allow List
 
@@ -177,6 +183,47 @@ public final class AppState {
     /// Issues filtered by the given pipeline status. Treats `.unknown` as `.backlog`.
     public func issues(for status: TicketStatus) -> [AssignedIssue] {
         assignedIssues.filter { effectiveStatus($0) == status }
+    }
+
+    /// Filtered and sorted issues for the ticket board, applying status filter, search, and sort.
+    public var filteredSortedIssues: [AssignedIssue] {
+        var result = assignedIssues
+
+        // Status filter
+        if let status = selectedTicketStatus {
+            result = result.filter { effectiveStatus($0) == status }
+        }
+
+        // Text search
+        if !ticketSearchText.isEmpty {
+            let query = ticketSearchText.lowercased()
+            result = result.filter { issue in
+                issue.title.lowercased().contains(query)
+                || issue.repo.lowercased().contains(query)
+                || "#\(issue.number)".contains(query)
+                || issue.labels.contains(where: { $0.lowercased().contains(query) })
+            }
+        }
+
+        // Sort
+        result.sort { a, b in
+            switch ticketSortOrder {
+            case .updatedDesc:
+                return (a.updatedAt ?? .distantPast) > (b.updatedAt ?? .distantPast)
+            case .updatedAsc:
+                return (a.updatedAt ?? .distantPast) < (b.updatedAt ?? .distantPast)
+            case .titleAsc:
+                return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+            case .titleDesc:
+                return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedDescending
+            case .numberDesc:
+                return a.number > b.number
+            case .numberAsc:
+                return a.number < b.number
+            }
+        }
+
+        return result
     }
 
     /// Find the active session linked to a given issue (by matching ticket URL).

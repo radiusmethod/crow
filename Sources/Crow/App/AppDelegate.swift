@@ -271,20 +271,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showAbout() {
-        if let existing = aboutWindow, existing.isVisible {
+        if let existing = aboutWindow {
             existing.makeKeyAndOrderFront(nil)
             return
         }
 
         let hostingView = NSHostingView(rootView: AboutView())
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 300, height: 340),
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 380),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
         win.title = "About Crow"
         win.appearance = NSAppearance(named: .darkAqua)
+        win.isReleasedWhenClosed = false
         win.contentView = hostingView
         win.center()
         win.makeKeyAndOrderFront(nil)
@@ -294,7 +295,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showSettings() {
         guard let devRoot, let appConfig else { return }
 
-        if let existing = settingsWindow, existing.isVisible {
+        if let existing = settingsWindow {
             existing.makeKeyAndOrderFront(nil)
             return
         }
@@ -320,6 +321,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         win.title = "Settings"
         win.appearance = NSAppearance(named: .darkAqua)
+        win.isReleasedWhenClosed = false
         win.contentView = hostingView
         win.center()
         win.makeKeyAndOrderFront(nil)
@@ -536,16 +538,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if isManaged && sessionID != AppState.managerSessionID {
                         capturedAppState.terminalReadiness[terminal.id] = .uninitialized
                         TerminalManager.shared.trackReadiness(for: terminal.id)
-
-                        // Write hook config for the session's worktree
-                        if let worktree = capturedAppState.primaryWorktree(for: sessionID),
-                           let crowPath = HookConfigGenerator.findCrowBinary() {
-                            try? HookConfigGenerator.writeHookConfig(
-                                worktreePath: worktree.worktreePath,
-                                sessionID: sessionID,
-                                crowPath: crowPath
-                            )
-                        }
                     }
                     return ["terminal_id": .string(terminal.id.uuidString), "session_id": .string(idStr)]
                 }
@@ -609,6 +601,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             )
                         }
                     }
+
+                    // For managed terminals receiving a claude command, write hook config
+                    // before sending so Claude picks up the hooks on startup.
+                    if let terminals = capturedAppState.terminals[sessionID],
+                       let terminal = terminals.first(where: { $0.id == terminalID }),
+                       terminal.isManaged,
+                       text.contains("claude") {
+                        if let worktree = capturedAppState.primaryWorktree(for: sessionID),
+                           let crowPath = HookConfigGenerator.findCrowBinary() {
+                            try? HookConfigGenerator.writeHookConfig(
+                                worktreePath: worktree.worktreePath,
+                                sessionID: sessionID,
+                                crowPath: crowPath
+                            )
+                        }
+                        capturedAppState.terminalReadiness[terminalID] = .claudeLaunched
+                    }
+
                     TerminalManager.shared.send(id: terminalID, text: text)
                 }
                 return ["sent": .bool(true)]

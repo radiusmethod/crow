@@ -14,66 +14,191 @@ public struct TicketBoardView: View {
     public var body: some View {
         VStack(spacing: 0) {
             ticketBoardHeader
-            Divider()
+            Divider().overlay(CorveilTheme.borderSubtle)
             PipelineView(appState: appState)
-            Divider()
+            Divider().overlay(CorveilTheme.borderSubtle)
             TicketListView(appState: appState)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.background)
+        .background(CorveilTheme.bgDeep)
     }
 
     private var ticketBoardHeader: some View {
-        HStack {
-            Text("Ticket Board")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(CorveilTheme.gold)
+        VStack(spacing: 10) {
+            // Row 1: Title + count + sort
+            HStack {
+                Text("Ticket Board")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundStyle(CorveilTheme.gold)
 
-            if appState.isLoadingIssues {
-                ProgressView()
-                    .controlSize(.small)
+                if appState.isLoadingIssues {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Spacer()
+
+                Text("\(appState.assignedIssues.count) issues")
+                    .font(.caption)
+                    .foregroundStyle(CorveilTheme.textSecondary)
+
+                SortMenu(sortOrder: $appState.ticketSortOrder)
             }
 
-            Spacer()
-
-            Text("\(appState.assignedIssues.count) issues")
-                .font(.caption)
-                .foregroundStyle(CorveilTheme.textSecondary)
+            // Row 2: Search field
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12))
+                    .foregroundStyle(CorveilTheme.textMuted)
+                TextField("Search tickets...", text: $appState.ticketSearchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundStyle(CorveilTheme.textPrimary)
+                if !appState.ticketSearchText.isEmpty {
+                    Button {
+                        appState.ticketSearchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 12))
+                            .foregroundStyle(CorveilTheme.textMuted)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(CorveilTheme.bgCard)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(CorveilTheme.borderSubtle, lineWidth: 1)
+                    )
+            )
         }
-        .padding(.horizontal)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .background(CorveilTheme.bgSurface)
+    }
+}
+
+// MARK: - Sort Menu
+
+struct SortMenu: View {
+    @Binding var sortOrder: TicketSortOrder
+
+    var body: some View {
+        Menu {
+            ForEach(TicketSortOrder.allCases, id: \.self) { order in
+                Button {
+                    sortOrder = order
+                } label: {
+                    HStack {
+                        Text(order.rawValue)
+                        if sortOrder == order {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 10))
+                Text(sortOrder.rawValue)
+                    .font(.caption)
+            }
+            .foregroundStyle(CorveilTheme.textSecondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(CorveilTheme.bgCard)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(CorveilTheme.borderSubtle, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
 
 // MARK: - Pipeline View
 
-/// Horizontal status timeline showing the four pipeline stages.
+/// Horizontal status timeline with "All" and the five pipeline stages.
 struct PipelineView: View {
     @Bindable var appState: AppState
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(TicketStatus.pipelineStatuses.enumerated()), id: \.element) { index, status in
-                if index > 0 {
-                    Image(systemName: "chevron.right")
-                        .font(.caption2)
-                        .foregroundStyle(.quaternary)
-                        .padding(.horizontal, 2)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                // "All" segment
+                AllPipelineSegment(
+                    count: appState.assignedIssues.count,
+                    isSelected: appState.selectedTicketStatus == nil
+                ) {
+                    appState.selectedTicketStatus = nil
                 }
 
-                PipelineSegment(
-                    status: status,
-                    count: appState.issueCount(for: status),
-                    isSelected: appState.selectedTicketStatus == status
-                ) {
-                    appState.selectedTicketStatus = status
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.quaternary)
+                    .padding(.horizontal, 2)
+
+                ForEach(Array(TicketStatus.pipelineStatuses.enumerated()), id: \.element) { index, status in
+                    if index > 0 {
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.quaternary)
+                            .padding(.horizontal, 2)
+                    }
+
+                    PipelineSegment(
+                        status: status,
+                        count: appState.issueCount(for: status),
+                        isSelected: appState.selectedTicketStatus == status
+                    ) {
+                        appState.selectedTicketStatus = status
+                    }
                 }
             }
+            .padding(.horizontal, 16)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 12)
-        .background(.bar)
+        .padding(.vertical, 10)
+        .background(CorveilTheme.bgSurface.opacity(0.5))
+    }
+}
+
+struct AllPipelineSegment: View {
+    let count: Int
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 8))
+                    .foregroundStyle(CorveilTheme.gold)
+                Text("All")
+                    .font(.callout)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                Text("\(count)")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(isSelected ? CorveilTheme.gold.opacity(0.2) : Color.secondary.opacity(0.1))
+                    .clipShape(Capsule())
+            }
+            .foregroundStyle(isSelected ? CorveilTheme.gold : CorveilTheme.textSecondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isSelected ? CorveilTheme.gold.opacity(0.1) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -100,6 +225,7 @@ struct PipelineSegment: View {
                     .background(isSelected ? statusColor.opacity(0.2) : Color.secondary.opacity(0.1))
                     .clipShape(Capsule())
             }
+            .foregroundStyle(isSelected ? statusColor : CorveilTheme.textSecondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(isSelected ? statusColor.opacity(0.1) : Color.clear)
@@ -125,130 +251,252 @@ struct PipelineSegment: View {
 struct TicketListView: View {
     @Bindable var appState: AppState
 
-    private var filteredIssues: [AssignedIssue] {
-        appState.issues(for: appState.selectedTicketStatus)
+    var body: some View {
+        let issues = appState.filteredSortedIssues
+        if issues.isEmpty {
+            emptyState
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 6) {
+                    ForEach(issues) { issue in
+                        TicketCard(
+                            issue: issue,
+                            appState: appState,
+                            isDone: issue.projectStatus == .done
+                        )
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+        }
     }
 
-    var body: some View {
-        if filteredIssues.isEmpty {
-            VStack {
-                Spacer().frame(height: 40)
-                Image(systemName: "ticket")
-                    .font(.system(size: 32))
-                    .foregroundStyle(CorveilTheme.textMuted)
-                Text("No \(appState.selectedTicketStatus.rawValue) Tickets")
-                    .font(.headline)
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "ticket")
+                .font(.system(size: 36))
+                .foregroundStyle(CorveilTheme.textMuted.opacity(0.5))
+            if let status = appState.selectedTicketStatus {
+                Text("No \(status.rawValue) Tickets")
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(CorveilTheme.textSecondary)
-                    .padding(.top, 8)
-                Text("No issues are in the \(appState.selectedTicketStatus.rawValue) state.")
-                    .font(.caption)
-                    .foregroundStyle(CorveilTheme.textMuted)
-                Spacer()
+                if appState.ticketSearchText.isEmpty {
+                    Text("No issues are in the \(status.rawValue) state.")
+                        .font(.caption)
+                        .foregroundStyle(CorveilTheme.textMuted)
+                } else {
+                    Text("No \(status.rawValue) issues match \"\(appState.ticketSearchText)\"")
+                        .font(.caption)
+                        .foregroundStyle(CorveilTheme.textMuted)
+                }
+            } else {
+                Text("No Tickets Found")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(CorveilTheme.textSecondary)
+                if !appState.ticketSearchText.isEmpty {
+                    Text("No issues match \"\(appState.ticketSearchText)\"")
+                        .font(.caption)
+                        .foregroundStyle(CorveilTheme.textMuted)
+                }
             }
-            .frame(maxWidth: .infinity)
-        } else {
-            List(filteredIssues) { issue in
-                TicketRow(issue: issue, appState: appState)
-            }
-            .listStyle(.inset)
+            Spacer()
         }
+        .frame(maxWidth: .infinity)
     }
 }
 
-// MARK: - Ticket Row
+// MARK: - Ticket Card
 
-struct TicketRow: View {
+struct TicketCard: View {
     let issue: AssignedIssue
     @Bindable var appState: AppState
+    let isDone: Bool
+
+    private var linkedSession: Session? {
+        appState.activeSession(for: issue)
+    }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(issue.repo)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("#\(issue.number)")
-                        .font(.callout)
-                        .fontWeight(.medium)
-                    if let prNum = issue.prNumber {
-                        prBadge(number: prNum, url: issue.prURL)
-                    }
+        VStack(alignment: .leading, spacing: 6) {
+            // Row 1: Repo + issue number + PR badge + timestamp
+            HStack(spacing: 6) {
+                Text(issue.repo)
+                    .font(.caption)
+                    .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textSecondary)
+
+                Text("#\(issue.number)")
+                    .font(.system(size: 12, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textPrimary)
+
+                if let prNum = issue.prNumber {
+                    ticketPRBadge(number: prNum, url: issue.prURL)
                 }
-                Text(issue.title)
-                    .font(.body)
-                    .lineLimit(2)
-                if !issue.labels.isEmpty {
-                    labelRow
+
+                Spacer()
+
+                if isDone {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.green.opacity(0.6))
+                }
+
+                if let date = issue.updatedAt {
+                    Text(date, style: .relative)
+                        .font(.caption2)
+                        .foregroundStyle(CorveilTheme.textMuted)
                 }
             }
 
-            Spacer()
+            // Row 2: Title
+            Text(issue.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textPrimary)
+                .lineLimit(2)
 
-            worktreeAction
+            // Row 3: Labels + status badge + session link
+            HStack(spacing: 6) {
+                if !issue.labels.isEmpty {
+                    labelRow
+                }
+
+                statusBadge
+
+                Spacer()
+
+                worktreeAction
+            }
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(cardBorder, lineWidth: 1)
+                )
+        )
+        .opacity(isDone ? 0.7 : 1.0)
     }
 
-    private func prBadge(number: Int, url: String?) -> some View {
+    private var cardBackground: Color {
+        if linkedSession != nil {
+            return Color(red: 0.15, green: 0.22, blue: 0.16)
+        }
+        return CorveilTheme.bgCard
+    }
+
+    private var cardBorder: Color {
+        if linkedSession != nil {
+            return Color.green.opacity(0.2)
+        }
+        return CorveilTheme.borderSubtle
+    }
+
+    // MARK: - Subviews
+
+    private func ticketPRBadge(number: Int, url: String?) -> some View {
         HStack(spacing: 3) {
             Image(systemName: "arrow.triangle.pull")
                 .font(.caption2)
             Text("PR #\(number)")
-                .font(.caption)
+                .font(.caption2)
+                .fontWeight(.medium)
         }
         .foregroundStyle(.purple)
         .padding(.horizontal, 6)
         .padding(.vertical, 2)
         .background(.purple.opacity(0.1))
+        .overlay(Capsule().strokeBorder(Color.purple.opacity(0.3), lineWidth: 0.5))
         .clipShape(Capsule())
     }
 
     private var labelRow: some View {
         HStack(spacing: 4) {
-            ForEach(issue.labels.prefix(4), id: \.self) { label in
+            ForEach(issue.labels.prefix(3), id: \.self) { label in
                 Text(label)
-                    .font(.caption2)
+                    .font(.system(size: 10))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(.secondary.opacity(0.1))
+                    .background(CorveilTheme.gold.opacity(0.08))
+                    .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textSecondary)
+                    .overlay(Capsule().strokeBorder(CorveilTheme.borderSubtle, lineWidth: 0.5))
                     .clipShape(Capsule())
             }
-            if issue.labels.count > 4 {
-                Text("+\(issue.labels.count - 4)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            if issue.labels.count > 3 {
+                Text("+\(issue.labels.count - 3)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(CorveilTheme.textMuted)
             }
+        }
+    }
+
+    private var statusBadge: some View {
+        let status = issue.projectStatus
+        let color = statusColor(for: status)
+        return Text(status.rawValue)
+            .font(.system(size: 10, weight: .medium))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12))
+            .foregroundStyle(isDone ? color.opacity(0.6) : color)
+            .clipShape(Capsule())
+    }
+
+    private func statusColor(for status: TicketStatus) -> Color {
+        switch status {
+        case .backlog: .gray
+        case .ready: .blue
+        case .inProgress: .orange
+        case .inReview: .purple
+        case .done: .green
+        case .unknown: .secondary
         }
     }
 
     @ViewBuilder
     private var worktreeAction: some View {
-        if let session = appState.activeSession(for: issue) {
+        if let session = linkedSession {
             Button {
                 appState.selectedSessionID = session.id
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 10))
                     Text(session.name)
                         .lineLimit(1)
+                        .font(.caption)
                 }
-                .font(.caption)
+                .foregroundStyle(.green)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(.green.opacity(0.15))
+                .background(.green.opacity(0.12))
+                .overlay(Capsule().strokeBorder(Color.green.opacity(0.3), lineWidth: 0.5))
                 .clipShape(Capsule())
             }
             .buttonStyle(.plain)
-        } else {
+        } else if !isDone {
             Button {
                 appState.onWorkOnIssue?(issue.url)
             } label: {
-                Label("Start Working", systemImage: "play.fill")
-                    .font(.caption)
+                HStack(spacing: 4) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 9))
+                    Text("Start Working")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                .foregroundStyle(CorveilTheme.gold)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(CorveilTheme.gold.opacity(0.1))
+                .overlay(Capsule().strokeBorder(CorveilTheme.goldDark.opacity(0.3), lineWidth: 0.5))
+                .clipShape(Capsule())
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            .buttonStyle(.plain)
         }
     }
 }

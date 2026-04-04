@@ -77,15 +77,20 @@ final class IssueTracker {
         // Fetch PR status (pipeline, review, mergeability) for sessions with PR links
         await fetchPRStatuses()
 
+        // Fetch done issues (closed in last 24h) and merge them in
+        if checkedGitHub {
+            let doneIssues = await fetchDoneIssuesLast24h()
+            // Avoid duplicates — a recently-closed issue may still appear in the open search
+            let openIDs = Set(allIssues.map(\.id))
+            let uniqueDone = doneIssues.filter { !openIDs.contains($0.id) }
+            allIssues.append(contentsOf: uniqueDone)
+            appState.doneIssuesLast24h = doneIssues.count
+        }
+
         appState.assignedIssues = allIssues
 
         // Sync session status for tickets that are "In Review" on the project board
         syncInReviewSessions(issues: allIssues)
-
-        // Fetch count of issues closed in last 24h
-        if checkedGitHub {
-            appState.doneIssuesLast24h = await fetchDoneIssuesLast24h()
-        }
 
         // Auto-complete sessions whose linked issue/PR is no longer open
         await autoCompleteFinishedSessions(openIssues: allIssues)
@@ -207,6 +212,7 @@ final class IssueTracker {
 
             if let output = try? await shell(
                 "gh", "pr", "list", "--repo", repoSlug, "--head", branch,
+                "--state", "all",
                 "--json", "number,url,state", "--limit", "1"
             ), let data = output.data(using: .utf8),
                let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
@@ -337,7 +343,7 @@ final class IssueTracker {
 
     // MARK: - Done Issues (Last 24h)
 
-    private func fetchDoneIssuesLast24h() async -> Int {
+    private func fetchDoneIssuesLast24h() async -> [AssignedIssue] {
         let formatter = ISO8601DateFormatter()
         let since = formatter.string(from: Date().addingTimeInterval(-86400))
 
@@ -345,15 +351,36 @@ final class IssueTracker {
             "gh", "search", "issues",
             "--assignee", "@me",
             "--state", "closed",
-            "--json", "number",
+            "--json", "number,title,state,labels,url,repository,updatedAt",
             "--limit", "50",
             "--", "closed:>\(since)"
-        ) else { return 0 }
+        ) else { return [] }
 
         guard let data = output.data(using: .utf8),
-              let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return 0 }
+              let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
 
-        return items.count
+        return items.compactMap { item -> AssignedIssue? in
+            guard let number = item["number"] as? Int,
+                  let title = item["title"] as? String,
+                  let url = item["url"] as? String else { return nil }
+
+            let state = item["state"] as? String ?? "closed"
+            let labels = (item["labels"] as? [[String: Any]])?.compactMap { $0["name"] as? String } ?? []
+            let repoDict = item["repository"] as? [String: Any]
+            let repoName = repoDict?["nameWithOwner"] as? String ?? ""
+
+            var updatedAt: Date?
+            if let dateStr = item["updatedAt"] as? String {
+                updatedAt = formatter.date(from: dateStr)
+            }
+
+            return AssignedIssue(
+                id: "github:\(repoName)#\(number)",
+                number: number, title: title, state: state.lowercased(),
+                url: url, repo: repoName, labels: labels, provider: .github,
+                updatedAt: updatedAt, projectStatus: .done
+            )
+        }
     }
 
     // MARK: - Auto-Complete Finished Sessions
