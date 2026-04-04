@@ -16,6 +16,8 @@ public struct MainContentView: View {
         } detail: {
             if appState.selectedSessionID == AppState.ticketBoardSessionID {
                 TicketBoardView(appState: appState)
+            } else if appState.selectedSessionID == AppState.allowListSessionID {
+                AllowListView(appState: appState)
             } else if let session = appState.selectedSession {
                 SessionDetailView(session: session, appState: appState)
             } else {

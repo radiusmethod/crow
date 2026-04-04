@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var socketServer: SocketServer?
     private var issueTracker: IssueTracker?
     private var notificationManager: NotificationManager?
+    private var allowListService: AllowListService?
     private var devRoot: String?
     private var appConfig: AppConfig?
 
@@ -189,6 +190,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Initialize notification manager
         let notifManager = NotificationManager(appState: appState, settings: config.notifications)
         self.notificationManager = notifManager
+
+        // Initialize allow list service
+        let allowList = AllowListService(appState: appState, devRoot: devRoot)
+        self.allowListService = allowList
+        appState.onLoadAllowList = { [weak allowList] in
+            allowList?.scan()
+        }
+        appState.onPromoteToGlobal = { [weak allowList] patterns in
+            allowList?.promoteToGlobal(patterns: patterns)
+        }
 
         // Hydrate mute state from config and wire toggle
         appState.soundMuted = config.notifications.globalMute

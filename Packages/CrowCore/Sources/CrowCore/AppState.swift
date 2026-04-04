@@ -30,6 +30,9 @@ public final class AppState {
     /// Fixed UUID for the ticket board tab.
     nonisolated public static let ticketBoardSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
+    /// Fixed UUID for the allow list tab.
+    nonisolated public static let allowListSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+
     public var managerSession: Session? {
         sessions.first { $0.id == Self.managerSessionID }
     }
@@ -45,6 +48,20 @@ public final class AppState {
 
     /// Currently selected pipeline filter on the ticket board.
     public var selectedTicketStatus: TicketStatus = .inProgress
+
+    // MARK: - Allow List
+
+    /// Aggregated allow-list entries from all worktrees.
+    public var allowEntries: [AllowEntry] = []
+    public var isLoadingAllowList: Bool = false
+
+    /// Called to scan and aggregate allow-list entries.
+    public var onLoadAllowList: (() -> Void)?
+
+    /// Called to promote selected patterns to the global settings.
+    public var onPromoteToGlobal: ((Set<String>) -> Void)?
+
+    // MARK: - PR & Tool Status
 
     /// PR status per session (pipeline, review, merge readiness).
     public var prStatus: [UUID: PRStatus] = [:]
@@ -117,7 +134,8 @@ public final class AppState {
     // MARK: - Computed Properties
 
     public var selectedSession: Session? {
-        guard selectedSessionID != Self.ticketBoardSessionID else { return nil }
+        guard selectedSessionID != Self.ticketBoardSessionID,
+              selectedSessionID != Self.allowListSessionID else { return nil }
         return sessions.first { $0.id == selectedSessionID }
     }
 

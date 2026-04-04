@@ -24,10 +24,9 @@ public struct SessionListView: View {
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
 
-            // Manager row
-            if let manager = appState.managerSession {
-                ManagerRow()
-                    .tag(manager.id)
+            // Manager + Allow List row
+            if appState.managerSession != nil {
+                ManagerAllowListRow(appState: appState)
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
@@ -172,27 +171,50 @@ struct SectionDivider: View {
     }
 }
 
-// MARK: - Manager Row
+// MARK: - Manager + Allow List Row
 
-struct ManagerRow: View {
+struct ManagerAllowListRow: View {
+    @Bindable var appState: AppState
+
     var body: some View {
-        HStack {
-            Spacer()
-            Text("Manager")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(CorveilTheme.gold)
-            Spacer()
+        HStack(spacing: 6) {
+            sidebarButton(
+                title: "Manager",
+                isActive: appState.selectedSessionID == AppState.managerSessionID
+            ) {
+                appState.selectedSessionID = AppState.managerSessionID
+            }
+
+            sidebarButton(
+                title: "Allow List",
+                isActive: appState.selectedSessionID == AppState.allowListSessionID
+            ) {
+                appState.selectedSessionID = AppState.allowListSessionID
+            }
         }
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(CorveilTheme.bgSurface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(CorveilTheme.goldDark.opacity(0.4), lineWidth: 1)
-                )
-        )
         .padding(.vertical, 2)
+    }
+
+    private func sidebarButton(title: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(isActive ? CorveilTheme.gold : CorveilTheme.goldDark)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isActive ? CorveilTheme.bgCard : CorveilTheme.bgSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(
+                                    isActive ? CorveilTheme.goldDark.opacity(0.6) : CorveilTheme.goldDark.opacity(0.3),
+                                    lineWidth: 1
+                                )
+                        )
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
 
