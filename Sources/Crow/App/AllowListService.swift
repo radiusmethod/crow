@@ -26,14 +26,7 @@ final class AllowListService {
             aggregated[pattern, default: []].insert(.global)
         }
 
-        // 2. Workspace: {devRoot}/.claude/settings.json
-        let workspacePath = (devRoot as NSString)
-            .appendingPathComponent(".claude/settings.json")
-        for pattern in readAllowList(at: workspacePath) {
-            aggregated[pattern, default: []].insert(.workspace)
-        }
-
-        // 3. Per-worktree: {worktreePath}/.claude/settings.local.json
+        // 2. Per-worktree: {worktreePath}/.claude/settings.local.json
         let sessionsByID = Dictionary(grouping: appState.sessions, by: \.id)
         for (sessionID, worktrees) in appState.worktrees {
             let sessionName = sessionsByID[sessionID]?.first?.name ?? sessionID.uuidString

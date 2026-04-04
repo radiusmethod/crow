@@ -4,8 +4,6 @@ import Foundation
 public enum AllowSource: Hashable, Sendable {
     /// Found in `~/.claude/settings.json`.
     case global
-    /// Found in `{devRoot}/.claude/settings.json` (Crow-managed workspace permissions).
-    case workspace
     /// Found in a worktree's `.claude/settings.local.json`.
     case worktree(sessionName: String, path: String)
 }
@@ -22,11 +20,6 @@ public struct AllowEntry: Identifiable, Hashable, Sendable {
     /// Whether this pattern already exists in the global `~/.claude/settings.json`.
     public var isInGlobal: Bool {
         sources.contains(.global)
-    }
-
-    /// Whether this pattern exists in the workspace-level settings.
-    public var isInWorkspace: Bool {
-        sources.contains(.workspace)
     }
 
     /// Session names from worktree sources.

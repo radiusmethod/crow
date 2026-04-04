@@ -8,16 +8,23 @@ public struct AllowListView: View {
     @Bindable var appState: AppState
     @State private var selection: Set<String> = []
     @State private var searchText = ""
+    @State private var hideGlobal = false
 
     public init(appState: AppState) {
         self.appState = appState
     }
 
     private var filteredEntries: [AllowEntry] {
-        if searchText.isEmpty { return appState.allowEntries }
-        return appState.allowEntries.filter {
-            $0.pattern.localizedCaseInsensitiveContains(searchText)
+        var entries = appState.allowEntries
+        if hideGlobal {
+            entries = entries.filter { !$0.isInGlobal }
         }
+        if !searchText.isEmpty {
+            entries = entries.filter {
+                $0.pattern.localizedCaseInsensitiveContains(searchText)
+            }
+        }
+        return entries
     }
 
     private var promotableSelection: Set<String> {
@@ -82,6 +89,11 @@ public struct AllowListView: View {
             .background(CorveilTheme.bgCard)
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
+            Toggle("Hide Global", isOn: $hideGlobal)
+                .toggleStyle(.checkbox)
+                .font(.system(size: 12))
+                .foregroundStyle(CorveilTheme.textSecondary)
+
             Spacer()
 
             Button {
@@ -136,9 +148,6 @@ struct AllowEntryRow: View {
             HStack(spacing: 6) {
                 if entry.isInGlobal {
                     SourceBadge(label: "Global", color: .green)
-                }
-                if entry.isInWorkspace {
-                    SourceBadge(label: "Workspace", color: CorveilTheme.gold)
                 }
                 ForEach(entry.worktreeSessionNames, id: \.self) { name in
                     SourceBadge(label: name, color: .blue)
