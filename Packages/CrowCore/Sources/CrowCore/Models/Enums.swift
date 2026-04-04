@@ -61,6 +61,16 @@ public enum TicketStatus: String, Codable, Sendable, CaseIterable {
     case done       = "Done"
     case unknown    = "Unknown"
 
-    /// The four active pipeline stages shown in the UI.
-    public static let pipelineStatuses: [TicketStatus] = [.backlog, .ready, .inProgress, .inReview]
+    /// The pipeline stages shown in the UI (including Done).
+    public static let pipelineStatuses: [TicketStatus] = [.backlog, .ready, .inProgress, .inReview, .done]
+}
+
+/// Sort order options for the ticket board.
+public enum TicketSortOrder: String, CaseIterable, Sendable {
+    case updatedDesc = "Recently Updated"
+    case updatedAsc  = "Oldest Updated"
+    case titleAsc    = "Title A–Z"
+    case titleDesc   = "Title Z–A"
+    case numberDesc  = "Newest"
+    case numberAsc   = "Oldest"
 }
