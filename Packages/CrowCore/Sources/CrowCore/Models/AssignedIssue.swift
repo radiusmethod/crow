@@ -10,9 +10,12 @@ public struct AssignedIssue: Identifiable, Codable, Sendable {
     public var repo: String         // "org/repo"
     public var labels: [String]
     public var provider: Provider
+    /// PR number linked via closing issue references, if any.
     public var prNumber: Int?
+    /// URL of the linked pull request, if any.
     public var prURL: String?
     public var updatedAt: Date?
+    /// Pipeline status from the GitHub/GitLab project board.
     public var projectStatus: TicketStatus
 
     public init(
@@ -21,9 +24,17 @@ public struct AssignedIssue: Identifiable, Codable, Sendable {
         provider: Provider, prNumber: Int? = nil, prURL: String? = nil,
         updatedAt: Date? = nil, projectStatus: TicketStatus = .unknown
     ) {
-        self.id = id; self.number = number; self.title = title; self.state = state
-        self.url = url; self.repo = repo; self.labels = labels
-        self.provider = provider; self.prNumber = prNumber; self.prURL = prURL
-        self.updatedAt = updatedAt; self.projectStatus = projectStatus
+        self.id = id
+        self.number = number
+        self.title = title
+        self.state = state
+        self.url = url
+        self.repo = repo
+        self.labels = labels
+        self.provider = provider
+        self.prNumber = prNumber
+        self.prURL = prURL
+        self.updatedAt = updatedAt
+        self.projectStatus = projectStatus
     }
 }

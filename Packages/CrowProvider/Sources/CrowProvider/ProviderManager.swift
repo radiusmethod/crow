@@ -11,6 +11,9 @@ public actor ProviderManager {
     }
 
     /// Detect provider from a URL string.
+    ///
+    /// Falls back to `.github` for unrecognized hosts — the `gh` CLI call will fail clearly
+    /// if the URL is actually a self-hosted GitLab instance, which is an acceptable failure mode.
     public func detectProvider(from url: String) -> (provider: Provider, cli: String, host: String?) {
         if url.contains("github.com") {
             return (.github, "gh", nil)
@@ -26,29 +29,41 @@ public actor ProviderManager {
         return (.github, "gh", nil)
     }
 
-    /// Parse issue/PR number and repo from a URL.
+    /// Parse issue/PR number and repo from a ticket URL.
+    ///
+    /// Supported formats:
+    /// - GitHub issue: `https://github.com/{org}/{repo}/issues/{number}`
+    /// - GitHub PR:    `https://github.com/{org}/{repo}/pull/{number}`
+    /// - GitLab issue: `https://{host}/{org}/{repo}/-/issues/{number}`
+    /// - GitLab MR:    `https://{host}/{org}/{repo}/-/merge_requests/{number}`
+    ///
+    /// - Returns: A tuple of `(org, repo, number, isMR)` where `isMR` is true for pull requests
+    ///   and merge requests, or `nil` if the URL doesn't match a supported format.
     public func parseTicketURL(_ url: String) -> (org: String, repo: String, number: Int, isMR: Bool)? {
-        // GitHub: https://github.com/{org}/{repo}/issues/{number}
-        // GitHub: https://github.com/{org}/{repo}/pull/{number}
-        // GitLab: https://host/{org}/{repo}/-/issues/{number}
-        // GitLab: https://host/{org}/{repo}/-/merge_requests/{number}
+        Self.parseTicketURLComponents(url)
+    }
+
+    /// Static variant of ``parseTicketURL(_:)`` usable without an actor instance.
+    public static func parseTicketURLComponents(_ url: String) -> (org: String, repo: String, number: Int, isMR: Bool)? {
+        // split(separator:) omits empty subsequences, so "https://host/..." becomes:
+        // ["https:", "host", "org", "repo", ...]
         let parts = url.split(separator: "/").map(String.init)
-        guard parts.count >= 5 else { return nil }
+        guard parts.count >= 4 else { return nil }
 
         if url.contains("github.com") {
-            // parts: ["https:", "", "github.com", org, repo, "issues"|"pull", number]
-            guard parts.count >= 7,
+            // ["https:", "github.com", org, repo, "issues"|"pull", number]
+            guard parts.count >= 6,
                   let number = Int(parts[parts.count - 1]) else { return nil }
-            let org = parts[3]
-            let repo = parts[4]
+            let org = parts[2]
+            let repo = parts[3]
             let isMR = parts[parts.count - 2] == "pull"
             return (org, repo, number, isMR)
         } else {
-            // GitLab: ["https:", "", host, org, repo, "-", "issues"|"merge_requests", number]
-            guard parts.count >= 8,
+            // GitLab: ["https:", host, org, repo, "-", "issues"|"merge_requests", number]
+            guard parts.count >= 7,
                   let number = Int(parts[parts.count - 1]) else { return nil }
-            let org = parts[3]
-            let repo = parts[4]
+            let org = parts[2]
+            let repo = parts[3]
             let isMR = parts[parts.count - 2] == "merge_requests"
             return (org, repo, number, isMR)
         }
@@ -129,6 +144,7 @@ public actor ProviderManager {
     }
 }
 
+/// Details about a ticket (issue or PR/MR) fetched from a provider.
 public struct TicketInfo: Sendable {
     public let number: Int
     public let title: String
