@@ -1,4 +1,4 @@
-.PHONY: build setup ghostty app release sign clean clean-all check help
+.PHONY: build setup ghostty app release sign clean clean-all check test help
 
 FRAMEWORKS_DIR := Frameworks
 XCFW := $(FRAMEWORKS_DIR)/GhosttyKit.xcframework
@@ -14,6 +14,7 @@ help:
 	@echo "  build      Full build: submodules + ghostty + swift build (default)"
 	@echo "  setup      Init submodules and check build prerequisites"
 	@echo "  check      Verify all build and runtime prerequisites"
+	@echo "  test       Run unit tests for CrowCore and CrowPersistence"
 	@echo "  ghostty    Build GhosttyKit framework"
 	@echo "  app        Swift build only (debug)"
 	@echo "  release    Release build + .app bundle"
@@ -64,6 +65,12 @@ clean:
 
 clean-all: clean
 	rm -rf $(FRAMEWORKS_DIR)
+
+# --- Test ---
+
+test:
+	swift test --package-path Packages/CrowCore
+	swift test --package-path Packages/CrowPersistence
 
 # --- Check ---
 
