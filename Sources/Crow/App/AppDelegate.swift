@@ -117,31 +117,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task { await service.detectOrphanedWorktrees() }
 
         // Check for runtime dependencies (non-blocking)
-        Task.detached { [weak appState] in
-            let tools = ["gh", "git", "claude", "glab", "code"]
-            var missing: [String] = []
-            for tool in tools {
-                let proc = Process()
-                proc.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-                proc.arguments = [tool]
-                proc.standardOutput = FileHandle.nullDevice
-                proc.standardError = FileHandle.nullDevice
-                do {
-                    try proc.run()
-                    proc.waitUntilExit()
-                    if proc.terminationStatus != 0 {
-                        NSLog("[Crow] Runtime dependency not found: %@", tool)
-                        missing.append(tool)
+        Task {
+            let missing = await Task.detached {
+                var result: [String] = []
+                let tools = ["gh", "git", "claude", "glab", "code"]
+                for tool in tools {
+                    let proc = Process()
+                    proc.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+                    proc.arguments = [tool]
+                    proc.standardOutput = FileHandle.nullDevice
+                    proc.standardError = FileHandle.nullDevice
+                    do {
+                        try proc.run()
+                        proc.waitUntilExit()
+                        if proc.terminationStatus != 0 {
+                            NSLog("[Crow] Runtime dependency not found: %@", tool)
+                            result.append(tool)
+                        }
+                    } catch {
+                        NSLog("[Crow] Could not check for %@: %@", tool, error.localizedDescription)
+                        result.append(tool)
                     }
-                } catch {
-                    NSLog("[Crow] Could not check for %@: %@", tool, error.localizedDescription)
-                    missing.append(tool)
                 }
-            }
+                return result
+            }.value
             if !missing.isEmpty {
-                await MainActor.run {
-                    appState?.missingDependencies = missing
-                }
+                appState.missingDependencies = missing
             }
         }
 
