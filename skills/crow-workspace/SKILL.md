@@ -197,12 +197,23 @@ git -C {repo_path} worktree add {path} \
 
 All `crow` commands require `dangerouslyDisableSandbox: true`.
 
+### Session Naming Convention
+
+The session name **MUST** match the worktree directory name (which is the branch slug without the `feature/` prefix):
+
+- **Ticket-based:** `{repo}-{ticket_number}-{slug}` (e.g., `crow-51-drag-drop-photo`)
+- **PR-based:** `{repo}-{pr_branch_slug}` (e.g., `citadel-45-jwt-validation`)
+- **Natural language:** `{repo}-{feature-slug}` (e.g., `citadel-update-auth`)
+
+This keeps session names, worktree paths, and branch names consistent.
+
 ### Complete Step-by-Step Flow
 
 ```bash
 # 1. Create session (parse session_id from JSON output)
-crow new-session --name "{feature_name}"
-# Output: {"session_id":"<uuid>","name":"feature_name"}
+#    The name MUST match the worktree directory name
+crow new-session --name "{repo}-{ticket_number}-{slug}"
+# Output: {"session_id":"<uuid>","name":"crow-51-drag-drop-photo"}
 
 # 2. Set ticket metadata (only if URL was provided)
 crow set-ticket --session {session_id} \
@@ -259,7 +270,7 @@ gh issue edit {ticket_url} --add-assignee @me
 #    IMPORTANT: Write to {devRoot}/.claude/prompts/ — NOT $TMPDIR (which differs per session)
 #    The prompt MUST start with /plan to enter plan mode
 mkdir -p {devRoot}/.claude/prompts
-cat > {devRoot}/.claude/prompts/crow-prompt-{feature_name}.md << 'PROMPT'
+cat > {devRoot}/.claude/prompts/crow-prompt-{session_name}.md << 'PROMPT'
 {prompt content — see template below}
 PROMPT
 
@@ -282,14 +293,14 @@ sleep 3
 #    Use single quotes so the shell doesn't expand $(cat ...).
 #    Use --permission-mode plan to start Claude in plan mode.
 #    Use full path to claude binary.
-crow send --session {session_id} --terminal {terminal_id} 'cd {primary_worktree_path} && {claude_binary_path} --permission-mode plan "$(cat {devRoot}/.claude/prompts/crow-prompt-{feature_name}.md)"\n'
+crow send --session {session_id} --terminal {terminal_id} 'cd {primary_worktree_path} && {claude_binary_path} --permission-mode plan "$(cat {devRoot}/.claude/prompts/crow-prompt-{session_name}.md)"\n'
 ```
 
 ## First Prompt Template
 
 IMPORTANT: Always use full absolute paths, never abbreviated (`...`) or home-relative (`~`) paths.
 
-The prompt is written to `{devRoot}/.claude/prompts/crow-prompt-{feature_name}.md`. It starts with `/plan` to enter plan mode.
+The prompt is written to `{devRoot}/.claude/prompts/crow-prompt-{session_name}.md`. It starts with `/plan` to enter plan mode.
 
 **Repo descriptions for the prompt table:**
 
