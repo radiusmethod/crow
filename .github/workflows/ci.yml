@@ -11,21 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Test
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: "16"
-
-      - name: Run tests
-        run: swift test --package-path Packages/CrowCore
-
-  build:
-    name: Build
+  build-and-test:
+    name: Build & Test
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -70,3 +57,12 @@ jobs:
 
       - name: Build
         run: swift build
+
+      - name: Run all tests
+        run: |
+          for pkg in Packages/*/; do
+            if [ -d "$pkg/Tests" ]; then
+              echo "Testing $pkg..."
+              swift test --package-path "$pkg"
+            fi
+          done
