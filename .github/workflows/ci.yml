@@ -53,7 +53,9 @@ jobs:
 
       - name: Build Ghostty
         if: steps.ghostty-cache.outputs.cache-hit != 'true'
-        run: make ghostty
+        run: |
+          unset ZIG_LOCAL_CACHE_DIR ZIG_GLOBAL_CACHE_DIR
+          make ghostty
 
       - name: Cache SPM dependencies
         uses: actions/cache@v4
