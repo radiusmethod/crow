@@ -78,6 +78,9 @@ public final class AppState {
     /// Whether the VS Code `code` CLI is available on this system.
     public var vsCodeAvailable: Bool = false
 
+    /// Runtime dependencies that were not found at startup (e.g., "gh", "git", "claude").
+    public var missingDependencies: [String] = []
+
     /// Terminal readiness state per terminal ID.
     public var terminalReadiness: [UUID: TerminalReadiness] = [:]
 

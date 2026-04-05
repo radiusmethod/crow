@@ -30,13 +30,13 @@ struct Scaffolder {
            let range = existing.range(of: "## Known Issues / Corrections") {
             // Preserve user corrections, replace everything above
             var userCorrections = String(existing[range.lowerBound...])
-            // Sanitize stale references from pre-rename installations
+            // Sanitize stale references from pre-rename installations (case-insensitive)
             userCorrections = userCorrections
-                .replacingOccurrences(of: "ride ", with: "crow ")
-                .replacingOccurrences(of: "`ride`", with: "`crow`")
-                .replacingOccurrences(of: "ride.sock", with: "crow.sock")
-                .replacingOccurrences(of: "/ride-workspace", with: "/crow-workspace")
-                .replacingOccurrences(of: "rm-ai-ide", with: "Crow")
+                .replacingOccurrences(of: "ride ", with: "crow ", options: .caseInsensitive)
+                .replacingOccurrences(of: "`ride`", with: "`crow`", options: .caseInsensitive)
+                .replacingOccurrences(of: "ride.sock", with: "crow.sock", options: .caseInsensitive)
+                .replacingOccurrences(of: "/ride-workspace", with: "/crow-workspace", options: .caseInsensitive)
+                .replacingOccurrences(of: "rm-ai-ide", with: "Crow", options: .caseInsensitive)
             let templateBase: String
             if let templateRange = template.range(of: "## Known Issues / Corrections") {
                 templateBase = String(template[..<templateRange.lowerBound])
@@ -149,7 +149,11 @@ struct Scaffolder {
         for _ in 0..<10 {
             if FileManager.default.fileExists(atPath: dir.appendingPathComponent("Package.swift").path) {
                 let filePath = dir.appendingPathComponent(relativePath)
-                return try? String(contentsOf: filePath)
+                if let content = try? String(contentsOf: filePath) {
+                    return content
+                }
+                NSLog("[Scaffolder] File not found at repo path: %@", filePath.path)
+                return nil
             }
             dir = dir.deletingLastPathComponent()
         }

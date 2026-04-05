@@ -13,8 +13,12 @@ enum AppSupportDirectory {
         let oldDir = appSupport.appendingPathComponent("rm-ai-ide", isDirectory: true)
         if !FileManager.default.fileExists(atPath: crowDir.path),
            FileManager.default.fileExists(atPath: oldDir.path) {
-            try? FileManager.default.copyItem(at: oldDir, to: crowDir)
-            NSLog("[AppSupportDirectory] Migrated data from rm-ai-ide to crow")
+            do {
+                try FileManager.default.copyItem(at: oldDir, to: crowDir)
+                NSLog("[AppSupportDirectory] Migrated data from rm-ai-ide to crow")
+            } catch {
+                NSLog("[AppSupportDirectory] Failed to migrate rm-ai-ide data: %@", error.localizedDescription)
+            }
         }
         return crowDir
     }()
