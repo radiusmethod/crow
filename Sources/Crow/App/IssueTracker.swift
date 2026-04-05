@@ -93,7 +93,7 @@ final class IssueTracker {
         syncInReviewSessions(issues: allIssues)
 
         // Auto-complete sessions whose linked issue/PR is no longer open
-        await autoCompleteFinishedSessions(openIssues: allIssues)
+        await autoCompleteFinishedSessions(openIssues: allIssues.filter { $0.state == "open" })
     }
 
     // MARK: - GitHub
@@ -403,7 +403,11 @@ final class IssueTracker {
     private func autoCompleteFinishedSessions(openIssues: [AssignedIssue]) async {
         let openIssueURLs = Set(openIssues.map(\.url))
 
-        for session in appState.activeSessions {
+        let candidateSessions = appState.sessions.filter {
+            $0.id != AppState.managerSessionID &&
+            ($0.status == .active || $0.status == .paused || $0.status == .inReview)
+        }
+        for session in candidateSessions {
             guard let ticketURL = session.ticketURL else { continue }
 
             // If the issue is still in the open list, it's not finished

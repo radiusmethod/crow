@@ -28,6 +28,8 @@ public final class GhosttySurfaceView: NSView {
 
         wantsLayer = true
         layer?.isOpaque = true
+
+        registerForDraggedTypes([.fileURL])
     }
 
     @available(*, unavailable)
@@ -321,6 +323,48 @@ public final class GhosttySurfaceView: NSView {
             }
         }
         NSLog("writeText: sent \(text.count) chars, \(parts.count - 1) newlines")
+    }
+
+    // MARK: - Drag & Drop
+
+    public override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard sender.draggingPasteboard.canReadObject(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) else { return [] }
+        return .copy
+    }
+
+    public override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        .copy
+    }
+
+    public override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        true
+    }
+
+    public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let surface else { return false }
+        guard let urls = sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL], !urls.isEmpty else { return false }
+
+        let escapedPaths = urls.map { Self.shellEscapePath($0.path) }
+        let text = escapedPaths.joined(separator: " ")
+
+        text.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
+        }
+        return true
+    }
+
+    private static func shellEscapePath(_ path: String) -> String {
+        let needsEscaping = path.contains { c in
+            " \t'\"\\()&|;!$`#*?[]{}~<>".contains(c)
+        }
+        guard needsEscaping else { return path }
+        return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     // MARK: - Helpers
