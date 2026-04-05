@@ -5,7 +5,16 @@ import Darwin
 import Glibc
 #endif
 
-/// Unix domain socket server that accepts JSON-RPC connections.
+/// Unix domain socket server that accepts JSON-RPC 2.0 connections.
+///
+/// Listens on a newline-delimited JSON-RPC 2.0 protocol over a Unix domain
+/// socket at `~/.local/share/crow/crow.sock`. Each client connection sends
+/// one request and receives one response. The socket file is restricted to
+/// owner-only access (0o600) within an owner-only directory (0o700).
+///
+/// Threading model: an accept loop runs on a dedicated GCD queue. Each
+/// accepted connection is dispatched to the global concurrent queue where
+/// it blocks until the async handler completes via a semaphore bridge.
 public final class SocketServer: @unchecked Sendable {
     private let socketPath: String
     private let router: CommandRouter
@@ -14,7 +23,7 @@ public final class SocketServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.radiusmethod.crow.socket", qos: .userInitiated)
 
     /// Maximum size of a single JSON-RPC message (1 MB).
-    private static let maxMessageSize = 1_048_576
+    static let maxMessageSize = 1_048_576
 
     public init(socketPath: String? = nil, router: CommandRouter) {
         self.socketPath = socketPath ?? Self.defaultSocketPath()
@@ -142,7 +151,10 @@ public final class SocketServer: @unchecked Sendable {
             return
         }
 
-        // Route to handler (async bridge)
+        // Bridge from sync socket I/O to async handler. Blocks one GCD thread
+        // per active connection — acceptable since Crow processes one CLI
+        // request at a time. A full async I/O rewrite would avoid the blocked
+        // thread but is out of scope for the current architecture.
         let semaphore = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var response: JSONRPCResponse?
         let capturedRouter = router
@@ -165,8 +177,15 @@ public final class SocketServer: @unchecked Sendable {
         encoder.outputFormatting = [.sortedKeys]
         guard var data = try? encoder.encode(response) else { return }
         data.append(UInt8(ascii: "\n"))
-        data.withUnsafeBytes { ptr in
-            _ = write(fd, ptr.baseAddress!, ptr.count)
+        data.withUnsafeBytes { rawBuffer in
+            var remaining = rawBuffer.count
+            var offset = 0
+            while remaining > 0 {
+                let written = write(fd, rawBuffer.baseAddress! + offset, remaining)
+                if written < 0 { return }  // client disconnected
+                offset += written
+                remaining -= written
+            }
         }
     }
 }
@@ -176,6 +195,10 @@ public enum SocketError: Error, LocalizedError {
     case bindFailed(Int32)
     case listenFailed(Int32)
     case connectionFailed(Int32)
+    case writeFailed(Int32)
+    case readFailed(Int32)
+    case timeout
+    case responseTooLarge
 
     public var errorDescription: String? {
         switch self {
@@ -183,6 +206,10 @@ public enum SocketError: Error, LocalizedError {
         case .bindFailed(let e): "Socket bind failed: \(String(cString: strerror(e)))"
         case .listenFailed(let e): "Socket listen failed: \(String(cString: strerror(e)))"
         case .connectionFailed(let e): "Socket connection failed: \(String(cString: strerror(e)))"
+        case .writeFailed(let e): "Socket write failed: \(String(cString: strerror(e)))"
+        case .readFailed(let e): "Socket read failed: \(String(cString: strerror(e)))"
+        case .timeout: "Socket read timed out"
+        case .responseTooLarge: "Response exceeded maximum size"
         }
     }
 }

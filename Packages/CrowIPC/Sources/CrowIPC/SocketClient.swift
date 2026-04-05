@@ -5,9 +5,16 @@ import Darwin
 import Glibc
 #endif
 
-/// Unix domain socket client for sending JSON-RPC requests.
+/// Unix domain socket client for sending JSON-RPC 2.0 requests.
+///
+/// Creates a new connection per request, sends a newline-delimited JSON-RPC
+/// message, and reads the response. Applies a 30-second read timeout and
+/// a 1 MB response size limit matching the server's request limit.
 public struct SocketClient: Sendable {
     private let socketPath: String
+
+    /// Read timeout in seconds applied via `SO_RCVTIMEO`.
+    private static let readTimeoutSeconds: Int = 30
 
     public init(socketPath: String? = nil) {
         self.socketPath = socketPath ?? {
@@ -20,6 +27,10 @@ public struct SocketClient: Sendable {
     }
 
     /// Send a JSON-RPC request and return the response.
+    ///
+    /// - Throws: `SocketError.timeout` if the server doesn't respond within 30 seconds.
+    /// - Throws: `SocketError.responseTooLarge` if the response exceeds 1 MB.
+    /// - Throws: `SocketError.writeFailed` if sending the request fails.
     public func send(method: String, params: [String: JSONValue] = [:]) throws -> JSONRPCResponse {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else {
@@ -47,6 +58,10 @@ public struct SocketClient: Sendable {
             throw SocketError.connectionFailed(errno)
         }
 
+        // Set read timeout so a hung server doesn't block the CLI indefinitely
+        var timeout = timeval(tv_sec: Self.readTimeoutSeconds, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+
         // Send request
         let request = JSONRPCRequest(id: 1, method: method, params: params.isEmpty ? nil : params)
         let encoder = JSONEncoder()
@@ -54,18 +69,36 @@ public struct SocketClient: Sendable {
         var data = try encoder.encode(request)
         data.append(UInt8(ascii: "\n"))
 
-        data.withUnsafeBytes { ptr in
-            _ = write(fd, ptr.baseAddress!, ptr.count)
+        let writeOK = data.withUnsafeBytes { rawBuffer -> Bool in
+            var remaining = rawBuffer.count
+            var offset = 0
+            while remaining > 0 {
+                let written = write(fd, rawBuffer.baseAddress! + offset, remaining)
+                if written < 0 { return false }
+                offset += written
+                remaining -= written
+            }
+            return true
         }
+        guard writeOK else { throw SocketError.writeFailed(errno) }
 
-        // Read response until newline
+        // Read response until newline (with size limit and timeout awareness)
         var responseData = Data()
         var byte: UInt8 = 0
         while true {
             let bytesRead = read(fd, &byte, 1)
-            if bytesRead <= 0 { break }
+            if bytesRead < 0 {
+                if errno == EAGAIN || errno == EWOULDBLOCK {
+                    throw SocketError.timeout
+                }
+                throw SocketError.readFailed(errno)
+            }
+            if bytesRead == 0 { break }
             if byte == UInt8(ascii: "\n") { break }
             responseData.append(byte)
+            if responseData.count >= SocketServer.maxMessageSize {
+                throw SocketError.responseTooLarge
+            }
         }
 
         let decoder = JSONDecoder()

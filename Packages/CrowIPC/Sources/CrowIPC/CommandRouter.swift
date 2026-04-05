@@ -1,6 +1,12 @@
 import Foundation
 
-/// Routes JSON-RPC method names to handler closures.
+/// Routes JSON-RPC method names to async handler closures.
+///
+/// Each handler receives the request's `params` dictionary (or an empty
+/// dictionary if none were sent) and returns a result dictionary. Errors
+/// thrown by handlers are converted to JSON-RPC error responses:
+/// - Errors conforming to ``RPCErrorCoded`` use their specific error code.
+/// - All other errors are reported as `-32000` (application error).
 public final class CommandRouter: Sendable {
     public typealias Handler = @Sendable ([String: JSONValue]) async throws -> [String: JSONValue]
 
@@ -18,6 +24,8 @@ public final class CommandRouter: Sendable {
         do {
             let result = try await handler(request.params ?? [:])
             return .success(id: request.id, result: result)
+        } catch let coded as RPCErrorCoded {
+            return .error(id: request.id, code: coded.rpcErrorCode, message: coded.localizedDescription)
         } catch {
             return .error(id: request.id, code: RPCErrorCode.applicationError, message: error.localizedDescription)
         }

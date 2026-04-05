@@ -9,5 +9,6 @@ let package = Package(
     ],
     targets: [
         .target(name: "CrowIPC"),
+        .testTarget(name: "CrowIPCTests", dependencies: ["CrowIPC"]),
     ]
 )
