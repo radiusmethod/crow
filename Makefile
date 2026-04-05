@@ -1,4 +1,4 @@
-.PHONY: build setup ghostty app release clean clean-all check help
+.PHONY: build setup ghostty app release sign dmg dist clean clean-all check help
 
 FRAMEWORKS_DIR := Frameworks
 XCFW := $(FRAMEWORKS_DIR)/GhosttyKit.xcframework
@@ -17,6 +17,9 @@ help:
 	@echo "  ghostty    Build GhosttyKit framework"
 	@echo "  app        Swift build only (debug)"
 	@echo "  release    Release build + .app bundle"
+	@echo "  sign       Code-sign Crow.app (ad-hoc or Developer ID)"
+	@echo "  dmg        Create distributable DMG"
+	@echo "  dist       Full distribution: release + sign + dmg"
 	@echo "  clean      Remove .build/ (keeps ghostty framework)"
 	@echo "  clean-all  Remove .build/ and Frameworks/ (full rebuild)"
 	@echo ""
@@ -52,6 +55,16 @@ app: $(XCFW)
 release: $(XCFW)
 	bash scripts/generate-build-info.sh
 	bash scripts/bundle.sh
+
+# --- Distribution ---
+
+sign: release
+	bash scripts/sign.sh
+
+dmg: sign
+	bash scripts/create-dmg.sh
+
+dist: dmg
 
 # --- Clean ---
 

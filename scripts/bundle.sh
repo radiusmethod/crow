@@ -8,6 +8,22 @@ BUILD_DIR="$ROOT_DIR/.build/release"
 APP_DIR="$ROOT_DIR/Crow.app"
 FRAMEWORKS_DIR="$ROOT_DIR/Frameworks"
 
+# --- Version ---
+if [ -n "${VERSION:-}" ]; then
+    APP_VERSION="$VERSION"
+elif [ -f "$ROOT_DIR/VERSION" ]; then
+    APP_VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")"
+else
+    APP_VERSION="0.1.0"
+fi
+
+# Build number from git commit count
+if git -C "$ROOT_DIR" rev-parse HEAD >/dev/null 2>&1; then
+    BUILD_NUMBER=$(git -C "$ROOT_DIR" rev-list --count HEAD)
+else
+    BUILD_NUMBER="1"
+fi
+
 echo "==> Generating build info..."
 bash "$SCRIPT_DIR/generate-build-info.sh"
 
@@ -15,7 +31,7 @@ echo "==> Building release..."
 cd "$ROOT_DIR"
 swift build -c release
 
-echo "==> Creating app bundle..."
+echo "==> Creating app bundle (version $APP_VERSION, build $BUILD_NUMBER)..."
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
@@ -30,7 +46,7 @@ if [ -d "$FRAMEWORKS_DIR/ghostty-resources" ]; then
 fi
 
 # Create Info.plist
-cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
+cat > "$APP_DIR/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -44,9 +60,9 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
     <key>CFBundleDisplayName</key>
     <string>Crow</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>${BUILD_NUMBER}</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>${APP_VERSION}</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>

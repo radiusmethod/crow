@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  ZIG_VERSION: '0.15.2'
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Verify prerequisites
+        run: |
+          echo "Zig: $(zig version)"
+          echo "Swift: $(swift --version)"
+          xcrun -sdk macosx metal --version
+
+      - name: Cache GhosttyKit
+        id: cache-ghostty
+        uses: actions/cache@v4
+        with:
+          path: |
+            Frameworks/GhosttyKit.xcframework
+            Frameworks/ghostty-resources
+          key: ghosttykit-${{ runner.os }}-${{ hashFiles('vendor/ghostty/**') }}-zig${{ env.ZIG_VERSION }}
+
+      - name: Build GhosttyKit
+        if: steps.cache-ghostty.outputs.cache-hit != 'true'
+        run: bash scripts/build-ghostty.sh
+
+      - name: Build release
+        run: make release
+
+      - name: Sign
+        run: bash scripts/sign.sh
+        env:
+          DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+
+      - name: Notarize
+        if: ${{ secrets.APPLE_ID != '' }}
+        run: |
+          xcrun notarytool submit Crow.app --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple Crow.app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+
+      - name: Create DMG
+        run: |
+          brew install create-dmg
+          bash scripts/create-dmg.sh
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Crow-${{ env.VERSION }}-arm64.dmg
+          path: Crow-${{ env.VERSION }}-arm64.dmg
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Crow-${{ env.VERSION }}-arm64.dmg
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

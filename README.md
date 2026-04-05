@@ -2,6 +2,56 @@
 
 A native macOS application for managing AI-powered development sessions. Orchestrates git worktrees, Claude Code instances, and GitHub/GitLab issue tracking in a unified interface with an embedded Ghostty terminal.
 
+## Installation
+
+### Download (Recommended)
+
+Download the latest DMG from [GitHub Releases](https://github.com/radiusmethod/crow/releases/latest), open it, and drag **Crow.app** to your Applications folder.
+
+> **Note:** If macOS shows "Crow can't be opened because Apple cannot check it for malicious software," right-click the app and select **Open**, then click **Open** in the dialog. This is expected for apps distributed outside the Mac App Store without a Developer ID signature.
+
+### Homebrew
+
+*Coming soon.* Once available:
+
+```bash
+brew install radiusmethod/tap/crow
+```
+
+### Build from Source
+
+See [Prerequisites](#prerequisites) and [Quick Start](#quick-start) below.
+
+### Platform Support
+
+| Platform | Architecture | Status |
+|----------|-------------|--------|
+| macOS 14+ (Sonoma) | Apple Silicon (arm64) | Supported |
+| macOS (Intel) | x86_64 | Not supported |
+| Linux | — | Not planned (heavy AppKit/SwiftUI/Metal dependency) |
+| Windows | — | Not planned |
+
+### Runtime Dependencies
+
+Regardless of installation method, the following tools must be installed separately:
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| `gh` | GitHub issue tracking and PR status | `brew install gh` |
+| `git` | Worktree management | Ships with Xcode CLT |
+| `claude` | Claude Code AI assistant | [claude.ai/download](https://claude.ai/download) |
+| `glab` | GitLab CLI (optional) | `brew install glab` |
+
+### Updating
+
+Crow does not currently include auto-update. To update:
+
+- **Download:** Re-download the latest DMG from [GitHub Releases](https://github.com/radiusmethod/crow/releases/latest) and replace the app in your Applications folder.
+- **Homebrew:** `brew upgrade crow` (once the tap is available).
+- **Source:** `git pull && make build`.
+
+Auto-update via Sparkle or GitHub API polling may be added in a future release based on user demand.
+
 ## Prerequisites
 
 ### System Requirements
