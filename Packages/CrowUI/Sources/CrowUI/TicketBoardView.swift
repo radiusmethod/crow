@@ -46,35 +46,7 @@ public struct TicketBoardView: View {
             }
 
             // Row 2: Search field
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12))
-                    .foregroundStyle(CorveilTheme.textMuted)
-                TextField("Search tickets...", text: $appState.ticketSearchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundStyle(CorveilTheme.textPrimary)
-                if !appState.ticketSearchText.isEmpty {
-                    Button {
-                        appState.ticketSearchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundStyle(CorveilTheme.textMuted)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(CorveilTheme.bgCard)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(CorveilTheme.borderSubtle, lineWidth: 1)
-                    )
-            )
+            SearchField("Search tickets...", text: $appState.ticketSearchText)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -170,6 +142,7 @@ struct PipelineView: View {
     }
 }
 
+/// "All" segment in the pipeline view, showing total issue count.
 struct AllPipelineSegment: View {
     let count: Int
     let isSelected: Bool
@@ -202,6 +175,7 @@ struct AllPipelineSegment: View {
     }
 }
 
+/// Single pipeline stage segment with count badge.
 struct PipelineSegment: View {
     let status: TicketStatus
     let count: Int
@@ -212,7 +186,7 @@ struct PipelineSegment: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(statusColor)
+                    .fill(status.color)
                     .frame(width: 8, height: 8)
                 Text(status.rawValue)
                     .font(.callout)
@@ -222,32 +196,22 @@ struct PipelineSegment: View {
                     .fontWeight(.medium)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(isSelected ? statusColor.opacity(0.2) : Color.secondary.opacity(0.1))
+                    .background(isSelected ? status.color.opacity(0.2) : Color.secondary.opacity(0.1))
                     .clipShape(Capsule())
             }
-            .foregroundStyle(isSelected ? statusColor : CorveilTheme.textSecondary)
+            .foregroundStyle(isSelected ? status.color : CorveilTheme.textSecondary)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(isSelected ? statusColor.opacity(0.1) : Color.clear)
+            .background(isSelected ? status.color.opacity(0.1) : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
-    }
-
-    private var statusColor: Color {
-        switch status {
-        case .backlog: .gray
-        case .ready: .blue
-        case .inProgress: .orange
-        case .inReview: .purple
-        case .done: .green
-        case .unknown: .secondary
-        }
     }
 }
 
 // MARK: - Ticket List View
 
+/// Scrollable list of ticket cards, filtered by the selected pipeline stage.
 struct TicketListView: View {
     @Bindable var appState: AppState
 
@@ -309,6 +273,7 @@ struct TicketListView: View {
 
 // MARK: - Ticket Card
 
+/// Card displaying a single ticket with repo, title, labels, status, and worktree action.
 struct TicketCard: View {
     let issue: AssignedIssue
     @Bindable var appState: AppState
@@ -384,7 +349,7 @@ struct TicketCard: View {
 
     private var cardBackground: Color {
         if linkedSession != nil {
-            return Color(red: 0.15, green: 0.22, blue: 0.16)
+            return CorveilTheme.bgDone
         }
         return CorveilTheme.bgCard
     }
@@ -436,25 +401,13 @@ struct TicketCard: View {
 
     private var statusBadge: some View {
         let status = issue.projectStatus
-        let color = statusColor(for: status)
         return Text(status.rawValue)
             .font(.system(size: 10, weight: .medium))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(color.opacity(0.12))
-            .foregroundStyle(isDone ? color.opacity(0.6) : color)
+            .background(status.color.opacity(0.12))
+            .foregroundStyle(isDone ? status.color.opacity(0.6) : status.color)
             .clipShape(Capsule())
-    }
-
-    private func statusColor(for status: TicketStatus) -> Color {
-        switch status {
-        case .backlog: .gray
-        case .ready: .blue
-        case .inProgress: .orange
-        case .inReview: .purple
-        case .done: .green
-        case .unknown: .secondary
-        }
     }
 
     @ViewBuilder
@@ -547,6 +500,7 @@ public struct TicketBoardSidebarRow: View {
     }
 }
 
+/// Compact icon + count pair for a pipeline status in the sidebar.
 struct StatusCount: View {
     let icon: String
     let color: Color

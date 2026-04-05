@@ -184,18 +184,7 @@ public struct SessionDetailView: View {
 
     @ViewBuilder
     private var managerBrandmark: some View {
-        let image: NSImage? = {
-            for bundle in Bundle.allBundles {
-                if let url = bundle.url(forResource: "CorveilBrandmark", withExtension: "png"),
-                   let img = NSImage(contentsOf: url) { return img }
-            }
-            return nil
-        }()
-        if let image {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-        }
+        BrandmarkImage()
     }
 
     // MARK: - Terminal Area
@@ -210,9 +199,8 @@ public struct SessionDetailView: View {
                 workingDirectory: FileManager.default.homeDirectoryForCurrentUser.path
             )
             .id(session.id)
-        } else if isManager {
+        } else if isManager, let terminal = sessionTerminals.first {
             // Manager session: single terminal, no tab bar
-            let terminal = sessionTerminals[0]
             TerminalSurfaceView(
                 terminalID: terminal.id,
                 workingDirectory: terminal.cwd,
@@ -248,13 +236,6 @@ public struct SessionDetailView: View {
 
     // MARK: - Helpers
 
-    private func shortenBranch(_ branch: String) -> String {
-        if let last = branch.split(separator: "/").last {
-            return String(last)
-        }
-        return branch
-    }
-
     private func shortenPath(_ path: String) -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         if path.hasPrefix(home) {
@@ -266,6 +247,7 @@ public struct SessionDetailView: View {
 
 // MARK: - Supporting Views
 
+/// Icon + text label used in the session detail header for repo/branch metadata.
 struct DetailLabel: View {
     let icon: String
     let text: String
@@ -309,6 +291,7 @@ public struct TerminalTabBar: View {
                             }
                             .buttonStyle(.plain)
                             .padding(.leading, 2)
+                            .accessibilityLabel("Close terminal")
                         }
                     }
                     .foregroundStyle(terminal.id == activeID ? CorveilTheme.gold : CorveilTheme.textSecondary)
@@ -327,6 +310,7 @@ public struct TerminalTabBar: View {
                     .padding(.vertical, 6)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Add terminal")
 
             Spacer()
         }
@@ -334,11 +318,12 @@ public struct TerminalTabBar: View {
     }
 }
 
+/// Badge displaying a session's current status with appropriate color.
 struct StatusBadge: View {
     let status: SessionStatus
 
     var body: some View {
-        Text(status.rawValue.capitalized)
+        Text(status.displayName)
             .font(.system(size: 11, weight: .semibold))
             .tracking(0.3)
             .padding(.horizontal, 8)
@@ -346,6 +331,7 @@ struct StatusBadge: View {
             .background(statusColor.opacity(0.15))
             .foregroundStyle(statusColor)
             .clipShape(Capsule())
+            .accessibilityLabel("Status: \(status.displayName)")
     }
 
     private var statusColor: Color {
@@ -359,6 +345,7 @@ struct StatusBadge: View {
     }
 }
 
+/// Clickable capsule that opens a URL (issue link, PR link, repo link).
 struct LinkChip: View {
     let label: String
     let url: String

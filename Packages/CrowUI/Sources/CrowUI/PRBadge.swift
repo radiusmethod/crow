@@ -1,7 +1,76 @@
 import SwiftUI
 import CrowCore
 
-/// PR badge with status indicators for pipeline, review, and merge readiness.
+// MARK: - PR Status Extensions
+
+extension PRStatus.CheckStatus {
+    /// SF Symbol name for this check status.
+    var icon: String {
+        switch self {
+        case .passing: "checkmark.circle.fill"
+        case .failing: "xmark.circle.fill"
+        case .pending: "clock.fill"
+        case .unknown: "questionmark.circle"
+        }
+    }
+
+    /// Canonical UI color for this check status.
+    var color: Color {
+        switch self {
+        case .passing: .green
+        case .failing: .red
+        case .pending: .orange
+        case .unknown: CorveilTheme.textMuted
+        }
+    }
+
+    /// Short human-readable label.
+    var label: String {
+        switch self {
+        case .passing: "Checks pass"
+        case .failing: "Checks failing"
+        case .pending: "Checks running"
+        case .unknown: "No checks"
+        }
+    }
+}
+
+extension PRStatus.ReviewStatus {
+    /// SF Symbol name for this review status.
+    var icon: String {
+        switch self {
+        case .approved: "person.crop.circle.badge.checkmark"
+        case .changesRequested: "person.crop.circle.badge.exclamationmark"
+        case .reviewRequired: "person.crop.circle.badge.clock"
+        case .unknown: "person.crop.circle"
+        }
+    }
+
+    /// Canonical UI color for this review status.
+    var color: Color {
+        switch self {
+        case .approved: .green
+        case .changesRequested: .red
+        case .reviewRequired: .orange
+        case .unknown: CorveilTheme.textMuted
+        }
+    }
+
+    /// Short human-readable label.
+    var label: String {
+        switch self {
+        case .approved: "Approved"
+        case .changesRequested: "Changes requested"
+        case .reviewRequired: "Needs review"
+        case .unknown: "No reviews"
+        }
+    }
+}
+
+// MARK: - PR Badge (Compact)
+
+/// Compact PR badge with status indicators for pipeline, review, and merge readiness.
+/// Used in sidebar session rows.
 struct PRBadge: View {
     let label: String
     let status: PRStatus?
@@ -14,20 +83,17 @@ struct PRBadge: View {
 
             if let status {
                 if status.isMerged {
-                    // Merged — single purple checkmark
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 8))
                         .foregroundStyle(.purple)
                 } else {
-                    // Pipeline status
-                    Image(systemName: checksIcon(status.checksPass))
+                    Image(systemName: status.checksPass.icon)
                         .font(.system(size: 8))
-                        .foregroundStyle(checksColor(status.checksPass))
+                        .foregroundStyle(status.checksPass.color)
 
-                    // Review status
-                    Image(systemName: reviewIcon(status.reviewStatus))
+                    Image(systemName: status.reviewStatus.icon)
                         .font(.system(size: 8))
-                        .foregroundStyle(reviewColor(status.reviewStatus))
+                        .foregroundStyle(status.reviewStatus.color)
                 }
             }
         }
@@ -39,6 +105,13 @@ struct PRBadge: View {
             Capsule().strokeBorder(badgeBorder, lineWidth: 0.5)
         )
         .clipShape(Capsule())
+        .accessibilityLabel(accessibilityDescription)
+    }
+
+    private var accessibilityDescription: String {
+        guard let status else { return label }
+        if status.isMerged { return "\(label), merged" }
+        return "\(label), \(status.checksPass.label), \(status.reviewStatus.label)"
     }
 
     private var badgeBackground: Color {
@@ -64,45 +137,11 @@ struct PRBadge: View {
         if status.isReadyToMerge { return .green.opacity(0.3) }
         return CorveilTheme.goldDark.opacity(0.3)
     }
-
-    private func checksIcon(_ check: PRStatus.CheckStatus) -> String {
-        switch check {
-        case .passing: "checkmark.circle.fill"
-        case .failing: "xmark.circle.fill"
-        case .pending: "clock.fill"
-        case .unknown: "questionmark.circle"
-        }
-    }
-
-    private func checksColor(_ check: PRStatus.CheckStatus) -> Color {
-        switch check {
-        case .passing: .green
-        case .failing: .red
-        case .pending: .orange
-        case .unknown: CorveilTheme.textMuted
-        }
-    }
-
-    private func reviewIcon(_ review: PRStatus.ReviewStatus) -> String {
-        switch review {
-        case .approved: "person.crop.circle.badge.checkmark"
-        case .changesRequested: "person.crop.circle.badge.exclamationmark"
-        case .reviewRequired: "person.crop.circle.badge.clock"
-        case .unknown: "person.crop.circle"
-        }
-    }
-
-    private func reviewColor(_ review: PRStatus.ReviewStatus) -> Color {
-        switch review {
-        case .approved: .green
-        case .changesRequested: .red
-        case .reviewRequired: .orange
-        case .unknown: CorveilTheme.textMuted
-        }
-    }
 }
 
-/// Larger PR status display for the detail header, with text labels.
+// MARK: - PR Status Detail (Expanded)
+
+/// Expanded PR status display for the session detail header, with text labels.
 struct PRStatusDetail: View {
     let status: PRStatus
 
@@ -118,94 +157,45 @@ struct PRStatusDetail: View {
             }
         } else {
             HStack(spacing: 8) {
-                // Pipeline
+                // Pipeline checks
                 HStack(spacing: 3) {
-                    Image(systemName: checksIcon)
+                    Image(systemName: status.checksPass.icon)
                         .font(.caption2)
-                        .foregroundStyle(checksColor)
+                        .foregroundStyle(status.checksPass.color)
                     Text(checksLabel)
                         .font(.caption2)
-                        .foregroundStyle(checksColor)
+                        .foregroundStyle(status.checksPass.color)
                 }
 
-                // Review
+                // Review status
                 HStack(spacing: 3) {
-                Image(systemName: reviewIcon)
-                    .font(.caption2)
-                    .foregroundStyle(reviewColor)
-                Text(reviewLabel)
-                    .font(.caption2)
-                    .foregroundStyle(reviewColor)
-            }
+                    Image(systemName: status.reviewStatus.icon)
+                        .font(.caption2)
+                        .foregroundStyle(status.reviewStatus.color)
+                    Text(status.reviewStatus.label)
+                        .font(.caption2)
+                        .foregroundStyle(status.reviewStatus.color)
+                }
 
-            // Merge conflicts
-            if status.mergeable == .conflicting {
-                HStack(spacing: 3) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                    Text("Conflicts")
-                        .font(.caption2)
-                        .foregroundStyle(.red)
+                // Merge conflicts
+                if status.mergeable == .conflicting {
+                    HStack(spacing: 3) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                        Text("Conflicts")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
                 }
             }
-            }
-        }
-    }
-
-    private var checksIcon: String {
-        switch status.checksPass {
-        case .passing: "checkmark.circle.fill"
-        case .failing: "xmark.circle.fill"
-        case .pending: "clock.fill"
-        case .unknown: "questionmark.circle"
-        }
-    }
-
-    private var checksColor: Color {
-        switch status.checksPass {
-        case .passing: .green
-        case .failing: .red
-        case .pending: .orange
-        case .unknown: CorveilTheme.textMuted
         }
     }
 
     private var checksLabel: String {
-        switch status.checksPass {
-        case .passing: return "Checks pass"
-        case .failing:
-            if status.failedCheckNames.isEmpty { return "Checks failing" }
+        if status.checksPass == .failing && !status.failedCheckNames.isEmpty {
             return "\(status.failedCheckNames.count) failing"
-        case .pending: return "Checks running"
-        case .unknown: return "No checks"
         }
-    }
-
-    private var reviewIcon: String {
-        switch status.reviewStatus {
-        case .approved: "person.crop.circle.badge.checkmark"
-        case .changesRequested: "person.crop.circle.badge.exclamationmark"
-        case .reviewRequired: "person.crop.circle.badge.clock"
-        case .unknown: "person.crop.circle"
-        }
-    }
-
-    private var reviewColor: Color {
-        switch status.reviewStatus {
-        case .approved: .green
-        case .changesRequested: .red
-        case .reviewRequired: .orange
-        case .unknown: CorveilTheme.textMuted
-        }
-    }
-
-    private var reviewLabel: String {
-        switch status.reviewStatus {
-        case .approved: "Approved"
-        case .changesRequested: "Changes requested"
-        case .reviewRequired: "Needs review"
-        case .unknown: "No reviews"
-        }
+        return status.checksPass.label
     }
 }

@@ -13,5 +13,6 @@ let package = Package(
     ],
     targets: [
         .target(name: "CrowUI", dependencies: ["CrowCore", "CrowTerminal"]),
+        .testTarget(name: "CrowUITests", dependencies: ["CrowUI"]),
     ]
 )

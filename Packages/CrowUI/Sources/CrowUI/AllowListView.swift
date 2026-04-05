@@ -76,18 +76,7 @@ public struct AllowListView: View {
 
     private var toolbar: some View {
         HStack(spacing: 10) {
-            HStack(spacing: 4) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(CorveilTheme.textMuted)
-                    .font(.caption)
-                TextField("Filter patterns…", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .background(CorveilTheme.bgCard)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+            SearchField("Filter patterns\u{2026}", text: $searchText)
 
             Toggle("Hide Global", isOn: $hideGlobal)
                 .toggleStyle(.checkbox)
@@ -136,6 +125,7 @@ public struct AllowListView: View {
 
 // MARK: - Entry Row
 
+/// Row displaying a single allow-list entry with source badges.
 struct AllowEntryRow: View {
     let entry: AllowEntry
 
@@ -147,10 +137,10 @@ struct AllowEntryRow: View {
 
             HStack(spacing: 6) {
                 if entry.isInGlobal {
-                    SourceBadge(label: "Global", color: .green)
+                    CapsuleBadge("Global", color: .green)
                 }
                 ForEach(entry.worktreeSessionNames, id: \.self) { name in
-                    SourceBadge(label: name, color: .blue)
+                    CapsuleBadge(name, color: .blue)
                 }
             }
         }
@@ -159,23 +149,3 @@ struct AllowEntryRow: View {
     }
 }
 
-// MARK: - Source Badge
-
-struct SourceBadge: View {
-    let label: String
-    let color: Color
-
-    var body: some View {
-        Text(label)
-            .font(.caption2)
-            .fontWeight(.medium)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.15))
-            .foregroundStyle(color)
-            .overlay(
-                Capsule().strokeBorder(color.opacity(0.3), lineWidth: 0.5)
-            )
-            .clipShape(Capsule())
-    }
-}

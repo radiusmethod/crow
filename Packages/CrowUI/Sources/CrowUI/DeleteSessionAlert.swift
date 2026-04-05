@@ -17,7 +17,13 @@ struct DeleteSessionAlert: ViewModifier {
             Button("Cancel", role: .cancel) { sessionToDelete = nil }
             Button(buttonLabel, role: .destructive) {
                 if let session = sessionToDelete {
-                    Task { try? await appState.onDeleteSession?(session.id) }
+                    Task {
+                        do {
+                            try await appState.onDeleteSession?(session.id)
+                        } catch {
+                            NSLog("Failed to delete session \(session.name): \(error)")
+                        }
+                    }
                     sessionToDelete = nil
                 }
             }
@@ -30,7 +36,7 @@ struct DeleteSessionAlert: ViewModifier {
         guard let session = sessionToDelete else { return "Delete" }
         let wts = appState.worktrees(for: session.id)
         let hasRealWorktrees = wts.contains { !WorktreeClassification.isMainCheckout($0) }
-        return hasRealWorktrees ? "Delete Everything" : "Remove Session"
+        return DeleteSessionMessageBuilder.buttonLabel(hasRealWorktrees: hasRealWorktrees)
     }
 
     private var messageText: String {
@@ -38,11 +44,39 @@ struct DeleteSessionAlert: ViewModifier {
         let wts = appState.worktrees(for: session.id)
         let realWorktrees = wts.filter { !WorktreeClassification.isMainCheckout($0) }
         let mainCheckouts = wts.filter { WorktreeClassification.isMainCheckout($0) }
+        return DeleteSessionMessageBuilder.buildMessage(
+            sessionName: session.name,
+            realWorktrees: realWorktrees,
+            mainCheckouts: mainCheckouts
+        )
+    }
+}
 
-        if wts.isEmpty {
-            return "This will remove the session \"\(session.name)\"."
+extension View {
+    func deleteSessionAlert(session: Binding<Session?>, appState: AppState) -> some View {
+        modifier(DeleteSessionAlert(sessionToDelete: session, appState: appState))
+    }
+}
+
+// MARK: - Delete Session Message Builder
+
+/// Testable logic for generating delete-session confirmation messages.
+enum DeleteSessionMessageBuilder {
+    static func buttonLabel(hasRealWorktrees: Bool) -> String {
+        hasRealWorktrees ? "Delete Everything" : "Remove Session"
+    }
+
+    static func buildMessage(
+        sessionName: String,
+        realWorktrees: [SessionWorktree],
+        mainCheckouts: [SessionWorktree]
+    ) -> String {
+        let hasWorktrees = !realWorktrees.isEmpty || !mainCheckouts.isEmpty
+
+        if !hasWorktrees {
+            return "This will remove the session \"\(sessionName)\"."
         } else if realWorktrees.isEmpty {
-            return "This will remove the session \"\(session.name)\".\n\nThe repository folder and branch (\(mainCheckouts.map(\.branch).joined(separator: ", "))) will not be affected."
+            return "This will remove the session \"\(sessionName)\".\n\nThe repository folder and branch (\(mainCheckouts.map(\.branch).joined(separator: ", "))) will not be affected."
         } else if mainCheckouts.isEmpty {
             return "This will delete:\n\n" +
                 realWorktrees.map { "  \u{2022} Worktree: \($0.worktreePath)\n  \u{2022} Branch: \($0.branch)" }
@@ -54,12 +88,6 @@ struct DeleteSessionAlert: ViewModifier {
                     .joined(separator: "\n\n") +
                 "\n\nThe worktree folders and branches above will be removed.\n\nThe main repo (\(mainCheckouts.map(\.branch).joined(separator: ", "))) will not be affected."
         }
-    }
-}
-
-extension View {
-    func deleteSessionAlert(session: Binding<Session?>, appState: AppState) -> some View {
-        modifier(DeleteSessionAlert(sessionToDelete: session, appState: appState))
     }
 }
 

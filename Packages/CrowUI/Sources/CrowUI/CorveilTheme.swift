@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import CrowCore
 
 /// Corveil design tokens translated from corveil.com/styles.css
 public enum CorveilTheme {
@@ -6,6 +8,8 @@ public enum CorveilTheme {
     public static let bgDeep = Color(hex: 0x121416)
     public static let bgSurface = Color(hex: 0x1A1D20)
     public static let bgCard = Color(hex: 0x22262A)
+    /// Tinted background for "done" / linked-session cards.
+    public static let bgDone = Color(red: 0.15, green: 0.22, blue: 0.16)
 
     // Gold palette
     public static let gold = Color(hex: 0xDDC482)
@@ -29,5 +33,142 @@ extension Color {
             blue: Double(hex & 0xFF) / 255,
             opacity: opacity
         )
+    }
+}
+
+// MARK: - Status Color Extensions
+
+extension TicketStatus {
+    /// Canonical UI color for each pipeline stage.
+    public var color: Color {
+        switch self {
+        case .backlog: .gray
+        case .ready: .blue
+        case .inProgress: .orange
+        case .inReview: .purple
+        case .done: .green
+        case .unknown: .secondary
+        }
+    }
+}
+
+extension SessionStatus {
+    /// Human-readable display name (handles multi-word statuses like "In Review").
+    public var displayName: String {
+        switch self {
+        case .active: "Active"
+        case .paused: "Paused"
+        case .inReview: "In Review"
+        case .completed: "Completed"
+        case .archived: "Archived"
+        }
+    }
+}
+
+// MARK: - Brandmark Image
+
+/// Loads the Corveil brandmark from app bundles. Decorative — hidden from VoiceOver.
+public struct BrandmarkImage: View {
+    public init() {}
+
+    public var body: some View {
+        if let image = Self.load() {
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .accessibilityHidden(true)
+        }
+    }
+
+    static func load() -> NSImage? {
+        for bundle in Bundle.allBundles {
+            if let url = bundle.url(forResource: "CorveilBrandmark", withExtension: "png"),
+               let image = NSImage(contentsOf: url) {
+                return image
+            }
+        }
+        return nil
+    }
+}
+
+// MARK: - Branch Formatting
+
+/// Shortens a git branch name by stripping common prefixes.
+public func shortenBranch(_ branch: String) -> String {
+    branch
+        .replacingOccurrences(of: "refs/heads/", with: "")
+        .replacingOccurrences(of: "feature/", with: "")
+}
+
+// MARK: - Search Field
+
+/// Themed search field with magnifying glass icon and clear button.
+public struct SearchField: View {
+    let placeholder: String
+    @Binding var text: String
+
+    public init(_ placeholder: String, text: Binding<String>) {
+        self.placeholder = placeholder
+        self._text = text
+    }
+
+    public var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12))
+                .foregroundStyle(CorveilTheme.textMuted)
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundStyle(CorveilTheme.textPrimary)
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(CorveilTheme.textMuted)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(CorveilTheme.bgCard)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(CorveilTheme.borderSubtle, lineWidth: 1)
+                )
+        )
+    }
+}
+
+// MARK: - Capsule Badge
+
+/// Reusable capsule badge with colored background and border.
+public struct CapsuleBadge: View {
+    let label: String
+    let color: Color
+
+    public init(_ label: String, color: Color) {
+        self.label = label
+        self.color = color
+    }
+
+    public var body: some View {
+        Text(label)
+            .font(.caption2)
+            .fontWeight(.medium)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.15))
+            .foregroundStyle(color)
+            .overlay(
+                Capsule().strokeBorder(color.opacity(0.3), lineWidth: 0.5)
+            )
+            .clipShape(Capsule())
     }
 }

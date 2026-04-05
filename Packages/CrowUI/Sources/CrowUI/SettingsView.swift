@@ -154,6 +154,7 @@ public struct SettingsView: View {
                                 Image(systemName: "pencil")
                             }
                             .buttonStyle(.borderless)
+                            .accessibilityLabel("Edit \(ws.name)")
 
                             Button(role: .destructive) {
                                 config.workspaces.removeAll { $0.id == ws.id }
@@ -162,6 +163,7 @@ public struct SettingsView: View {
                                 Image(systemName: "trash")
                             }
                             .buttonStyle(.borderless)
+                            .accessibilityLabel("Delete \(ws.name)")
                         }
                     }
                 }
