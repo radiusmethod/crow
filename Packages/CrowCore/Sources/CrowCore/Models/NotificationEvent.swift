@@ -1,7 +1,10 @@
 import Foundation
 
 /// User-facing notification event categories, mapped from raw Claude Code hook events.
-/// Only events that require human attention trigger notifications.
+///
+/// Only events that require human attention trigger notifications. Most hook events
+/// (e.g., tool execution, streaming responses) are intentionally unmapped — they fire
+/// too frequently and don't need the user's immediate attention.
 public enum NotificationEvent: String, Codable, Sendable, CaseIterable, Identifiable {
     case taskComplete
     case agentWaiting
