@@ -11,8 +11,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: Build & Test
+  test:
+    name: Test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "16"
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Get Ghostty submodule SHA
+        id: ghostty-sha
+        run: echo "sha=$(git -C vendor/ghostty rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Ghostty framework
+        id: ghostty-cache
+        uses: actions/cache@v4
+        with:
+          path: Frameworks
+          key: ghostty-${{ runner.os }}-${{ runner.arch }}-${{ steps.ghostty-sha.outputs.sha }}
+
+      - name: Build Ghostty
+        if: steps.ghostty-cache.outputs.cache-hit != 'true'
+        run: |
+          unset ZIG_LOCAL_CACHE_DIR ZIG_GLOBAL_CACHE_DIR
+          make ghostty
+
+      - name: Run tests
+        run: |
+          for pkg in Packages/*/; do
+            if [ -d "$pkg/Tests" ]; then
+              echo "Testing $pkg..."
+              swift test --package-path "$pkg"
+            fi
+          done
+
+  build:
+    name: Build
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -57,12 +99,3 @@ jobs:
 
       - name: Build
         run: swift build
-
-      - name: Run all tests
-        run: |
-          for pkg in Packages/*/; do
-            if [ -d "$pkg/Tests" ]; then
-              echo "Testing $pkg..."
-              swift test --package-path "$pkg"
-            fi
-          done
