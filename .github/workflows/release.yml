@@ -1,0 +1,125 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  ZIG_VERSION: '0.15.2'
+
+jobs:
+  release:
+    name: Build, Sign & Release
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16'
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Extract version from tag
+        run: echo "CROW_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Import signing certificate
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_CERTIFICATE_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+
+          # Decode certificate
+          echo "$CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+
+          # Create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import certificate
+          security import "$CERTIFICATE_PATH" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          # Allow codesign to access the keychain without UI prompt
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          # Add to keychain search list
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+          # Clean up certificate file
+          rm -f "$CERTIFICATE_PATH"
+
+      - name: Get Ghostty submodule SHA
+        id: ghostty-sha
+        run: echo "sha=$(git -C vendor/ghostty rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Ghostty framework
+        id: ghostty-cache
+        uses: actions/cache@v4
+        with:
+          path: Frameworks
+          key: ghostty-${{ runner.os }}-${{ runner.arch }}-${{ steps.ghostty-sha.outputs.sha }}
+
+      - name: Build GhosttyKit
+        if: steps.ghostty-cache.outputs.cache-hit != 'true'
+        run: |
+          unset ZIG_LOCAL_CACHE_DIR ZIG_GLOBAL_CACHE_DIR
+          make ghostty
+
+      - name: Bundle Crow.app
+        env:
+          CROW_VERSION: ${{ env.CROW_VERSION }}
+        run: |
+          bash scripts/generate-build-info.sh
+          bash scripts/bundle.sh
+
+      - name: Sign, create DMG, and notarize
+        env:
+          DEVELOPER_ID_APPLICATION: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+          CROW_VERSION: ${{ env.CROW_VERSION }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash scripts/sign-and-notarize.sh
+
+      - name: Build CLI
+        run: |
+          swift build -c release --product crow
+          cp .build/release/crow crow-cli-macos-arm64
+
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" 2>/dev/null || true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Crow-${{ env.CROW_VERSION }}.dmg
+            crow-cli-macos-arm64
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
