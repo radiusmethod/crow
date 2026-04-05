@@ -8,6 +8,7 @@ xcuserdata/
 
 # Generated sources
 Sources/Crow/Generated/
+Sources/CrowCLI/Generated/
 
 # App bundle
 *.app
