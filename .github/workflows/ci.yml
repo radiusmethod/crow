@@ -10,6 +10,7 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# test, shellcheck, and build run in parallel; all are required for merge
 jobs:
   test:
     name: Test
@@ -48,10 +49,19 @@ jobs:
         run: |
           for pkg in Packages/*/; do
             if [ -d "$pkg/Tests" ]; then
-              echo "Testing $pkg..."
+              echo "==> Testing $(basename "$pkg")..."
               swift test --package-path "$pkg"
             fi
           done
+
+  shellcheck:
+    name: Shell Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check scripts
+        run: shellcheck scripts/*.sh
 
   build:
     name: Build

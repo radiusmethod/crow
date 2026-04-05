@@ -26,15 +26,23 @@ cd crow
 make build
 ```
 
+> Always use `make build` for full builds. It handles submodules, the Ghostty
+> framework, and the Swift build. Use `swift build` only for quick iteration
+> after the initial build.
+
 **Note:** Code signing is not required for development. Unsigned builds work normally for local testing. Official releases are signed and notarized automatically via GitHub Actions.
 
 ### Running Tests
 
 ```bash
-swift test        # or: mise test
+make test         # Preferred — runs all package tests
+swift test        # Also works (runs root package tests)
+mise test         # If using mise
 ```
 
-Tests use the Swift Testing framework (`@Test` macros).
+Tests use the Swift Testing framework (`@Test` macros). Currently, tests exist
+in `CrowCore`. When adding new functionality to any package, include a test
+target in that package's `Package.swift` and add tests.
 
 ## Code Style
 
