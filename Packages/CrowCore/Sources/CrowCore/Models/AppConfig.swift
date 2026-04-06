@@ -1,7 +1,11 @@
 import Foundation
 
-/// Application configuration stored at {devRoot}/.claude/config.json
-public struct AppConfig: Codable, Sendable {
+/// Application configuration stored at `{devRoot}/.claude/config.json`.
+///
+/// All top-level fields are optional on decode — missing keys fall back to defaults.
+/// This means existing config files continue to work when new settings are added
+/// (forward compatibility).
+public struct AppConfig: Codable, Sendable, Equatable {
     public var workspaces: [WorkspaceInfo]
     public var defaults: ConfigDefaults
     public var notifications: NotificationSettings
@@ -33,13 +37,24 @@ public struct AppConfig: Codable, Sendable {
 }
 
 /// A workspace folder configuration.
-public struct WorkspaceInfo: Identifiable, Codable, Sendable {
+///
+/// Each workspace maps to a directory under the dev root (e.g., `~/Dev/MyOrg`).
+/// The `provider` field determines which forge is used (GitHub or GitLab),
+/// and `cli` stores the corresponding CLI tool name for backward compatibility.
+/// Prefer `derivedCLI` in new code — it's always consistent with `provider`.
+public struct WorkspaceInfo: Identifiable, Codable, Sendable, Equatable {
     public let id: UUID
     public var name: String
     public var provider: String       // "github" or "gitlab"
-    public var cli: String            // "gh" or "glab"
+    public var cli: String            // "gh" or "glab" — kept for config file compat
     public var host: String?          // GitLab host (e.g., "gitlab.example.com")
     public var alwaysInclude: [String] // repos to always list in prompt table
+
+    /// The CLI tool name derived from the current `provider` value.
+    /// Unlike `cli` (which may be stale from an old config file), this is always correct.
+    public var derivedCLI: String {
+        provider == "github" ? "gh" : "glab"
+    }
 
     public init(
         id: UUID = UUID(),
@@ -56,14 +71,55 @@ public struct WorkspaceInfo: Identifiable, Codable, Sendable {
         self.host = host
         self.alwaysInclude = alwaysInclude
     }
+
+    /// Characters that are unsafe in directory names (workspace names become directory names).
+    private static let unsafeCharacters = CharacterSet(charactersIn: "/:\0")
+
+    /// Validate a workspace name, returning an error message or `nil` if valid.
+    ///
+    /// - Parameters:
+    ///   - name: The trimmed workspace name to validate.
+    ///   - existingNames: Names of other workspaces (for duplicate detection).
+    /// - Returns: A human-readable error string, or `nil` if the name is valid.
+    public static func validateName(_ name: String, existingNames: [String]) -> String? {
+        if name.isEmpty {
+            return "Name is required"
+        }
+        if name.unicodeScalars.contains(where: { unsafeCharacters.contains($0) }) {
+            return "Name cannot contain /, :, or null characters"
+        }
+        let lowercased = name.lowercased()
+        if existingNames.contains(where: { $0.lowercased() == lowercased }) {
+            return "A workspace with this name already exists"
+        }
+        return nil
+    }
 }
 
-/// Default settings for new workspaces.
-public struct ConfigDefaults: Codable, Sendable {
+/// Default settings applied when creating new workspaces or sessions.
+public struct ConfigDefaults: Codable, Sendable, Equatable {
     public var provider: String
     public var cli: String
     public var branchPrefix: String
     public var excludeDirs: [String]
+
+    /// Characters that are invalid in git ref names (see `git check-ref-format`).
+    private static let invalidBranchChars = CharacterSet(charactersIn: " ~^:?*[\\")
+
+    /// Check whether a branch prefix is valid for use in git ref names.
+    ///
+    /// Rejects prefixes containing characters forbidden by `git check-ref-format`,
+    /// as well as patterns like consecutive dots or a trailing dot/slash.
+    public static func isValidBranchPrefix(_ prefix: String) -> Bool {
+        guard !prefix.isEmpty else { return true } // empty is allowed (means no prefix)
+        if prefix.unicodeScalars.contains(where: { invalidBranchChars.contains($0) }) {
+            return false
+        }
+        if prefix.contains("..") { return false }
+        if prefix.hasSuffix(".") { return false }
+        if prefix.contains("@{") { return false }
+        return true
+    }
 
     public init(
         provider: String = "github",
@@ -79,7 +135,7 @@ public struct ConfigDefaults: Codable, Sendable {
 }
 
 /// Sidebar display preferences.
-public struct SidebarSettings: Codable, Sendable {
+public struct SidebarSettings: Codable, Sendable, Equatable {
     public var hideSessionDetails: Bool
 
     public init(hideSessionDetails: Bool = false) {

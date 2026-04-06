@@ -34,18 +34,7 @@ public final class JSONStore: Sendable {
     }
 
     public init(directory: URL? = nil) {
-        let dir = directory ?? {
-            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            let crowDir = appSupport.appendingPathComponent("crow", isDirectory: true)
-            // One-time migration: copy data from old "rm-ai-ide" directory if it exists
-            let oldDir = appSupport.appendingPathComponent("rm-ai-ide", isDirectory: true)
-            if !FileManager.default.fileExists(atPath: crowDir.path),
-               FileManager.default.fileExists(atPath: oldDir.path) {
-                try? FileManager.default.copyItem(at: oldDir, to: crowDir)
-                NSLog("[JSONStore] Migrated data from rm-ai-ide to crow")
-            }
-            return crowDir
-        }()
+        let dir = directory ?? AppSupportDirectory.url
 
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         self.fileURL = dir.appendingPathComponent("store.json")
