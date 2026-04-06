@@ -8,6 +8,23 @@ BUILD_DIR="$ROOT_DIR/.build/release"
 APP_DIR="$ROOT_DIR/Crow.app"
 FRAMEWORKS_DIR="$ROOT_DIR/Frameworks"
 
+# Read version: CROW_VERSION env var takes precedence, then VERSION file
+if [ -n "${CROW_VERSION:-}" ]; then
+    VERSION="$CROW_VERSION"
+elif [ -f "$ROOT_DIR/VERSION" ]; then
+    VERSION="$(tr -d '[:space:]' < "$ROOT_DIR/VERSION")"
+else
+    echo "ERROR: No VERSION file found and CROW_VERSION not set" >&2
+    exit 1
+fi
+
+# Build number from git commit count
+if git -C "$ROOT_DIR" rev-parse HEAD >/dev/null 2>&1; then
+    BUILD_NUMBER=$(git -C "$ROOT_DIR" rev-list --count HEAD)
+else
+    BUILD_NUMBER="1"
+fi
+
 echo "==> Generating build info..."
 bash "$SCRIPT_DIR/generate-build-info.sh"
 
@@ -30,7 +47,7 @@ if [ -d "$FRAMEWORKS_DIR/ghostty-resources" ]; then
 fi
 
 # Create Info.plist
-cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
+cat > "$APP_DIR/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -44,9 +61,9 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
     <key>CFBundleDisplayName</key>
     <string>Crow</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$BUILD_NUMBER</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>$VERSION</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
@@ -59,4 +76,4 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLIST'
 </plist>
 PLIST
 
-echo "==> App bundle created at: $APP_DIR"
+echo "==> App bundle created at: $APP_DIR (version: $VERSION, build: $BUILD_NUMBER)"

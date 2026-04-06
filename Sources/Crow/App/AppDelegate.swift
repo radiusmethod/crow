@@ -332,8 +332,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func saveSettings(devRoot: String, config: AppConfig) {
         self.devRoot = devRoot
         self.appConfig = config
-        try? ConfigStore.saveDevRoot(devRoot)
-        try? ConfigStore.saveConfig(config, devRoot: devRoot)
+        do {
+            try ConfigStore.saveDevRoot(devRoot)
+        } catch {
+            NSLog("[Crow] Failed to save devRoot: %@", error.localizedDescription)
+        }
+        do {
+            try ConfigStore.saveConfig(config, devRoot: devRoot)
+        } catch {
+            NSLog("[Crow] Failed to save config: %@", error.localizedDescription)
+        }
         notificationManager?.updateSettings(config.notifications)
         appState.hideSessionDetails = config.sidebar.hideSessionDetails
     }

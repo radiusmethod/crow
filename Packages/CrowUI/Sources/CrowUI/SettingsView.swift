@@ -2,6 +2,10 @@ import SwiftUI
 import CrowCore
 
 /// Settings panel accessible via Cmd+,
+///
+/// Three-tab interface: General (devRoot, defaults, sidebar), Workspaces (list + add/edit),
+/// and Notifications (global + per-event config). Every change is persisted immediately
+/// via the `onSave` callback — there is no explicit "Apply" button.
 public struct SettingsView: View {
     @State var devRoot: String
     @State var config: AppConfig
@@ -20,6 +24,13 @@ public struct SettingsView: View {
         self.onRescaffold = onRescaffold
     }
 
+    /// Names of all workspaces except the one currently being edited.
+    private func otherWorkspaceNames(excluding id: UUID? = nil) -> [String] {
+        config.workspaces
+            .filter { $0.id != id }
+            .map(\.name)
+    }
+
     public var body: some View {
         TabView {
             generalTab
@@ -31,13 +42,18 @@ public struct SettingsView: View {
         }
         .frame(width: 520, height: 480)
         .sheet(isPresented: $isAddingWorkspace) {
-            WorkspaceEditorView(workspace: nil) { ws in
+            WorkspaceFormView(
+                existingNames: otherWorkspaceNames()
+            ) { ws in
                 config.workspaces.append(ws)
                 save()
             }
         }
         .sheet(item: $editingWorkspace) { ws in
-            WorkspaceEditorView(workspace: ws) { updated in
+            WorkspaceFormView(
+                workspace: ws,
+                existingNames: otherWorkspaceNames(excluding: ws.id)
+            ) { updated in
                 if let idx = config.workspaces.firstIndex(where: { $0.id == updated.id }) {
                     config.workspaces[idx] = updated
                     save()
@@ -82,6 +98,12 @@ public struct SettingsView: View {
                 TextField("Branch Prefix", text: $config.defaults.branchPrefix)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { save() }
+
+                if !ConfigDefaults.isValidBranchPrefix(config.defaults.branchPrefix) {
+                    Text("Contains characters invalid in git branch names.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             Section("Sidebar") {
@@ -162,77 +184,5 @@ public struct SettingsView: View {
 
     private func save() {
         onSave?(devRoot, config)
-    }
-}
-
-// MARK: - Workspace Editor
-
-public struct WorkspaceEditorView: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var name: String
-    @State private var provider: String
-    @State private var host: String
-    @State private var alwaysIncludeText: String
-
-    private let existingID: UUID?
-    private let onSave: (WorkspaceInfo) -> Void
-
-    public init(workspace: WorkspaceInfo?, onSave: @escaping (WorkspaceInfo) -> Void) {
-        self.existingID = workspace?.id
-        self._name = State(initialValue: workspace?.name ?? "")
-        self._provider = State(initialValue: workspace?.provider ?? "github")
-        self._host = State(initialValue: workspace?.host ?? "")
-        self._alwaysIncludeText = State(initialValue: workspace?.alwaysInclude.joined(separator: ", ") ?? "")
-        self.onSave = onSave
-    }
-
-    public var body: some View {
-        Form {
-            Section("Workspace") {
-                TextField("Name", text: $name)
-                    .textFieldStyle(.roundedBorder)
-
-                Picker("Provider", selection: $provider) {
-                    Text("GitHub").tag("github")
-                    Text("GitLab").tag("gitlab")
-                }
-
-                if provider == "gitlab" {
-                    TextField("GitLab Host (e.g., gitlab.example.com)", text: $host)
-                        .textFieldStyle(.roundedBorder)
-                }
-
-                TextField("Always Include Repos", text: $alwaysIncludeText)
-                    .textFieldStyle(.roundedBorder)
-            }
-        }
-        .formStyle(.grouped)
-        .safeAreaInset(edge: .bottom) {
-            HStack {
-                Button("Cancel") { dismiss() }
-                Spacer()
-                Button("Save") {
-                    let alwaysInclude = alwaysIncludeText
-                        .split(separator: ",")
-                        .map { $0.trimmingCharacters(in: .whitespaces) }
-                        .filter { !$0.isEmpty }
-
-                    let ws = WorkspaceInfo(
-                        id: existingID ?? UUID(),
-                        name: name.trimmingCharacters(in: .whitespaces),
-                        provider: provider,
-                        cli: provider == "github" ? "gh" : "glab",
-                        host: provider == "gitlab" && !host.isEmpty ? host : nil,
-                        alwaysInclude: alwaysInclude
-                    )
-                    onSave(ws)
-                    dismiss()
-                }
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding()
-        }
-        .frame(width: 400, height: 280)
     }
 }

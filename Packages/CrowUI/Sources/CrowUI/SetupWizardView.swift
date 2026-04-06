@@ -66,7 +66,11 @@ public struct SetupWizardView: View {
         }
         .frame(width: 520, height: 420)
         .sheet(isPresented: $isAddingWorkspace) {
-            WorkspaceFormSheet(workspaces: $workspaces)
+            WorkspaceFormView(
+                existingNames: workspaces.map(\.name)
+            ) { ws in
+                workspaces.append(ws)
+            }
         }
     }
 
@@ -207,56 +211,5 @@ public struct SetupWizardView: View {
     private func completeSetup() {
         let config = AppConfig(workspaces: workspaces)
         onComplete?(devRoot, config)
-    }
-}
-
-// MARK: - Workspace Form Sheet
-
-struct WorkspaceFormSheet: View {
-    @Binding var workspaces: [WorkspaceInfo]
-    @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-    @State private var provider = "github"
-    @State private var host = ""
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Add Workspace")
-                .font(.title3)
-                .fontWeight(.semibold)
-
-            TextField("Name (e.g., RadiusMethod)", text: $name)
-                .textFieldStyle(.roundedBorder)
-
-            Picker("Provider", selection: $provider) {
-                Text("GitHub").tag("github")
-                Text("GitLab").tag("gitlab")
-            }
-            .pickerStyle(.segmented)
-
-            if provider == "gitlab" {
-                TextField("GitLab host (e.g., gitlab.example.com)", text: $host)
-                    .textFieldStyle(.roundedBorder)
-            }
-
-            HStack {
-                Button("Cancel") { dismiss() }
-                Spacer()
-                Button("Add") {
-                    let ws = WorkspaceInfo(
-                        name: name,
-                        provider: provider,
-                        cli: provider == "github" ? "gh" : "glab",
-                        host: provider == "gitlab" && !host.isEmpty ? host : nil
-                    )
-                    workspaces.append(ws)
-                    dismiss()
-                }
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(20)
-        .frame(width: 360)
     }
 }

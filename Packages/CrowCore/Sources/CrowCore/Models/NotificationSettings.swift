@@ -1,6 +1,14 @@
 import Foundation
 
 /// Notification preferences stored in AppConfig.
+///
+/// Notifications follow a cascading disable model:
+/// 1. `globalMute` overrides everything — no sounds or system notifications.
+/// 2. `soundEnabled` / `systemNotificationsEnabled` act as global category toggles.
+/// 3. Per-event settings in `eventSettings` provide fine-grained control.
+///
+/// A notification only fires if the global toggle, the category toggle, **and** the
+/// per-event toggle are all enabled.
 public struct NotificationSettings: Codable, Sendable, Equatable {
     /// Master mute — suppresses all sounds and system notifications.
     public var globalMute: Bool
@@ -36,6 +44,9 @@ public struct NotificationSettings: Codable, Sendable, Equatable {
     }
 
     /// Get the config for a specific event, falling back to defaults.
+    ///
+    /// This ensures forward compatibility: when a new `NotificationEvent` case is added,
+    /// existing config files that don't include it in `eventSettings` still get sensible defaults.
     public func config(for event: NotificationEvent) -> EventNotificationConfig {
         eventSettings[event] ?? EventNotificationConfig(soundName: event.defaultSound)
     }

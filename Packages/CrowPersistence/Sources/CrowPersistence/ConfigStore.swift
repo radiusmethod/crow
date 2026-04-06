@@ -2,21 +2,17 @@ import Foundation
 import CrowCore
 
 /// Manages the devRoot pointer and workspace config.
+///
+/// Storage is split across two locations:
+/// - **App Support** (`~/Library/Application Support/crow/devroot`): a plain-text file
+///   containing the path to the user's development root directory.
+/// - **Dev Root** (`{devRoot}/.claude/config.json`): the full application config (workspaces,
+///   defaults, notification preferences, sidebar settings).
+///
+/// All files are written with restrictive permissions (0o600 for files, 0o700 for directories)
+/// because the config may contain host names and workspace layout details.
 public final class ConfigStore: Sendable {
-    private static let appSupportDir: URL = {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let crowDir = appSupport.appendingPathComponent("crow", isDirectory: true)
-        // One-time migration: copy data from old "rm-ai-ide" directory if it exists
-        let oldDir = appSupport.appendingPathComponent("rm-ai-ide", isDirectory: true)
-        if !FileManager.default.fileExists(atPath: crowDir.path),
-           FileManager.default.fileExists(atPath: oldDir.path) {
-            try? FileManager.default.copyItem(at: oldDir, to: crowDir)
-            NSLog("[ConfigStore] Migrated data from rm-ai-ide to crow")
-        }
-        return crowDir
-    }()
-
-    private static let devRootPointerPath: URL = appSupportDir.appendingPathComponent("devroot")
+    private static let devRootPointerPath: URL = AppSupportDirectory.url.appendingPathComponent("devroot")
 
     // MARK: - devRoot Pointer
 
@@ -32,6 +28,7 @@ public final class ConfigStore: Sendable {
 
     /// Write the devRoot path.
     public static func saveDevRoot(_ path: String) throws {
+        let appSupportDir = AppSupportDirectory.url
         try FileManager.default.createDirectory(at: appSupportDir, withIntermediateDirectories: true)
         // Restrict app support directory to owner-only access
         try FileManager.default.setAttributes(
@@ -43,19 +40,42 @@ public final class ConfigStore: Sendable {
 
     // MARK: - App Config
 
-    /// Load config from {devRoot}/.claude/config.json
+    /// Load config from `{devRoot}/.claude/config.json`.
+    ///
+    /// Returns `nil` if the file doesn't exist or can't be decoded. Decode errors
+    /// are logged so malformed configs are diagnosable.
     public static func loadConfig(devRoot: String) -> AppConfig? {
         let configURL = URL(fileURLWithPath: devRoot)
             .appendingPathComponent(".claude", isDirectory: true)
             .appendingPathComponent("config.json")
-        guard let data = try? Data(contentsOf: configURL) else { return nil }
-        return try? JSONDecoder().decode(AppConfig.self, from: data)
+        return loadConfig(from: configURL)
     }
 
-    /// Save config to {devRoot}/.claude/config.json
+    /// Load config from an explicit URL (internal, exposed for testing via @testable).
+    static func loadConfig(from configURL: URL) -> AppConfig? {
+        guard let data = try? Data(contentsOf: configURL) else { return nil }
+        do {
+            return try JSONDecoder().decode(AppConfig.self, from: data)
+        } catch {
+            NSLog("[ConfigStore] Failed to decode config at %@: %@", configURL.path, error.localizedDescription)
+            return nil
+        }
+    }
+
+    /// Save config to `{devRoot}/.claude/config.json`.
+    ///
+    /// Creates the `.claude/` directory if needed. Both the directory (0o700) and the
+    /// config file (0o600) are restricted to owner-only access.
     public static func saveConfig(_ config: AppConfig, devRoot: String) throws {
         let claudeDir = URL(fileURLWithPath: devRoot).appendingPathComponent(".claude", isDirectory: true)
+        try saveConfig(config, to: claudeDir)
+    }
+
+    /// Save config to an explicit directory (internal, exposed for testing via @testable).
+    static func saveConfig(_ config: AppConfig, to claudeDir: URL) throws {
         try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700], ofItemAtPath: claudeDir.path)
 
         let configURL = claudeDir.appendingPathComponent("config.json")
         let encoder = JSONEncoder()
@@ -68,7 +88,11 @@ public final class ConfigStore: Sendable {
 
     // MARK: - Import from CMUX workspace-repos.json
 
-    /// Try to import config from ~/.claude/workspace-repos.json (CMUX format).
+    /// Import config from `~/.claude/workspace-repos.json` (legacy CMUX format).
+    ///
+    /// CMUX was the predecessor tool. This imports workspace names, providers, CLI tools,
+    /// hosts, and always-include repos. Fields that don't exist in Crow's config model
+    /// (`worktreePattern`, `keywordSources`) are silently dropped.
     public static func importFromCMUX() -> (devRoot: String, config: AppConfig)? {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let cmuxPath = home.appendingPathComponent(".claude/workspace-repos.json")

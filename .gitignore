@@ -8,10 +8,12 @@ xcuserdata/
 
 # Generated sources
 Sources/Crow/Generated/
+Sources/CrowCLI/Generated/
 
 # App bundle
 *.app
 *.dmg
+*.p12
 
 # Frameworks (built locally)
 Frameworks/GhosttyKit.xcframework/
