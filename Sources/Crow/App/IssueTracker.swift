@@ -788,12 +788,13 @@ final class IssueTracker {
     // MARK: - Review Requests
 
     private func fetchReviewRequests() async -> [ReviewRequest] {
+        // gh search prs doesn't support headRefName/baseRefName fields — fetch basic list first
         guard let output = try? await shell(
             "gh", "search", "prs",
             "--review-requested", "@me",
             "--state", "open",
             "--sort", "updated",
-            "--json", "number,title,url,repository,author,headRefName,baseRefName,isDraft,updatedAt",
+            "--json", "number,title,url,repository,author,isDraft,updatedAt",
             "--limit", "50"
         ) else { return [] }
 
@@ -803,12 +804,12 @@ final class IssueTracker {
         let dateFormatter = ISO8601DateFormatter()
         dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
-        let requests = items.compactMap { item -> ReviewRequest? in
+        var requests: [ReviewRequest] = []
+
+        for item in items {
             guard let number = item["number"] as? Int,
                   let title = item["title"] as? String,
-                  let url = item["url"] as? String,
-                  let headBranch = item["headRefName"] as? String,
-                  let baseBranch = item["baseRefName"] as? String else { return nil }
+                  let url = item["url"] as? String else { continue }
 
             let repoDict = item["repository"] as? [String: Any]
             let repoName = repoDict?["nameWithOwner"] as? String ?? ""
@@ -818,7 +819,18 @@ final class IssueTracker {
             let updatedStr = item["updatedAt"] as? String
             let updatedAt = updatedStr.flatMap { dateFormatter.date(from: $0) }
 
-            return ReviewRequest(
+            // Fetch branch info via gh pr view (supports headRefName/baseRefName)
+            var headBranch = ""
+            var baseBranch = ""
+            if let prOutput = try? await shell(
+                "gh", "pr", "view", url, "--json", "headRefName,baseRefName"
+            ), let prData = prOutput.data(using: .utf8),
+               let prJSON = try? JSONSerialization.jsonObject(with: prData) as? [String: Any] {
+                headBranch = prJSON["headRefName"] as? String ?? ""
+                baseBranch = prJSON["baseRefName"] as? String ?? ""
+            }
+
+            requests.append(ReviewRequest(
                 id: "github:\(repoName)#\(number)",
                 prNumber: number,
                 title: title,
@@ -830,7 +842,7 @@ final class IssueTracker {
                 isDraft: isDraft,
                 requestedAt: updatedAt,
                 provider: .github
-            )
+            ))
         }
 
         // Sort newest first so stale review requests sink to the bottom
