@@ -26,6 +26,8 @@ cd crow
 make build
 ```
 
+**Note:** Code signing is not required for development. Unsigned builds work normally for local testing. Official releases are signed and notarized automatically via GitHub Actions.
+
 ### Running Tests
 
 ```bash

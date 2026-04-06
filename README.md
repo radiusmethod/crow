@@ -463,6 +463,16 @@ Run with log filtering:
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on reporting bugs, suggesting features, and submitting pull requests.
 
+## Releases
+
+Official releases are signed and notarized via GitHub Actions. Download the latest DMG from the [Releases](https://github.com/radiusmethod/crow/releases) page — it will install without Gatekeeper warnings.
+
+**Building from source:** Code signing is only required for distribution. Developers building from source do not need a signing certificate — `make build` and `make release` produce unsigned but fully functional builds. If macOS quarantines an unsigned .app, remove it with:
+
+```bash
+xattr -cr Crow.app
+```
+
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE) for details.
