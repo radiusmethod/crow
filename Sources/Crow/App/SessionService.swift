@@ -823,36 +823,6 @@ final class SessionService {
         return nil
     }
 
-    // MARK: - Review Prompt
-
-    /// Build the initial prompt for a review session.
-    private static func buildReviewPrompt(prURL: String, prTitle: String, repoSlug: String, prNumber: Int) -> String {
-        """
-        Review the following pull request. All gh commands MUST use dangerouslyDisableSandbox: true.
-
-        ## Pull Request
-
-        **\(repoSlug)#\(prNumber)**: \(prTitle)
-
-        ```bash
-        gh pr view \(prURL) --json title,body,baseRefName,headRefName,files,additions,deletions,commits,author,labels
-        ```
-
-        ## Instructions
-
-        1. Fetch the PR details and diff using the commands below (all require dangerouslyDisableSandbox: true):
-           ```bash
-           gh pr view \(prURL) --json title,body,baseRefName,headRefName,files,additions,deletions,commits,author,labels
-           gh pr diff \(prURL)
-           ```
-        2. Read the codebase context — CLAUDE.md, README.md, and files touched in the diff
-        3. Analyze the changes for: correctness, security, performance, code quality, testing, architecture
-        4. Present your review with a verdict (APPROVE / REQUEST_CHANGES / COMMENT), issues found (with severity, file, line, description, suggestion), and positive notes
-        5. **IMPORTANT: Ask for my approval before submitting** — never auto-submit
-        6. Submit via `gh pr review \(prURL)` with the appropriate flag (--approve, --request-changes, or --comment)
-        """
-    }
-
     // MARK: - VS Code Integration
 
     /// Find the VS Code `code` CLI binary.
