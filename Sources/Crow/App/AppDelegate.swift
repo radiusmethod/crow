@@ -418,9 +418,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let idStr = params["session_id"]?.stringValue, let id = UUID(uuidString: idStr) else {
                     throw RPCError.invalidParams("session_id required")
                 }
-                return await MainActor.run {
+                return try await MainActor.run {
                     guard let s = capturedAppState.sessions.first(where: { $0.id == id }) else {
-                        return ["error": .string("Session not found")]
+                        throw RPCError.applicationError("Session not found")
                     }
                     let fmt = ISO8601DateFormatter()
                     return [
@@ -569,13 +569,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                       let terminalID = UUID(uuidString: terminalIDStr) else {
                     throw RPCError.invalidParams("session_id and terminal_id required")
                 }
-                return await MainActor.run {
+                return try await MainActor.run {
                     guard let terminals = capturedAppState.terminals[sessionID],
                           let terminal = terminals.first(where: { $0.id == terminalID }) else {
-                        return ["error": .string("Terminal not found")]
+                        throw RPCError.applicationError("Terminal not found")
                     }
                     guard !terminal.isManaged else {
-                        return ["error": .string("Cannot close managed terminal")]
+                        throw RPCError.applicationError("Cannot close managed terminal")
                     }
                     TerminalManager.shared.destroy(id: terminalID)
                     capturedAppState.terminals[sessionID]?.removeAll { $0.id == terminalID }
@@ -886,9 +886,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-enum RPCError: Error, LocalizedError {
+enum RPCError: Error, LocalizedError, RPCErrorCoded {
     case invalidParams(String)
     case applicationError(String)
+    var rpcErrorCode: Int {
+        switch self {
+        case .invalidParams: RPCErrorCode.invalidParams
+        case .applicationError: RPCErrorCode.applicationError
+        }
+    }
     var errorDescription: String? {
         switch self {
         case .invalidParams(let msg): msg

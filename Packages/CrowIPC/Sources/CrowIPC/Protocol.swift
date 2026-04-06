@@ -2,6 +2,7 @@ import Foundation
 
 // MARK: - JSON-RPC 2.0 Protocol Types
 
+/// A JSON-RPC 2.0 request sent from the CLI client to the socket server.
 public struct JSONRPCRequest: Codable, Sendable {
     public let jsonrpc: String
     public let id: Int
@@ -16,6 +17,7 @@ public struct JSONRPCRequest: Codable, Sendable {
     }
 }
 
+/// A JSON-RPC 2.0 response returned from the socket server to the CLI client.
 public struct JSONRPCResponse: Codable, Sendable {
     public let jsonrpc: String
     public let id: Int
@@ -31,6 +33,7 @@ public struct JSONRPCResponse: Codable, Sendable {
     }
 }
 
+/// Structured error payload within a JSON-RPC 2.0 response.
 public struct JSONRPCError: Codable, Sendable {
     public let code: Int
     public let message: String
@@ -38,7 +41,12 @@ public struct JSONRPCError: Codable, Sendable {
 
 // MARK: - JSON Value (type-erased for flexible params/results)
 
-public enum JSONValue: Codable, Sendable, Equatable {
+/// Type-erased JSON value used for flexible RPC parameters and results.
+///
+/// Supports all JSON primitives (string, int, double, bool, null)
+/// and compound types (array, object). Each case provides a typed
+/// accessor property that returns `nil` for mismatched types.
+public enum JSONValue: Codable, Sendable, Hashable {
     case string(String)
     case int(Int)
     case double(Double)
@@ -54,6 +62,11 @@ public enum JSONValue: Codable, Sendable, Equatable {
 
     public var intValue: Int? {
         if case .int(let i) = self { return i }
+        return nil
+    }
+
+    public var doubleValue: Double? {
+        if case .double(let d) = self { return d }
         return nil
     }
 
@@ -109,10 +122,20 @@ public enum JSONValue: Codable, Sendable, Equatable {
 
 // MARK: - Error Codes
 
+/// Standard JSON-RPC 2.0 error codes plus the application-level error code.
 public enum RPCErrorCode {
     public static let parseError = -32700
     public static let invalidRequest = -32600
     public static let methodNotFound = -32601
     public static let invalidParams = -32602
+    public static let internalError = -32603
     public static let applicationError = -32000
+}
+
+// MARK: - RPCErrorCoded Protocol
+
+/// Conforming errors provide a specific JSON-RPC error code so the
+/// `CommandRouter` can return it instead of the generic `-32000`.
+public protocol RPCErrorCoded: Error {
+    var rpcErrorCode: Int { get }
 }
