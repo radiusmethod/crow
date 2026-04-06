@@ -24,7 +24,7 @@ final class SessionService {
         // Backfill provider from ticketURL for sessions that predate provider tracking
         for i in appState.sessions.indices {
             if appState.sessions[i].provider == nil, let url = appState.sessions[i].ticketURL {
-                appState.sessions[i].provider = Self.detectProviderFromURL(url)
+                appState.sessions[i].provider = Validation.detectProviderFromURL(url)
             }
         }
 
@@ -177,6 +177,12 @@ final class SessionService {
 
     // MARK: - Delete Session
 
+    /// Delete a session and clean up all associated resources.
+    ///
+    /// Performs a full cascade: destroys terminal surfaces, removes worktrees from disk
+    /// (with branch deletion for non-protected branches), removes hook configs, and cleans
+    /// up all in-memory state (sessions, worktrees, links, terminals, hook state, PR status).
+    /// The manager session cannot be deleted.
     func deleteSession(id: UUID) async {
         guard id != AppState.managerSessionID else { return }
 
@@ -208,18 +214,38 @@ final class SessionService {
 
                 // Delete the local branch (only if not a protected branch)
                 if !SessionWorktree.isProtectedBranch(wt.branch) {
-                    _ = try? await shell("git", "-C", wt.repoPath, "branch", "-D", wt.branch)
+                    do {
+                        _ = try await shell("git", "-C", wt.repoPath, "branch", "-D", wt.branch)
+                    } catch {
+                        NSLog("[SessionService] Failed to delete branch \(wt.branch): \(error)")
+                    }
                 }
 
                 // Prune worktree metadata
-                _ = try? await shell("git", "-C", wt.repoPath, "worktree", "prune")
+                do {
+                    _ = try await shell("git", "-C", wt.repoPath, "worktree", "prune")
+                } catch {
+                    NSLog("[SessionService] Failed to prune worktree metadata: \(error)")
+                }
 
                 // Remove the directory if it still exists
-                try? FileManager.default.removeItem(atPath: wt.worktreePath)
+                if FileManager.default.fileExists(atPath: wt.worktreePath) {
+                    do {
+                        try FileManager.default.removeItem(atPath: wt.worktreePath)
+                    } catch {
+                        NSLog("[SessionService] Failed to remove directory \(wt.worktreePath): \(error)")
+                    }
+                }
             } catch {
-                NSLog("Failed to remove worktree \(wt.worktreePath): \(error)")
+                NSLog("[SessionService] Failed to remove worktree \(wt.worktreePath): \(error)")
                 // Still try to remove the directory (but not if it's the main repo)
-                try? FileManager.default.removeItem(atPath: wt.worktreePath)
+                if FileManager.default.fileExists(atPath: wt.worktreePath) {
+                    do {
+                        try FileManager.default.removeItem(atPath: wt.worktreePath)
+                    } catch {
+                        NSLog("[SessionService] Failed to remove directory \(wt.worktreePath): \(error)")
+                    }
+                }
             }
         }
 
@@ -230,6 +256,8 @@ final class SessionService {
         appState.terminals.removeValue(forKey: id)
         appState.activeTerminalID.removeValue(forKey: id)
         appState.removeHookState(for: id)
+        appState.prStatus.removeValue(forKey: id)
+        appState.isMarkingInReview.removeValue(forKey: id)
 
         store.mutate { data in
             data.sessions.removeAll { $0.id == id }
@@ -241,18 +269,6 @@ final class SessionService {
         if appState.selectedSessionID == id {
             appState.selectedSessionID = appState.sessions.first?.id
         }
-    }
-
-    // MARK: - Provider Detection
-
-    /// Detect provider from a ticket URL without hardcoding specific hosts.
-    static func detectProviderFromURL(_ url: String) -> Provider? {
-        if url.contains("github.com") {
-            return .github
-        } else if url.contains("gitlab.com") || url.contains("gitlab") || url.contains("/-/issues") || url.contains("/-/merge_requests") {
-            return .gitlab
-        }
-        return nil
     }
 
     // MARK: - Worktree Safety Checks
@@ -307,6 +323,7 @@ final class SessionService {
 
     /// Scan repos for worktrees that exist on disk but have no session in the store.
     /// Re-imports them as active sessions so they appear in the sidebar.
+    /// Runs async and may invoke `gh` CLI for ticket/PR metadata (best-effort).
     func detectOrphanedWorktrees() async {
         guard let devRoot = ConfigStore.loadDevRoot(),
               let config = ConfigStore.loadConfig(devRoot: devRoot) else { return }
@@ -399,61 +416,84 @@ final class SessionService {
         return entries
     }
 
-    private func recoverOrphan(worktreePath: String, branch: String, repoName: String, repoPath: String) async {
-        let dirName = (worktreePath as NSString).lastPathComponent
-
-        // Try to parse ticket number from directory name (e.g., "citadel-209-slug" → 209)
-        var ticketNumber: Int?
-        var ticketURL: String?
-        var ticketTitle: String?
+    private struct TicketInfo {
+        var number: Int?
+        var url: String?
+        var title: String?
         var provider: Provider?
+    }
+
+    /// Parse ticket number from a directory name and resolve ticket metadata from GitHub.
+    private func parseTicketInfo(dirName: String, repoPath: String) async -> TicketInfo {
+        var info = TicketInfo()
 
         let parts = dirName.components(separatedBy: "-")
         // Look for a numeric part after the repo name prefix
         if !parts.isEmpty {
             for (i, part) in parts.enumerated() where i > 0 {
                 if let num = Int(part) {
-                    ticketNumber = num
+                    info.number = num
                     break
                 }
             }
         }
 
-        // Try to construct ticket URL and fetch title from GitHub
-        if let num = ticketNumber {
-            if let remoteURL = try? await shell("git", "-C", repoPath, "remote", "get-url", "origin") {
-                var url = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
-                if url.hasSuffix(".git") { url = String(url.dropLast(4)) }
-                // Convert SSH to HTTPS
-                if url.hasPrefix("git@github.com:") {
-                    let slug = url.replacingOccurrences(of: "git@github.com:", with: "")
-                    ticketURL = "https://github.com/\(slug)/issues/\(num)"
-                    provider = .github
-                } else if url.contains("github.com") {
-                    ticketURL = "\(url)/issues/\(num)"
-                    provider = .github
-                }
-            }
+        guard let num = info.number else { return info }
 
-            // Try to fetch issue title
-            if let issueURL = ticketURL {
-                if let output = try? await shell("gh", "issue", "view", issueURL, "--json", "title"),
-                   let data = output.data(using: .utf8),
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let title = json["title"] as? String {
-                    ticketTitle = title
-                }
+        // Try to construct ticket URL from git remote
+        if let remoteURL = try? await shell("git", "-C", repoPath, "remote", "get-url", "origin") {
+            var url = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            if url.hasSuffix(".git") { url = String(url.dropLast(4)) }
+            if url.hasPrefix("git@github.com:") {
+                let slug = url.replacingOccurrences(of: "git@github.com:", with: "")
+                info.url = "https://github.com/\(slug)/issues/\(num)"
+                info.provider = .github
+            } else if url.contains("github.com") {
+                info.url = "\(url)/issues/\(num)"
+                info.provider = .github
             }
         }
 
-        // Create the session
+        // Try to fetch issue title
+        if let issueURL = info.url {
+            if let output = try? await shell("gh", "issue", "view", issueURL, "--json", "title"),
+               let data = output.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let title = json["title"] as? String {
+                info.title = title
+            }
+        }
+
+        return info
+    }
+
+    /// Check for a pull request on a branch and return a link if found.
+    private func findPRLink(branch: String, repoPath: String, sessionID: UUID) async -> SessionLink? {
+        guard let repoSlug = resolveRepoSlug(repoPath: repoPath) else { return nil }
+        guard let prOutput = try? await shell(
+            "gh", "pr", "list", "--repo", repoSlug, "--head", branch,
+            "--state", "all", "--json", "number,url,state", "--limit", "1"
+        ), let prData = prOutput.data(using: .utf8),
+           let prItems = try? JSONSerialization.jsonObject(with: prData) as? [[String: Any]],
+           let pr = prItems.first,
+           let prNum = pr["number"] as? Int,
+           let prURL = pr["url"] as? String else { return nil }
+
+        NSLog("[SessionService] Found PR #\(prNum) for branch '\(branch)'")
+        return SessionLink(sessionID: sessionID, label: "PR #\(prNum)", url: prURL, linkType: .pr)
+    }
+
+    private func recoverOrphan(worktreePath: String, branch: String, repoName: String, repoPath: String) async {
+        let dirName = (worktreePath as NSString).lastPathComponent
+        let ticket = await parseTicketInfo(dirName: dirName, repoPath: repoPath)
+
         let session = Session(
             name: dirName,
             status: .active,
-            ticketURL: ticketURL,
-            ticketTitle: ticketTitle,
-            ticketNumber: ticketNumber,
-            provider: provider
+            ticketURL: ticket.url,
+            ticketTitle: ticket.title,
+            ticketNumber: ticket.number,
+            provider: ticket.provider
         )
 
         let worktree = SessionWorktree(
@@ -472,49 +512,35 @@ final class SessionService {
             isManaged: true
         )
 
-        // Add to state and store
+        // Collect links
+        var links: [SessionLink] = []
+        if let ticketURL = ticket.url {
+            let label = ticket.number.map { "Issue #\($0)" } ?? "Issue"
+            links.append(SessionLink(sessionID: session.id, label: label, url: ticketURL, linkType: .ticket))
+        }
+        if let prLink = await findPRLink(branch: branch, repoPath: repoPath, sessionID: session.id) {
+            links.append(prLink)
+        }
+
+        // Update state
         appState.sessions.append(session)
         appState.worktrees[session.id] = [worktree]
         appState.terminals[session.id] = [terminal]
+        appState.links[session.id] = links.isEmpty ? nil : links
         appState.terminalReadiness[terminal.id] = .uninitialized
         TerminalManager.shared.trackReadiness(for: terminal.id)
         // Pre-initialize in offscreen window so recovered terminal starts immediately
         TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: worktreePath)
 
-        if let ticketURL {
-            let link = SessionLink(sessionID: session.id, label: "Issue #\(ticketNumber ?? 0)", url: ticketURL, linkType: .ticket)
-            appState.links[session.id] = [link]
-            store.mutate { data in
-                data.links.append(link)
-            }
-        }
-
-        // Check for a PR on this branch
-        if let repoSlug = resolveRepoSlug(repoPath: repoPath) {
-            if let prOutput = try? await shell(
-                "gh", "pr", "list", "--repo", repoSlug, "--head", branch,
-                "--state", "all", "--json", "number,url,state", "--limit", "1"
-            ), let prData = prOutput.data(using: .utf8),
-               let prItems = try? JSONSerialization.jsonObject(with: prData) as? [[String: Any]],
-               let pr = prItems.first,
-               let prNum = pr["number"] as? Int,
-               let prURL = pr["url"] as? String {
-                let prLink = SessionLink(sessionID: session.id, label: "PR #\(prNum)", url: prURL, linkType: .pr)
-                appState.links[session.id, default: []].append(prLink)
-                store.mutate { data in
-                    data.links.append(prLink)
-                }
-                NSLog("[SessionService] Found PR #\(prNum) for orphan '\(dirName)'")
-            }
-        }
-
+        // Single atomic store mutation
         store.mutate { data in
             data.sessions.append(session)
             data.worktrees.append(worktree)
             data.terminals.append(terminal)
+            data.links.append(contentsOf: links)
         }
 
-        NSLog("[SessionService] Recovered session '\(dirName)' — ticket=#\(ticketNumber ?? 0) title=\(ticketTitle ?? "unknown")")
+        NSLog("[SessionService] Recovered session '\(dirName)' — ticket=#\(ticket.number.map(String.init) ?? "none") title=\(ticket.title ?? "unknown")")
     }
 
     // MARK: - Terminal Tab Management
@@ -550,42 +576,36 @@ final class SessionService {
         store.mutate { data in data.terminals.removeAll { $0.id == terminalID } }
     }
 
-    // MARK: - Complete Session
+    // MARK: - Session Status
 
-    func completeSession(id: UUID) {
+    /// Update a session's status and persist the change.
+    private func updateSessionStatus(_ id: UUID, to status: SessionStatus) {
         guard id != AppState.managerSessionID else { return }
 
         if let idx = appState.sessions.firstIndex(where: { $0.id == id }) {
-            appState.sessions[idx].status = .completed
+            appState.sessions[idx].status = status
             appState.sessions[idx].updatedAt = Date()
         }
 
         store.mutate { data in
             if let idx = data.sessions.firstIndex(where: { $0.id == id }) {
-                data.sessions[idx].status = .completed
+                data.sessions[idx].status = status
                 data.sessions[idx].updatedAt = Date()
             }
         }
     }
 
+    func completeSession(id: UUID) {
+        updateSessionStatus(id, to: .completed)
+    }
+
     func setSessionInReview(id: UUID) {
-        guard id != AppState.managerSessionID else { return }
-
-        if let idx = appState.sessions.firstIndex(where: { $0.id == id }) {
-            appState.sessions[idx].status = .inReview
-            appState.sessions[idx].updatedAt = Date()
-        }
-
-        store.mutate { data in
-            if let idx = data.sessions.firstIndex(where: { $0.id == id }) {
-                data.sessions[idx].status = .inReview
-                data.sessions[idx].updatedAt = Date()
-            }
-        }
+        updateSessionStatus(id, to: .inReview)
     }
 
     // MARK: - Persist Current State
 
+    /// Sync all in-memory state back to the JSON store on disk.
     func persistState() {
         store.mutate { data in
             data.sessions = appState.sessions

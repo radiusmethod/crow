@@ -18,4 +18,14 @@ public enum Validation {
             && name.count <= maxSessionNameLength
             && !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
     }
+
+    /// Detect provider from a ticket URL.
+    public static func detectProviderFromURL(_ url: String) -> Provider? {
+        if url.contains("github.com") {
+            return .github
+        } else if url.contains("gitlab.com") || url.contains("gitlab") || url.contains("/-/issues") || url.contains("/-/merge_requests") {
+            return .gitlab
+        }
+        return nil
+    }
 }

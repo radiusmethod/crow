@@ -73,6 +73,7 @@ public final class AppState {
     // MARK: - PR & Tool Status
 
     /// PR status per session (pipeline, review, merge readiness).
+    /// Must be cleaned up when a session is deleted (see `SessionService.deleteSession`).
     public var prStatus: [UUID: PRStatus] = [:]
 
     /// Whether the VS Code `code` CLI is available on this system.
@@ -132,6 +133,7 @@ public final class AppState {
     public var onSetSessionInReview: ((UUID) -> Void)?
 
     /// Whether a given session is currently being marked as "In Review" (loading state).
+    /// Must be cleaned up when a session is deleted (see `SessionService.deleteSession`).
     public var isMarkingInReview: [UUID: Bool] = [:]
 
     /// Called to open a session's primary worktree in VS Code.

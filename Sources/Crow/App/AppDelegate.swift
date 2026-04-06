@@ -408,12 +408,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                       let name = params["name"]?.stringValue else {
                     throw RPCError.invalidParams("session_id and name required")
                 }
-                return await MainActor.run {
-                    if let idx = capturedAppState.sessions.firstIndex(where: { $0.id == id }) {
-                        capturedAppState.sessions[idx].name = name
-                        capturedStore.mutate { data in
-                            if let i = data.sessions.firstIndex(where: { $0.id == id }) { data.sessions[i].name = name }
-                        }
+                guard AppDelegate.isValidSessionName(name) else {
+                    throw RPCError.invalidParams("Invalid session name (max \(AppDelegate.maxSessionNameLength) chars, no control characters)")
+                }
+                return try await MainActor.run {
+                    guard let idx = capturedAppState.sessions.firstIndex(where: { $0.id == id }) else {
+                        throw RPCError.applicationError("Session not found")
+                    }
+                    capturedAppState.sessions[idx].name = name
+                    capturedStore.mutate { data in
+                        if let i = data.sessions.firstIndex(where: { $0.id == id }) { data.sessions[i].name = name }
                     }
                     return ["session_id": .string(idStr), "name": .string(name)]
                 }
@@ -460,11 +464,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                       let statusStr = params["status"]?.stringValue, let status = SessionStatus(rawValue: statusStr) else {
                     throw RPCError.invalidParams("session_id and status required")
                 }
-                return await MainActor.run {
-                    if let idx = capturedAppState.sessions.firstIndex(where: { $0.id == id }) {
-                        capturedAppState.sessions[idx].status = status
-                        capturedStore.mutate { data in
-                            if let i = data.sessions.firstIndex(where: { $0.id == id }) { data.sessions[i].status = status }
+                return try await MainActor.run {
+                    guard let idx = capturedAppState.sessions.firstIndex(where: { $0.id == id }) else {
+                        throw RPCError.applicationError("Session not found")
+                    }
+                    capturedAppState.sessions[idx].status = status
+                    capturedAppState.sessions[idx].updatedAt = Date()
+                    capturedStore.mutate { data in
+                        if let i = data.sessions.firstIndex(where: { $0.id == id }) {
+                            data.sessions[i].status = status
+                            data.sessions[i].updatedAt = Date()
                         }
                     }
                     return ["session_id": .string(idStr), "status": .string(statusStr)]
@@ -482,29 +491,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let idStr = params["session_id"]?.stringValue, let id = UUID(uuidString: idStr) else {
                     throw RPCError.invalidParams("session_id required")
                 }
-                return await MainActor.run {
-                    if let idx = capturedAppState.sessions.firstIndex(where: { $0.id == id }) {
-                        if let url = params["url"]?.stringValue {
-                            capturedAppState.sessions[idx].ticketURL = url
-                            // Auto-detect provider from URL
-                            if capturedAppState.sessions[idx].provider == nil {
-                                capturedAppState.sessions[idx].provider = SessionService.detectProviderFromURL(url)
-                            }
+                return try await MainActor.run {
+                    guard let idx = capturedAppState.sessions.firstIndex(where: { $0.id == id }) else {
+                        throw RPCError.applicationError("Session not found")
+                    }
+                    if let url = params["url"]?.stringValue {
+                        capturedAppState.sessions[idx].ticketURL = url
+                        // Auto-detect provider from URL
+                        if capturedAppState.sessions[idx].provider == nil {
+                            capturedAppState.sessions[idx].provider = Validation.detectProviderFromURL(url)
                         }
-                        if let title = params["title"]?.stringValue { capturedAppState.sessions[idx].ticketTitle = title }
-                        if let num = params["number"]?.intValue { capturedAppState.sessions[idx].ticketNumber = num }
-                        capturedStore.mutate { data in
-                            if let i = data.sessions.firstIndex(where: { $0.id == id }) { data.sessions[i] = capturedAppState.sessions[idx] }
-                        }
+                    }
+                    if let title = params["title"]?.stringValue { capturedAppState.sessions[idx].ticketTitle = title }
+                    if let num = params["number"]?.intValue { capturedAppState.sessions[idx].ticketNumber = num }
+                    capturedStore.mutate { data in
+                        if let i = data.sessions.firstIndex(where: { $0.id == id }) { data.sessions[i] = capturedAppState.sessions[idx] }
                     }
                     return ["session_id": .string(idStr)]
                 }
             },
             "add-worktree": { @Sendable params in
                 guard let idStr = params["session_id"]?.stringValue, let sessionID = UUID(uuidString: idStr),
-                      let repo = params["repo"]?.stringValue, let path = params["path"]?.stringValue,
-                      let branch = params["branch"]?.stringValue else {
-                    throw RPCError.invalidParams("session_id, repo, path, branch required")
+                      let repo = params["repo"]?.stringValue, !repo.isEmpty,
+                      let path = params["path"]?.stringValue, !path.isEmpty,
+                      let branch = params["branch"]?.stringValue, !branch.isEmpty else {
+                    throw RPCError.invalidParams("session_id, repo, path, branch required (non-empty)")
                 }
                 // Validate path is within devRoot to prevent path traversal
                 guard AppDelegate.isPathWithinDevRoot(path, devRoot: devRoot) else {
@@ -512,6 +523,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 // repo_path is the main repo (for git commands). Defaults to path if not provided.
                 let repoPath = params["repo_path"]?.stringValue ?? path
+                guard AppDelegate.isPathWithinDevRoot(repoPath, devRoot: devRoot) else {
+                    throw RPCError.invalidParams("repo_path must be within the configured devRoot")
+                }
                 let wt = SessionWorktree(sessionID: sessionID, repoName: repo, repoPath: repoPath, worktreePath: path,
                                          branch: branch, isPrimary: params["primary"]?.boolValue ?? false)
                 return await MainActor.run {
@@ -645,8 +659,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             "add-link": { @Sendable params in
                 guard let idStr = params["session_id"]?.stringValue, let sessionID = UUID(uuidString: idStr),
-                      let label = params["label"]?.stringValue, let url = params["url"]?.stringValue else {
-                    throw RPCError.invalidParams("session_id, label, url required")
+                      let label = params["label"]?.stringValue, !label.isEmpty,
+                      let url = params["url"]?.stringValue, !url.isEmpty else {
+                    throw RPCError.invalidParams("session_id, label, url required (non-empty)")
                 }
                 let link = SessionLink(sessionID: sessionID, label: label, url: url,
                                        linkType: LinkType(rawValue: params["type"]?.stringValue ?? "custom") ?? .custom)
