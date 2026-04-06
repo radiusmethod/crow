@@ -20,23 +20,35 @@ public struct PRStatus: Codable, Sendable {
     }
 
     public enum CheckStatus: String, Codable, Sendable {
+        /// All CI/CD checks have passed.
         case passing
+        /// One or more CI/CD checks have failed.
         case failing
+        /// Checks are still running.
         case pending
+        /// Check status could not be determined (e.g. no checks configured).
         case unknown
     }
 
     public enum ReviewStatus: String, Codable, Sendable {
+        /// PR has been approved by required reviewers.
         case approved
+        /// A reviewer has requested changes.
         case changesRequested
+        /// Review is required but not yet submitted.
         case reviewRequired
+        /// Review status could not be determined.
         case unknown
     }
 
     public enum MergeStatus: String, Codable, Sendable {
+        /// PR can be merged (no conflicts, requirements met).
         case mergeable
+        /// PR has merge conflicts that must be resolved.
         case conflicting
+        /// PR has already been merged.
         case merged
+        /// Merge status could not be determined.
         case unknown
     }
 

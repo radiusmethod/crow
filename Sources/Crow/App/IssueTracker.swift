@@ -1,6 +1,7 @@
 import Foundation
 import CrowCore
 import CrowPersistence
+import CrowProvider
 
 /// Polls GitHub/GitLab for issues assigned to the current user.
 @MainActor
@@ -8,6 +9,7 @@ final class IssueTracker {
     private let appState: AppState
     private var timer: Timer?
     private let pollInterval: TimeInterval = 60 // 1 minute
+    private var isRefreshing = false
 
     init(appState: AppState) {
         self.appState = appState
@@ -17,7 +19,7 @@ final class IssueTracker {
         // Initial fetch
         Task { await refresh() }
 
-        // Poll every 5 minutes
+        // Poll on interval
         timer = Timer.scheduledTimer(withTimeInterval: pollInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 await self?.refresh()
@@ -31,6 +33,10 @@ final class IssueTracker {
     }
 
     func refresh() async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
         appState.isLoadingIssues = true
         defer { appState.isLoadingIssues = false }
 
@@ -100,33 +106,24 @@ final class IssueTracker {
 
     private func fetchGitHubIssues() async -> [AssignedIssue] {
         // Use gh search issues to find ALL issues assigned to me across all repos
-        guard let output = try? await shell(
-            "gh", "search", "issues",
-            "--assignee", "@me",
-            "--state", "open",
-            "--json", "number,title,state,labels,url,repository,updatedAt",
-            "--limit", "100"
-        ) else { return [] }
+        let output: String
+        do {
+            output = try await shell(
+                "gh", "search", "issues",
+                "--assignee", "@me",
+                "--state", "open",
+                "--json", "number,title,state,labels,url,repository,updatedAt",
+                "--limit", "100"
+            )
+        } catch {
+            print("[IssueTracker] fetchGitHubIssues failed: \(error)")
+            return []
+        }
 
         guard let data = output.data(using: .utf8),
               let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
 
-        return items.compactMap { item -> AssignedIssue? in
-            guard let number = item["number"] as? Int,
-                  let title = item["title"] as? String,
-                  let url = item["url"] as? String else { return nil }
-
-            let state = item["state"] as? String ?? "open"
-            let labels = (item["labels"] as? [[String: Any]])?.compactMap { $0["name"] as? String } ?? []
-            let repoDict = item["repository"] as? [String: Any]
-            let repoName = repoDict?["nameWithOwner"] as? String ?? ""
-
-            return AssignedIssue(
-                id: "github:\(repoName)#\(number)",
-                number: number, title: title, state: state.lowercased(),
-                url: url, repo: repoName, labels: labels, provider: .github
-            )
-        }
+        return items.compactMap { parseGitHubIssueJSON($0) }
     }
 
     private struct PRInfo {
@@ -136,12 +133,47 @@ final class IssueTracker {
         let linkedIssueNumbers: [Int]
     }
 
+    /// Parse a GitHub issue JSON dictionary (from `gh search issues`) into an AssignedIssue.
+    private func parseGitHubIssueJSON(
+        _ item: [String: Any],
+        defaultState: String = "open",
+        projectStatus: TicketStatus = .unknown,
+        dateFormatter: ISO8601DateFormatter? = nil
+    ) -> AssignedIssue? {
+        guard let number = item["number"] as? Int,
+              let title = item["title"] as? String,
+              let url = item["url"] as? String else { return nil }
+
+        let state = item["state"] as? String ?? defaultState
+        let labels = (item["labels"] as? [[String: Any]])?.compactMap { $0["name"] as? String } ?? []
+        let repoDict = item["repository"] as? [String: Any]
+        let repoName = repoDict?["nameWithOwner"] as? String ?? ""
+
+        var updatedAt: Date?
+        if let dateFormatter, let dateStr = item["updatedAt"] as? String {
+            updatedAt = dateFormatter.date(from: dateStr)
+        }
+
+        return AssignedIssue(
+            id: "github:\(repoName)#\(number)",
+            number: number, title: title, state: state.lowercased(),
+            url: url, repo: repoName, labels: labels, provider: .github,
+            updatedAt: updatedAt, projectStatus: projectStatus
+        )
+    }
+
     private func fetchGitHubPRs() async -> [PRInfo] {
-        guard let output = try? await shell(
-            "gh", "pr", "list", "--author", "@me", "--state", "open",
-            "--json", "number,url,headRefName,closingIssuesReferences",
-            "--limit", "20"
-        ) else { return [] }
+        let output: String
+        do {
+            output = try await shell(
+                "gh", "pr", "list", "--author", "@me", "--state", "open",
+                "--json", "number,url,headRefName,closingIssuesReferences",
+                "--limit", "20"
+            )
+        } catch {
+            print("[IssueTracker] fetchGitHubPRs failed: \(error)")
+            return []
+        }
 
         guard let data = output.data(using: .utf8),
               let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
@@ -161,10 +193,16 @@ final class IssueTracker {
     // MARK: - GitLab
 
     private func fetchGitLabIssues(host: String) async -> [AssignedIssue] {
-        guard let output = try? await shell(
-            env: ["GITLAB_HOST": host],
-            "glab", "issue", "list", "-a", "@me", "--output-format", "json"
-        ) else { return [] }
+        let output: String
+        do {
+            output = try await shell(
+                env: ["GITLAB_HOST": host],
+                "glab", "issue", "list", "-a", "@me", "--output-format", "json"
+            )
+        } catch {
+            print("[IssueTracker] fetchGitLabIssues(host: \(host)) failed: \(error)")
+            return []
+        }
 
         guard let data = output.data(using: .utf8),
               let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
@@ -210,15 +248,17 @@ final class IssueTracker {
             let repoSlug = resolveRepoSlug(worktree: primaryWt)
             guard !repoSlug.isEmpty else { continue }
 
-            if let output = try? await shell(
-                "gh", "pr", "list", "--repo", repoSlug, "--head", branch,
-                "--state", "all",
-                "--json", "number,url,state", "--limit", "1"
-            ), let data = output.data(using: .utf8),
-               let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-               let pr = items.first,
-               let prNum = pr["number"] as? Int,
-               let prURL = pr["url"] as? String {
+            do {
+                let output = try await shell(
+                    "gh", "pr", "list", "--repo", repoSlug, "--head", branch,
+                    "--state", "all",
+                    "--json", "number,url,state", "--limit", "1"
+                )
+                if let data = output.data(using: .utf8),
+                   let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                   let pr = items.first,
+                   let prNum = pr["number"] as? Int,
+                   let prURL = pr["url"] as? String {
 
                 let link = SessionLink(
                     sessionID: session.id,
@@ -232,6 +272,9 @@ final class IssueTracker {
                 store.mutate { data in
                     data.links.append(link)
                 }
+                }
+            } catch {
+                print("[IssueTracker] checkSessionPRs: PR lookup for branch '\(branch)' failed: \(error)")
             }
         }
     }
@@ -280,10 +323,16 @@ final class IssueTracker {
             let links = appState.links(for: session.id)
             guard let prLink = links.first(where: { $0.linkType == .pr }) else { continue }
 
-            guard let output = try? await shell(
-                "gh", "pr", "view", prLink.url,
-                "--json", "state,mergeable,reviewDecision,statusCheckRollup"
-            ) else { continue }
+            let output: String
+            do {
+                output = try await shell(
+                    "gh", "pr", "view", prLink.url,
+                    "--json", "state,mergeable,reviewDecision,statusCheckRollup"
+                )
+            } catch {
+                print("[IssueTracker] fetchPRStatuses: failed for \(prLink.url): \(error)")
+                continue
+            }
 
             guard let data = output.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
@@ -347,40 +396,25 @@ final class IssueTracker {
         let formatter = ISO8601DateFormatter()
         let since = formatter.string(from: Date().addingTimeInterval(-86400))
 
-        guard let output = try? await shell(
-            "gh", "search", "issues",
-            "--assignee", "@me",
-            "--state", "closed",
-            "--json", "number,title,state,labels,url,repository,updatedAt",
-            "--limit", "50",
-            "--", "closed:>\(since)"
-        ) else { return [] }
+        let output: String
+        do {
+            output = try await shell(
+                "gh", "search", "issues",
+                "--assignee", "@me",
+                "--state", "closed",
+                "--json", "number,title,state,labels,url,repository,updatedAt",
+                "--limit", "50",
+                "--", "closed:>\(since)"
+            )
+        } catch {
+            print("[IssueTracker] fetchDoneIssuesLast24h failed: \(error)")
+            return []
+        }
 
         guard let data = output.data(using: .utf8),
               let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
 
-        return items.compactMap { item -> AssignedIssue? in
-            guard let number = item["number"] as? Int,
-                  let title = item["title"] as? String,
-                  let url = item["url"] as? String else { return nil }
-
-            let state = item["state"] as? String ?? "closed"
-            let labels = (item["labels"] as? [[String: Any]])?.compactMap { $0["name"] as? String } ?? []
-            let repoDict = item["repository"] as? [String: Any]
-            let repoName = repoDict?["nameWithOwner"] as? String ?? ""
-
-            var updatedAt: Date?
-            if let dateStr = item["updatedAt"] as? String {
-                updatedAt = formatter.date(from: dateStr)
-            }
-
-            return AssignedIssue(
-                id: "github:\(repoName)#\(number)",
-                number: number, title: title, state: state.lowercased(),
-                url: url, repo: repoName, labels: labels, provider: .github,
-                updatedAt: updatedAt, projectStatus: .done
-            )
-        }
+        return items.compactMap { parseGitHubIssueJSON($0, defaultState: "closed", projectStatus: .done, dateFormatter: formatter) }
     }
 
     // MARK: - Auto-Complete Finished Sessions
@@ -438,9 +472,13 @@ final class IssueTracker {
 
     /// Check if a GitHub PR was merged.
     private func checkPRMerged(url: String) async -> Bool {
-        guard let output = try? await shell(
-            "gh", "pr", "view", url, "--json", "state"
-        ) else { return false }
+        let output: String
+        do {
+            output = try await shell("gh", "pr", "view", url, "--json", "state")
+        } catch {
+            print("[IssueTracker] checkPRMerged failed for \(url): \(error)")
+            return false
+        }
 
         guard let data = output.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -451,11 +489,18 @@ final class IssueTracker {
 
     /// Check if an issue is closed.
     private func checkIssueClosed(url: String, provider: Provider) async -> Bool {
-        guard provider == .github else { return false }  // GitLab TBD
+        guard provider == .github else {
+            print("[IssueTracker] checkIssueClosed: GitLab not yet supported, skipping \(url)")
+            return false
+        }
 
-        guard let output = try? await shell(
-            "gh", "issue", "view", url, "--json", "state"
-        ) else { return false }
+        let output: String
+        do {
+            output = try await shell("gh", "issue", "view", url, "--json", "state")
+        } catch {
+            print("[IssueTracker] checkIssueClosed failed for \(url): \(error)")
+            return false
+        }
 
         guard let data = output.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -470,6 +515,8 @@ final class IssueTracker {
         let githubIssues = issues.enumerated().filter { $0.element.provider == .github }
         guard !githubIssues.isEmpty else { return }
 
+        // Query the "Status" single-select field from GitHub Projects V2 for each issue.
+        // Returns the project board pipeline status (e.g. "Backlog", "In Progress", "Done").
         let query = """
         query($owner: String!, $repo: String!, $number: Int!) {
           repository(owner: $owner, name: $repo) {
@@ -487,7 +534,7 @@ final class IssueTracker {
         """
 
         // Test with the first issue to detect scope errors early
-        let (firstIndex, firstIssue) = githubIssues[0]
+        let (_, firstIssue) = githubIssues[0]
         let firstParts = firstIssue.repo.split(separator: "/")
         if firstParts.count == 2 {
             let testResult = await shellWithStatus(
@@ -513,13 +560,19 @@ final class IssueTracker {
             let owner = String(parts[0])
             let repoName = String(parts[1])
 
-            guard let output = try? await shell(
-                "gh", "api", "graphql",
-                "-f", "query=\(query)",
-                "-F", "owner=\(owner)",
-                "-F", "repo=\(repoName)",
-                "-F", "number=\(issue.number)"
-            ) else { continue }
+            let output: String
+            do {
+                output = try await shell(
+                    "gh", "api", "graphql",
+                    "-f", "query=\(query)",
+                    "-F", "owner=\(owner)",
+                    "-F", "repo=\(repoName)",
+                    "-F", "number=\(issue.number)"
+                )
+            } catch {
+                print("[IssueTracker] fetchGitHubProjectStatuses: GraphQL query failed for \(owner)/\(repoName)#\(issue.number): \(error)")
+                continue
+            }
 
             guard let data = output.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -533,27 +586,10 @@ final class IssueTracker {
             for node in nodes {
                 if let fieldValue = node["fieldValueByName"] as? [String: Any],
                    let statusName = fieldValue["name"] as? String {
-                    issues[index].projectStatus = mapProjectStatus(statusName)
+                    issues[index].projectStatus = TicketStatus(projectBoardName: statusName)
                     break
                 }
             }
-        }
-    }
-
-    private func mapProjectStatus(_ name: String) -> TicketStatus {
-        switch name.lowercased().trimmingCharacters(in: .whitespaces) {
-        case "backlog":
-            return .backlog
-        case "ready", "todo", "to do":
-            return .ready
-        case "in progress", "doing", "active":
-            return .inProgress
-        case "in review", "review":
-            return .inReview
-        case "done", "closed", "complete", "completed":
-            return .done
-        default:
-            return .unknown
         }
     }
 
@@ -564,20 +600,19 @@ final class IssueTracker {
               let ticketURL = session.ticketURL,
               session.provider == .github else { return }
 
-        // Parse owner/repo/number from URL like "https://github.com/org/repo/issues/123"
-        let components = ticketURL.split(separator: "/")
-        guard components.count >= 5,
-              let number = Int(components.last ?? "") else {
+        guard let parsed = ProviderManager.parseTicketURLComponents(ticketURL) else {
             print("[IssueTracker] Could not parse ticket URL: \(ticketURL)")
             return
         }
-        let owner = String(components[components.count - 4])
-        let repoName = String(components[components.count - 3])
+        let owner = parsed.org
+        let repoName = parsed.repo
+        let number = parsed.number
 
         appState.isMarkingInReview[sessionID] = true
         defer { appState.isMarkingInReview[sessionID] = false }
 
-        // Step 1: Query for project item ID, project ID, field ID, and "In Review" option ID
+        // Step 1: Query the project item ID, project ID, Status field ID, and available options
+        // so we can find the "In Review" option to set.
         let query = """
         query($owner: String!, $repo: String!, $number: Int!) {
           repository(owner: $owner, name: $repo) {
@@ -670,7 +705,7 @@ final class IssueTracker {
             return
         }
 
-        // Step 2: Mutation to update the status
+        // Step 2: Mutation to update the Status field to the "In Review" option
         let mutation = """
         mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
           updateProjectV2ItemFieldValue(input: {

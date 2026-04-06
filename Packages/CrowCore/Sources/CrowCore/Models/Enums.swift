@@ -63,6 +63,18 @@ public enum TicketStatus: String, Codable, Sendable, CaseIterable {
 
     /// The pipeline stages shown in the UI (including Done).
     public static let pipelineStatuses: [TicketStatus] = [.backlog, .ready, .inProgress, .inReview, .done]
+
+    /// Initialize from a GitHub/GitLab project board status name (case-insensitive).
+    public init(projectBoardName name: String) {
+        switch name.lowercased().trimmingCharacters(in: .whitespaces) {
+        case "backlog": self = .backlog
+        case "ready", "todo", "to do": self = .ready
+        case "in progress", "doing", "active": self = .inProgress
+        case "in review", "review": self = .inReview
+        case "done", "closed", "complete", "completed": self = .done
+        default: self = .unknown
+        }
+    }
 }
 
 /// Sort order options for the ticket board.
