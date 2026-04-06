@@ -35,15 +35,15 @@ struct DeleteSessionAlert: ViewModifier {
     private var buttonLabel: String {
         guard let session = sessionToDelete else { return "Delete" }
         let wts = appState.worktrees(for: session.id)
-        let hasRealWorktrees = wts.contains { !WorktreeClassification.isMainCheckout($0) }
+        let hasRealWorktrees = wts.contains { !$0.isMainRepoCheckout }
         return DeleteSessionMessageBuilder.buttonLabel(hasRealWorktrees: hasRealWorktrees)
     }
 
     private var messageText: String {
         guard let session = sessionToDelete else { return "" }
         let wts = appState.worktrees(for: session.id)
-        let realWorktrees = wts.filter { !WorktreeClassification.isMainCheckout($0) }
-        let mainCheckouts = wts.filter { WorktreeClassification.isMainCheckout($0) }
+        let realWorktrees = wts.filter { !$0.isMainRepoCheckout }
+        let mainCheckouts = wts.filter { $0.isMainRepoCheckout }
         return DeleteSessionMessageBuilder.buildMessage(
             sessionName: session.name,
             realWorktrees: realWorktrees,
@@ -91,21 +91,3 @@ enum DeleteSessionMessageBuilder {
     }
 }
 
-// MARK: - Worktree Classification
-
-/// Shared logic for classifying worktrees as main checkouts vs real worktrees.
-enum WorktreeClassification {
-    /// Returns true if the worktree points at the main repo checkout (not a real git worktree).
-    static func isMainCheckout(_ wt: SessionWorktree) -> Bool {
-        let worktree = (wt.worktreePath as NSString).standardizingPath
-        let repo = (wt.repoPath as NSString).standardizingPath
-        if worktree == repo { return true }
-
-        let branch = wt.branch
-            .replacingOccurrences(of: "refs/heads/", with: "")
-            .replacingOccurrences(of: "origin/", with: "")
-            .lowercased()
-        let protectedNames: Set<String> = ["main", "master", "develop", "dev", "trunk", "release"]
-        return protectedNames.contains(branch)
-    }
-}

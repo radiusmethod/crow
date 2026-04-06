@@ -88,7 +88,7 @@ private func makeWorktree(
     )
 }
 
-// MARK: - WorktreeClassification
+// MARK: - Worktree Classification (uses SessionWorktree.isMainRepoCheckout from CrowCore)
 
 @Test func isMainCheckoutDetectsMatchingPaths() {
     let wt = makeWorktree(
@@ -96,25 +96,25 @@ private func makeWorktree(
         worktreePath: "/Users/test/Dev/Org/repo",
         branch: "feature/something"
     )
-    #expect(WorktreeClassification.isMainCheckout(wt) == true)
+    #expect(wt.isMainRepoCheckout == true)
 }
 
 @Test func isMainCheckoutDetectsProtectedBranches() {
     let protectedBranches = ["main", "master", "develop", "dev", "trunk", "release"]
     for branch in protectedBranches {
         let wt = makeWorktree(branch: branch)
-        #expect(WorktreeClassification.isMainCheckout(wt) == true, "Expected \(branch) to be a main checkout")
+        #expect(wt.isMainRepoCheckout == true, "Expected \(branch) to be a main checkout")
     }
 }
 
 @Test func isMainCheckoutDetectsProtectedBranchesWithPrefix() {
     let wt = makeWorktree(branch: "refs/heads/main")
-    #expect(WorktreeClassification.isMainCheckout(wt) == true)
+    #expect(wt.isMainRepoCheckout == true)
 }
 
 @Test func isMainCheckoutReturnsFalseForFeatureBranch() {
     let wt = makeWorktree(branch: "feature/crow-73-quality-pass")
-    #expect(WorktreeClassification.isMainCheckout(wt) == false)
+    #expect(wt.isMainRepoCheckout == false)
 }
 
 // MARK: - Delete Session Message Logic
