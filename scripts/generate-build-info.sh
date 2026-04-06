@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 APP_OUTPUT_DIR="$ROOT_DIR/Sources/Crow/Generated"
-CLI_OUTPUT_DIR="$ROOT_DIR/Sources/CrowCLI/Generated"
+CLI_OUTPUT_DIR="$ROOT_DIR/Packages/CrowCLI/Sources/CrowCLILib/Generated"
 
 mkdir -p "$APP_OUTPUT_DIR" "$CLI_OUTPUT_DIR"
 
