@@ -14,7 +14,7 @@ help:
 	@echo "  build      Full build: submodules + ghostty + swift build (default)"
 	@echo "  setup      Init submodules and check build prerequisites"
 	@echo "  check      Verify all build and runtime prerequisites"
-	@echo "  test       Run unit tests for CrowCore and CrowPersistence"
+	@echo "  test       Run all package tests"
 	@echo "  ghostty    Build GhosttyKit framework"
 	@echo "  app        Swift build only (debug)"
 	@echo "  release    Release build + .app bundle"
@@ -58,6 +58,16 @@ release: $(XCFW)
 sign: release
 	bash scripts/sign-and-notarize.sh
 
+# --- Test ---
+
+test:
+	@for pkg in Packages/*/; do \
+		if [ -d "$$pkg/Tests" ]; then \
+			echo "==> Testing $$(basename $$pkg)..."; \
+			swift test --package-path "$$pkg"; \
+		fi; \
+	done
+
 # --- Clean ---
 
 clean:
@@ -65,12 +75,6 @@ clean:
 
 clean-all: clean
 	rm -rf $(FRAMEWORKS_DIR)
-
-# --- Test ---
-
-test:
-	swift test --package-path Packages/CrowCore
-	swift test --package-path Packages/CrowPersistence
 
 # --- Check ---
 

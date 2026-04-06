@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Generate BuildInfo.swift and CLIVersion.swift with version, git SHA, and build date
+# Generate BuildInfo.swift and CLIVersion.swift with version, git SHA, and build date.
+#
+# Output: Sources/Crow/Generated/BuildInfo.swift
+#         Sources/CrowCLI/Generated/CLIVersion.swift
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

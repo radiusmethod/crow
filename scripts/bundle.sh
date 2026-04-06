@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # Bundle Crow into a .app
+#
+# Usage: bash scripts/bundle.sh  (or: make release)
+# Prerequisites: GhosttyKit.xcframework must be built first (run: make ghostty)
+# Output: Crow.app/ in the repo root
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,7 +36,12 @@ echo "==> Building release..."
 cd "$ROOT_DIR"
 swift build -c release
 
-echo "==> Creating app bundle..."
+if [ ! -f "$BUILD_DIR/CrowApp" ]; then
+    echo "ERROR: Release binary not found at $BUILD_DIR/CrowApp"
+    exit 1
+fi
+
+echo "==> Creating app bundle (v$VERSION)..."
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
@@ -45,6 +54,8 @@ if [ -d "$FRAMEWORKS_DIR/ghostty-resources" ]; then
     cp -R "$FRAMEWORKS_DIR/ghostty-resources" "$APP_DIR/Contents/Resources/ghostty"
     echo "    Bundled Ghostty resources"
 fi
+
+# TODO: Add CFBundleIconFile and bundle AppIcon.icns once icon asset pipeline is created
 
 # Create Info.plist
 cat > "$APP_DIR/Contents/Info.plist" << PLIST

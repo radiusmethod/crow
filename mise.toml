@@ -10,8 +10,8 @@ description = "Run the app in debug mode"
 run = "swift run CrowApp"
 
 [tasks.build]
-description = "Build debug"
-run = "swift build"
+description = "Full build: submodules + ghostty + swift build"
+run = "make build"
 
 [tasks."build:release"]
 description = "Build release"
