@@ -103,7 +103,7 @@ import Testing
     let session = Session(id: sessionID, name: "round-trip")
     let worktree = SessionWorktree(
         sessionID: sessionID, repoName: "crow", repoPath: "/path/to/crow",
-        worktreePath: "/path/to/worktree", branch: "feature/test", workspace: "RadiusMethod"
+        worktreePath: "/path/to/worktree", branch: "feature/test"
     )
     let link = SessionLink(
         sessionID: sessionID, label: "Issue", url: "https://github.com/org/repo/issues/1",
@@ -135,7 +135,6 @@ import Testing
 
     let rw = reloaded.data.worktrees.first!
     #expect(rw.branch == "feature/test")
-    #expect(rw.workspace == "RadiusMethod")
 
     let rl = reloaded.data.links.first!
     #expect(rl.linkType == .ticket)
