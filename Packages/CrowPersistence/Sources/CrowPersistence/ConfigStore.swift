@@ -23,6 +23,9 @@ public final class ConfigStore: Sendable {
               !path.isEmpty else {
             return nil
         }
+        if !FileManager.default.fileExists(atPath: path) {
+            NSLog("[ConfigStore] devRoot path does not exist on disk: %@", path)
+        }
         return path
     }
 

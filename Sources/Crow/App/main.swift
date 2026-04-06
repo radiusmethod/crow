@@ -9,6 +9,9 @@ if let iconURL = Bundle.module.url(forResource: "AppIcon", withExtension: "png")
     app.applicationIconImage = iconImage
 }
 
+let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+NSLog("[Crow] Starting Crow %@ (pid %d)", version, ProcessInfo.processInfo.processIdentifier)
+
 let delegate = AppDelegate()
 app.delegate = delegate
 app.run()

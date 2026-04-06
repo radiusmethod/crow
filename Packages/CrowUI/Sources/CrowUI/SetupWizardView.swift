@@ -11,14 +11,14 @@ public struct SetupWizardView: View {
     @State private var isAddingWorkspace = false
     @State private var errorMessage: String?
 
-    /// Called when setup completes with devRoot and config.
-    public var onComplete: ((String, AppConfig) -> Void)?
+    /// Called when setup completes with devRoot and config. Returns an error message on failure.
+    public var onComplete: ((String, AppConfig) -> String?)?
 
     /// Called if user wants to import from existing CMUX config.
     public var onImportCMUX: (() -> (devRoot: String, config: AppConfig)?)?
 
     public init(
-        onComplete: ((String, AppConfig) -> Void)? = nil,
+        onComplete: ((String, AppConfig) -> String?)? = nil,
         onImportCMUX: (() -> (devRoot: String, config: AppConfig)?)? = nil
     ) {
         self.onComplete = onComplete
@@ -210,6 +210,8 @@ public struct SetupWizardView: View {
 
     private func completeSetup() {
         let config = AppConfig(workspaces: workspaces)
-        onComplete?(devRoot, config)
+        if let error = onComplete?(devRoot, config) {
+            errorMessage = error
+        }
     }
 }

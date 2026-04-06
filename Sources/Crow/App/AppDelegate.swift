@@ -57,7 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func completeSetup(devRoot: String, config: AppConfig) {
+    private func completeSetup(devRoot: String, config: AppConfig) -> String? {
         do {
             // Save devRoot pointer
             try ConfigStore.saveDevRoot(devRoot)
@@ -73,8 +73,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.devRoot = devRoot
             self.appConfig = config
             launchMainApp()
+            return nil
         } catch {
-            NSLog("Setup failed: \(error)")
+            NSLog("[Crow] Setup failed: %@", error.localizedDescription)
+            return "Setup failed: \(error.localizedDescription)"
         }
     }
 
@@ -84,15 +86,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let devRoot else { return }
 
         // Initialize libghostty
+        NSLog("[Crow] Initializing Ghostty")
         GhosttyApp.shared.initialize()
 
         // Load config
         let config = appConfig ?? ConfigStore.loadConfig(devRoot: devRoot) ?? AppConfig()
         self.appConfig = config
+        NSLog("[Crow] Config loaded (workspaces: %d)", config.workspaces.count)
 
         // Update skills and CLAUDE.md on every launch
         let scaffolder = Scaffolder(devRoot: devRoot)
-        try? scaffolder.scaffold(workspaceNames: config.workspaces.map(\.name))
+        do {
+            try scaffolder.scaffold(workspaceNames: config.workspaces.map(\.name))
+        } catch {
+            NSLog("[Crow] Scaffold update failed: %@", error.localizedDescription)
+        }
 
         // Initialize persistence
         let store = JSONStore()
@@ -103,28 +111,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         service.hydrateState()
         service.wireTerminalReadiness()
         self.sessionService = service
+        NSLog("[Crow] Session state hydrated (%d sessions)", appState.sessions.count)
 
         // Detect orphaned worktrees (runs async, updates UI when done)
         Task { await service.detectOrphanedWorktrees() }
 
         // Check for runtime dependencies (non-blocking)
-        Task.detached {
-            let tools = ["gh", "git", "claude"]
-            for tool in tools {
-                let proc = Process()
-                proc.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-                proc.arguments = [tool]
-                proc.standardOutput = FileHandle.nullDevice
-                proc.standardError = FileHandle.nullDevice
-                do {
-                    try proc.run()
-                    proc.waitUntilExit()
-                    if proc.terminationStatus != 0 {
-                        NSLog("[Crow] Runtime dependency not found: %@", tool)
+        Task {
+            let missing = await Task.detached {
+                var result: [String] = []
+                let tools = ["gh", "git", "claude", "glab", "code"]
+                for tool in tools {
+                    let proc = Process()
+                    proc.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+                    proc.arguments = [tool]
+                    proc.standardOutput = FileHandle.nullDevice
+                    proc.standardError = FileHandle.nullDevice
+                    do {
+                        try proc.run()
+                        proc.waitUntilExit()
+                        if proc.terminationStatus != 0 {
+                            NSLog("[Crow] Runtime dependency not found: %@", tool)
+                            result.append(tool)
+                        }
+                    } catch {
+                        NSLog("[Crow] Could not check for %@: %@", tool, error.localizedDescription)
+                        result.append(tool)
                     }
-                } catch {
-                    NSLog("[Crow] Could not check for %@: %@", tool, error.localizedDescription)
                 }
+                return result
+            }.value
+            if !missing.isEmpty {
+                appState.missingDependencies = missing
             }
         }
 
@@ -217,6 +235,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start socket server
         startSocketServer(store: store, devRoot: devRoot)
 
+        NSLog("[Crow] Main app launch complete — creating window")
+
         // Create main window
         let contentView = MainContentView(appState: appState)
         let hostingView = NSHostingView(rootView: contentView)
@@ -231,8 +251,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         mainWindow.title = "Crow"
+        mainWindow.minSize = NSSize(width: 800, height: 500)
         mainWindow.contentView = hostingView
         mainWindow.center()
+        // Set autosave name after center() so a saved frame takes precedence
         mainWindow.setFrameAutosaveName("MainWindow")
         mainWindow.makeKeyAndOrderFront(nil)
         self.window = mainWindow
@@ -349,20 +371,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Socket Server
 
     /// Maximum allowed length for session names.
-    private nonisolated static let maxSessionNameLength = 256
+    private nonisolated static let maxSessionNameLength = Validation.maxSessionNameLength
 
     /// Validate that a path is within the configured devRoot to prevent path traversal.
     private nonisolated static func isPathWithinDevRoot(_ path: String, devRoot: String) -> Bool {
-        let realPath = (path as NSString).standardizingPath
-        let realRoot = (devRoot as NSString).standardizingPath
-        return realPath.hasPrefix(realRoot + "/") || realPath == realRoot
+        Validation.isPathWithinRoot(path, root: devRoot)
     }
 
     /// Validate a session name contains no control characters and is within length limits.
     private nonisolated static func isValidSessionName(_ name: String) -> Bool {
-        !name.isEmpty
-            && name.count <= maxSessionNameLength
-            && !name.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+        Validation.isValidSessionName(name)
     }
 
     private func startSocketServer(store: JSONStore, devRoot: String) {
@@ -854,10 +872,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
+        NSLog("[Crow] Application terminating — beginning cleanup")
         issueTracker?.stop()
         sessionService?.persistState()
+        // Persist config in case settings changed during this session
+        if let devRoot, let appConfig {
+            try? ConfigStore.saveConfig(appConfig, devRoot: devRoot)
+        }
         socketServer?.stop()
         GhosttyApp.shared.shutdown()
+        NSLog("[Crow] Cleanup complete")
     }
 
     // MARK: - Claude Binary Resolution
