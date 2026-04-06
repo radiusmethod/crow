@@ -26,6 +26,8 @@ cd crow
 make build
 ```
 
+**Note:** Code signing is not required for development. Unsigned builds work normally for local testing. Official releases are signed and notarized automatically via GitHub Actions.
+
 ### Running Tests
 
 ```bash
@@ -68,6 +70,36 @@ If a new package is needed, create it under `Packages/` and add it to the root `
    - A description of what changed and why
    - A link to the related issue
    - Screenshots for UI changes
+
+## Versioning
+
+Crow follows [Semantic Versioning](https://semver.org/):
+
+- **Major** (X.0.0) — breaking changes to the CLI, IPC protocol, or config format
+- **Minor** (0.X.0) — new features and capabilities
+- **Patch** (0.0.X) — bug fixes and minor improvements
+
+### Version source of truth
+
+The `VERSION` file at the repo root contains the current version (e.g., `0.1.0`). All build scripts read from this file. Never hardcode a version string elsewhere.
+
+For CI, set the `CROW_VERSION` environment variable to override the file. The build number (`CFBundleVersion`) is derived automatically from `git rev-list --count HEAD`.
+
+### Releasing a new version
+
+1. Update `VERSION` with the new version number
+2. Move entries from `[Unreleased]` in `CHANGELOG.md` into a new version section
+3. Commit: `git commit -am "Release vX.Y.Z"`
+4. Tag: `git tag vX.Y.Z`
+5. Push: `git push origin main --tags`
+
+### Changelog contributions
+
+When submitting a PR, add a bullet under the `[Unreleased]` section of `CHANGELOG.md` describing your change. Use the categories from [Keep a Changelog](https://keepachangelog.com/): Added, Changed, Deprecated, Removed, Fixed, Security.
+
+### Future considerations
+
+We may adopt [Conventional Commits](https://www.conventionalcommits.org/) and automated changelog generation (e.g., [git-cliff](https://git-cliff.org/)) as the project matures. For now, the changelog is maintained manually.
 
 ## Auto-Scaffolded Files
 

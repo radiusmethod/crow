@@ -7,7 +7,7 @@ struct Crow: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "crow",
         abstract: "CLI for Crow — manage sessions, terminals, and metadata",
-        version: "0.1.0",
+        version: CLIVersion.version,
         subcommands: [
             Setup.self,
             NewSession.self,

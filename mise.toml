@@ -29,6 +29,11 @@ run = "swift test"
 description = "Create .app bundle"
 run = "bash scripts/bundle.sh"
 
+[tasks.sign]
+description = "Sign, create DMG, and notarize (requires DEVELOPER_ID_APPLICATION)"
+depends = ["bundle"]
+run = "bash scripts/sign-and-notarize.sh"
+
 [tasks.clean]
 description = "Clean build artifacts"
 run = "rm -rf .build .derived-data Crow.app"
