@@ -57,26 +57,26 @@ public final class GhosttySurfaceView: NSView {
         config.scale_factor = Double(window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0)
         config.font_size = 0
 
-        if let wd = workingDirectory {
-            wd.withCString { ptr in
-                config.working_directory = ptr
-                if let cmd = resolvedCommand {
-                    cmd.withCString { cmdPtr in
-                        config.command = cmdPtr
-                        self.surface = ghostty_surface_new(app, &config)
-                    }
-                } else {
-                    self.surface = ghostty_surface_new(app, &config)
-                }
-            }
-        } else if let cmd = resolvedCommand {
-            cmd.withCString { cmdPtr in
+        // Helper to call ghostty_surface_new with optional C-string pointers.
+        // withCString ensures pointer validity for the duration of the closure.
+        func createWithStrings(wd: String?, cmd: String?) {
+            let create = { (wdPtr: UnsafePointer<CChar>?, cmdPtr: UnsafePointer<CChar>?) in
+                config.working_directory = wdPtr
                 config.command = cmdPtr
                 self.surface = ghostty_surface_new(app, &config)
             }
-        } else {
-            surface = ghostty_surface_new(app, &config)
+            switch (wd, cmd) {
+            case let (wd?, cmd?):
+                wd.withCString { wdPtr in cmd.withCString { cmdPtr in create(wdPtr, cmdPtr) } }
+            case let (wd?, nil):
+                wd.withCString { wdPtr in create(wdPtr, nil) }
+            case let (nil, cmd?):
+                cmd.withCString { cmdPtr in create(nil, cmdPtr) }
+            case (nil, nil):
+                create(nil, nil)
+            }
         }
+        createWithStrings(wd: workingDirectory, cmd: resolvedCommand)
 
         updateTrackingAreaInternal()
 
@@ -88,6 +88,7 @@ public final class GhosttySurfaceView: NSView {
         }
     }
 
+    /// Single-quote a string for safe shell interpolation, escaping internal single quotes.
     private static func shellEscape(_ str: String) -> String {
         // Single-quote the string, escaping any internal single quotes
         "'" + str.replacingOccurrences(of: "'", with: "'\\''") + "'"
@@ -357,39 +358,29 @@ public final class GhosttySurfaceView: NSView {
     // MARK: - Programmatic Text Input
 
     /// Write text to the terminal's PTY input (for crow CLI `send` command).
-    /// Newlines in the text trigger Enter keypresses.
+    ///
+    /// Text segments are sent via `ghostty_surface_text`. Newlines are converted
+    /// to carriage returns (`\r`) which the PTY interprets as Enter keypresses.
     public func writeText(_ text: String) {
         guard let surface else {
-            NSLog("writeText: no surface!")
+            NSLog("[GhosttySurfaceView] writeText: no surface!")
             return
         }
-        // Split on newlines — text goes via ghostty_surface_text,
-        // newlines go via ghostty_surface_key (Enter keypress)
         let parts = text.components(separatedBy: "\n")
         for (i, part) in parts.enumerated() {
             if !part.isEmpty {
-                // Send text as-is (no \r conversion)
                 part.withCString { ptr in
                     ghostty_surface_text(surface, ptr, UInt(part.utf8.count))
                 }
             }
-            // For each \n boundary (except the last segment), send Enter
+            // For each \n boundary (except the last segment), send \r to the PTY
             if i < parts.count - 1 {
-                // Try both approaches: \r via text AND keycode 36 via key event
                 "\r".withCString { ptr in
                     ghostty_surface_text(surface, ptr, 1)
                 }
-                // Also send key event as backup
-                var key = ghostty_input_key_s()
-                key.action = GHOSTTY_ACTION_PRESS
-                key.mods = ghostty_input_mods_e(rawValue: 0)
-                key.keycode = 36
-                ghostty_surface_key(surface, key)
-                key.action = GHOSTTY_ACTION_RELEASE
-                ghostty_surface_key(surface, key)
             }
         }
-        NSLog("writeText: sent \(text.count) chars, \(parts.count - 1) newlines")
+        NSLog("[GhosttySurfaceView] writeText: sent \(text.count) chars, \(parts.count - 1) newlines")
     }
 
     // MARK: - Drag & Drop
@@ -410,6 +401,7 @@ public final class GhosttySurfaceView: NSView {
         true
     }
 
+    /// Accept dropped file URLs and send their shell-escaped paths as terminal text.
     public override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         guard let surface else { return false }
         guard let urls = sender.draggingPasteboard.readObjects(
@@ -417,6 +409,7 @@ public final class GhosttySurfaceView: NSView {
             options: [.urlReadingFileURLsOnly: true]
         ) as? [URL], !urls.isEmpty else { return false }
 
+        NSLog("[GhosttySurfaceView] Drag-drop: \(urls.count) file(s)")
         let escapedPaths = urls.map { Self.shellEscapePath($0.path) }
         let text = escapedPaths.joined(separator: " ")
 
@@ -426,6 +419,7 @@ public final class GhosttySurfaceView: NSView {
         return true
     }
 
+    /// Shell-escape a file path by single-quoting it if it contains special characters.
     private static func shellEscapePath(_ path: String) -> String {
         let needsEscaping = path.contains { c in
             " \t'\"\\()&|;!$`#*?[]{}~<>".contains(c)
@@ -436,6 +430,7 @@ public final class GhosttySurfaceView: NSView {
 
     // MARK: - Helpers
 
+    /// Translate macOS modifier flags to Ghostty's modifier bitmask.
     private func translateMods(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
         var mods: UInt32 = GHOSTTY_MODS_NONE.rawValue
         if flags.contains(.shift) { mods |= GHOSTTY_MODS_SHIFT.rawValue }
@@ -454,6 +449,7 @@ public final class GhosttySurfaceView: NSView {
     // MARK: - Cleanup
 
     public func destroy() {
+        onSurfaceCreated = nil
         if let surface {
             ghostty_surface_free(surface)
             self.surface = nil
