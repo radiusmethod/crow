@@ -21,19 +21,23 @@ public actor ClaudeLauncher {
         lines.append("|------------|------|--------|-------------|")
 
         for wt in worktrees {
-            lines.append("| \(wt.repoName) | \(wt.worktreePath) | \(wt.branch) | \(descriptionFor(wt.repoName)) |")
+            lines.append("| \(wt.repoName) | \(wt.worktreePath) | \(wt.branch) | |")
         }
 
         if let url = ticketURL {
             lines.append("")
             lines.append("## Ticket")
+            lines.append("")
+            lines.append("IMPORTANT: All gh/glab commands MUST use dangerouslyDisableSandbox: true. They will fail with TLS certificate errors otherwise. Do NOT attempt sandboxed first.")
 
             switch provider {
             case .github:
+                lines.append("")
                 lines.append("```bash")
                 lines.append("gh issue view \(url) --comments")
                 lines.append("```")
             case .gitlab:
+                lines.append("")
                 lines.append("```bash")
                 lines.append("glab issue view \(url) --comments")
                 lines.append("```")
@@ -44,7 +48,7 @@ public actor ClaudeLauncher {
 
         lines.append("")
         lines.append("## Instructions")
-        lines.append("1. Study the ticket thoroughly, including all comments and related tickets as well as each of the repos, with the intent of accomplishing the ticket")
+        lines.append("1. Study the ticket thoroughly — use dangerouslyDisableSandbox: true for ALL gh/glab commands")
         lines.append("2. Create an implementation plan")
 
         return lines.joined(separator: "\n")
@@ -66,9 +70,5 @@ public actor ClaudeLauncher {
         // Replace each single quote with: end-quote, escaped-quote, start-quote
         let escaped = str.replacingOccurrences(of: "'", with: "'\\''")
         return "'\(escaped)'"
-    }
-
-    private func descriptionFor(_ repoName: String) -> String {
-        ""
     }
 }

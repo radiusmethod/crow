@@ -12,5 +12,6 @@ let package = Package(
     ],
     targets: [
         .target(name: "CrowClaude", dependencies: ["CrowCore"]),
+        .testTarget(name: "CrowClaudeTests", dependencies: ["CrowClaude"]),
     ]
 )

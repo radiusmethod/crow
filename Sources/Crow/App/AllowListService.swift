@@ -81,11 +81,15 @@ final class AllowListService {
         settings["permissions"] = permissions
 
         // Write back
-        if let data = try? JSONSerialization.data(
-            withJSONObject: settings,
-            options: [.prettyPrinted, .sortedKeys]
-        ) {
-            try? data.write(to: globalPath)
+        do {
+            let data = try JSONSerialization.data(
+                withJSONObject: settings,
+                options: [.prettyPrinted, .sortedKeys]
+            )
+            try data.write(to: globalPath)
+        } catch {
+            NSLog("[AllowListService] Failed to write promoted patterns to %@: %@",
+                  globalPath.path, error.localizedDescription)
         }
 
         // Re-scan to refresh UI

@@ -8,11 +8,7 @@ public struct NotificationSettingsView: View {
     var onSave: (() -> Void)?
 
     /// Built-in macOS system sounds available for selection.
-    private static let builtInSounds = [
-        "Basso", "Blow", "Bottle", "Frog", "Funk",
-        "Glass", "Hero", "Morse", "Ping", "Pop",
-        "Purr", "Sosumi", "Submarine", "Tink",
-    ]
+    private static let builtInSounds = NotificationSettings.builtInSounds
 
     public init(settings: Binding<NotificationSettings>, onSave: (() -> Void)? = nil) {
         self._settings = settings

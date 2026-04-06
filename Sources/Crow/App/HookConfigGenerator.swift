@@ -113,9 +113,21 @@ struct HookConfigGenerator {
 
         // If settings is now empty, remove the file
         if settings.isEmpty {
-            try? FileManager.default.removeItem(atPath: settingsPath)
-        } else if let updatedData = try? JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]) {
-            try? updatedData.write(to: URL(fileURLWithPath: settingsPath))
+            do {
+                try FileManager.default.removeItem(atPath: settingsPath)
+            } catch {
+                NSLog("[HookConfigGenerator] Failed to remove empty settings file at %@: %@",
+                      settingsPath, error.localizedDescription)
+            }
+        } else {
+            do {
+                let updatedData = try JSONSerialization.data(
+                    withJSONObject: settings, options: [.prettyPrinted, .sortedKeys])
+                try updatedData.write(to: URL(fileURLWithPath: settingsPath))
+            } catch {
+                NSLog("[HookConfigGenerator] Failed to write updated settings to %@: %@",
+                      settingsPath, error.localizedDescription)
+            }
         }
     }
 
