@@ -792,6 +792,7 @@ final class IssueTracker {
             "gh", "search", "prs",
             "--review-requested", "@me",
             "--state", "open",
+            "--sort", "updated",
             "--json", "number,title,url,repository,author,headRefName,baseRefName,isDraft,updatedAt",
             "--limit", "50"
         ) else { return [] }
@@ -802,7 +803,7 @@ final class IssueTracker {
         let dateFormatter = ISO8601DateFormatter()
         dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 
-        return items.compactMap { item -> ReviewRequest? in
+        let requests = items.compactMap { item -> ReviewRequest? in
             guard let number = item["number"] as? Int,
                   let title = item["title"] as? String,
                   let url = item["url"] as? String,
@@ -831,6 +832,9 @@ final class IssueTracker {
                 provider: .github
             )
         }
+
+        // Sort newest first so stale review requests sink to the bottom
+        return requests.sorted { ($0.requestedAt ?? .distantPast) > ($1.requestedAt ?? .distantPast) }
     }
 
     /// Auto-complete review sessions whose linked PR is no longer open (merged or closed).

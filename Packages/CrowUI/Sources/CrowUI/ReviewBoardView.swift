@@ -112,6 +112,14 @@ struct ReviewRow: View {
                         .font(.caption)
                         .foregroundStyle(CorveilTheme.textMuted)
                         .lineLimit(1)
+                    if let date = request.requestedAt {
+                        Text("\u{2022}")
+                            .font(.caption2)
+                            .foregroundStyle(CorveilTheme.textMuted)
+                        Text(date, style: .relative)
+                            .font(.caption)
+                            .foregroundStyle(CorveilTheme.textMuted)
+                    }
                 }
             }
 
