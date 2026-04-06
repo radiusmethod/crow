@@ -1,4 +1,4 @@
-# PR Review Skill
+# Crow Review PR Skill
 
 ## Purpose
 
@@ -11,7 +11,7 @@ All `gh` commands require `dangerouslyDisableSandbox: true` because they need ne
 ## Activation
 
 This skill activates when:
-- User invokes `/review-pr` command
+- User invokes `/crow-review-pr` command
 - User asks to "review a PR" or "review this pull request"
 - This is a review session (the session was created via the Reviews board)
 
@@ -171,18 +171,18 @@ For comments on deleted lines, use `side=LEFT` with the old line number.
 
 ### Basic Review
 ```
-/review-pr
+/crow-review-pr
 ```
 → Reads PR from session links, fetches diff, analyzes, presents review for approval
 
 ### Review with Specific Focus
 ```
-/review-pr — focus on security implications
+/crow-review-pr — focus on security implications
 ```
 → Same flow but with security-focused analysis
 
 ### Review a Specific PR
 ```
-/review-pr https://github.com/org/repo/pull/123
+/crow-review-pr https://github.com/org/repo/pull/123
 ```
 → Reviews the specified PR regardless of session links
