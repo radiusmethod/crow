@@ -6,7 +6,7 @@ Orchestrates work sessions in **Crow** by setting up git worktrees and creating 
 
 ## Important: Sandbox Bypass
 
-All `crow`, `gh`, and `glab` commands require `dangerouslyDisableSandbox: true` because they communicate via Unix socket or need network/TLS access.
+All `crow`, `gh`, `glab`, and `git worktree` commands require `dangerouslyDisableSandbox: true` because they communicate via Unix socket, need network/TLS access, or write outside the sandbox-allowed directories.
 
 ## Activation
 
@@ -178,7 +178,7 @@ git -C {repo_path} worktree add {path} \
 
 ## crow Session Creation
 
-All `crow` commands require `dangerouslyDisableSandbox: true`.
+All `crow` and `git worktree` commands require `dangerouslyDisableSandbox: true`.
 
 ### Complete Step-by-Step Flow
 

@@ -7,7 +7,7 @@ This is the development root managed by Crow. The Manager tab runs Claude Code h
 
 ## crow CLI Reference
 
-The `crow` CLI communicates with the Crow app via Unix socket at `~/.local/share/crow/crow.sock`. The app must be running for commands to work. **All `crow`, `gh`, and `glab` commands require `dangerouslyDisableSandbox: true`** and return JSON.
+The `crow` CLI communicates with the Crow app via Unix socket at `~/.local/share/crow/crow.sock`. The app must be running for commands to work. **All `crow`, `gh`, `glab`, and `git worktree` commands require `dangerouslyDisableSandbox: true`** and return JSON.
 
 ### Session Commands
 ```
