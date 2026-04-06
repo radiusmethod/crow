@@ -87,6 +87,7 @@ public struct SessionListView: View {
                         .foregroundStyle(appState.soundMuted ? CorveilTheme.textMuted : CorveilTheme.gold)
                 }
                 .help(appState.soundMuted ? "Unmute notifications" : "Mute notifications")
+                .accessibilityLabel(appState.soundMuted ? "Unmute notifications" : "Mute notifications")
             }
         }
         .deleteSessionAlert(session: $sessionToDelete, appState: appState)
@@ -128,34 +129,22 @@ public struct SessionListView: View {
 
 // MARK: - Sidebar Brandmark
 
+/// Sidebar header showing the Corveil brandmark.
 struct SidebarBrandmark: View {
     var body: some View {
         VStack(spacing: 0) {
-            if let image = loadBrandmark() {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 120)
-                    .opacity(0.7)
-            }
+            BrandmarkImage()
+                .frame(width: 120)
+                .opacity(0.7)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 2)
-    }
-
-    private func loadBrandmark() -> NSImage? {
-        for bundle in Bundle.allBundles {
-            if let url = bundle.url(forResource: "CorveilBrandmark", withExtension: "png"),
-               let image = NSImage(contentsOf: url) {
-                return image
-            }
-        }
-        return nil
     }
 }
 
 // MARK: - Section Divider
 
+/// Uppercase section label used to group sessions in the sidebar.
 struct SectionDivider: View {
     let title: String
 
@@ -173,6 +162,7 @@ struct SectionDivider: View {
 
 // MARK: - Manager + Allow List Row
 
+/// Combined Manager and Allow List toggle buttons in the sidebar.
 struct ManagerAllowListRow: View {
     @Bindable var appState: AppState
 
@@ -220,6 +210,7 @@ struct ManagerAllowListRow: View {
 
 // MARK: - Session Row
 
+/// Sidebar row for a work session, showing name, ticket info, PR status, and Claude state.
 struct SessionRow: View {
     let session: Session
     let appState: AppState
@@ -281,17 +272,7 @@ struct SessionRow: View {
             if hasBadges {
                 HStack(spacing: 6) {
                     if let num = session.ticketNumber {
-                        Text("Issue #\(num)")
-                            .font(.caption2)
-                            .fontWeight(.medium)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(CorveilTheme.gold.opacity(0.1))
-                            .foregroundStyle(CorveilTheme.gold)
-                            .overlay(
-                                Capsule().strokeBorder(CorveilTheme.goldDark.opacity(0.3), lineWidth: 0.5)
-                            )
-                            .clipShape(Capsule())
+                        CapsuleBadge("Issue #\(num)", color: CorveilTheme.gold)
                     }
                     if let pr = prLink {
                         PRBadge(label: pr.label, status: prStatus)
@@ -327,14 +308,17 @@ struct SessionRow: View {
                 Circle()
                     .fill(CorveilTheme.textMuted)
                     .frame(width: 8, height: 8)
+                    .accessibilityLabel("Waiting for terminal")
             case .surfaceCreated:
                 Circle()
                     .fill(.yellow)
                     .frame(width: 8, height: 8)
+                    .accessibilityLabel("Terminal starting")
             case .shellReady:
                 Circle()
                     .fill(.blue)
                     .frame(width: 8, height: 8)
+                    .accessibilityLabel("Shell ready")
             case .claudeLaunched:
                 if needsAttention {
                     Circle()
@@ -345,6 +329,7 @@ struct SessionRow: View {
                                 .stroke(.orange.opacity(0.4), lineWidth: 2)
                                 .scaleEffect(1.6)
                         )
+                        .accessibilityLabel("Needs attention")
                 } else if claudeState == .working {
                     Circle()
                         .fill(.green)
@@ -354,29 +339,35 @@ struct SessionRow: View {
                                 .stroke(.green.opacity(0.4), lineWidth: 2)
                                 .scaleEffect(1.6)
                         )
+                        .accessibilityLabel("Claude working")
                 } else {
                     // done or idle — solid green
                     Circle()
                         .fill(.green)
                         .frame(width: 8, height: 8)
+                        .accessibilityLabel("Active")
                 }
             }
         case .inReview:
             Image(systemName: "eye.circle.fill")
                 .foregroundStyle(CorveilTheme.gold)
                 .font(.caption)
+                .accessibilityLabel("In review")
         case .paused:
             Circle()
                 .fill(.yellow)
                 .frame(width: 8, height: 8)
+                .accessibilityLabel("Paused")
         case .completed:
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(CorveilTheme.gold)
                 .font(.caption)
+                .accessibilityLabel("Completed")
         case .archived:
             Image(systemName: "archivebox.fill")
                 .foregroundStyle(CorveilTheme.textMuted)
                 .font(.caption)
+                .accessibilityLabel("Archived")
         }
     }
 
@@ -441,7 +432,7 @@ struct SessionRow: View {
         if needsAttention {
             return Color.orange.opacity(0.12)
         } else if claudeState == .done && terminalReadiness == .claudeLaunched {
-            return Color(red: 0.15, green: 0.22, blue: 0.16)
+            return CorveilTheme.bgDone
         }
         return CorveilTheme.bgCard
     }
@@ -453,9 +444,4 @@ struct SessionRow: View {
         return CorveilTheme.borderSubtle
     }
 
-    private func shortenBranch(_ branch: String) -> String {
-        branch
-            .replacingOccurrences(of: "feature/", with: "")
-            .replacingOccurrences(of: "refs/heads/", with: "")
-    }
 }
