@@ -27,11 +27,13 @@ public struct SessionRepository: Sendable {
         }
     }
 
+    /// Delete a session and all related data (worktrees, links, terminals) in a single atomic mutation.
     public func delete(id: UUID) {
         store.mutate { data in
             data.sessions.removeAll { $0.id == id }
             data.worktrees.removeAll { $0.sessionID == id }
             data.links.removeAll { $0.sessionID == id }
+            data.terminals.removeAll { $0.sessionID == id }
         }
     }
 

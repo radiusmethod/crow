@@ -22,6 +22,17 @@ public struct StoreData: Codable, Sendable {
 }
 
 /// Thread-safe JSON file store for session persistence.
+///
+/// Uses `NSLock` to serialize access to the in-memory `StoreData` and disk writes.
+/// The `nonisolated(unsafe)` annotation on `_data` is safe because all reads and writes
+/// go through the lock. An actor was not used because `mutate()` must be synchronous
+/// to support callers on the MainActor without requiring `await`.
+///
+/// On initialization, if `store.json` is corrupt (fails to decode), the file is backed up
+/// to `store.json.bak` and the store starts fresh with empty data.
+///
+/// Performs a one-time migration from the legacy "rm-ai-ide" application support directory
+/// when no "crow" directory exists yet (via `AppSupportDirectory`).
 public final class JSONStore: Sendable {
     private let fileURL: URL
     private let lock = NSLock()
@@ -60,10 +71,9 @@ public final class JSONStore: Sendable {
 
     public func mutate(_ transform: (inout StoreData) -> Void) {
         lock.lock()
+        defer { lock.unlock() }
         transform(&_data)
-        let snapshot = _data
-        lock.unlock()
-        Self.save(snapshot, to: fileURL)
+        Self.save(_data, to: fileURL)
     }
 
     private static func save(_ data: StoreData, to url: URL) {
