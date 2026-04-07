@@ -17,6 +17,7 @@ let package = Package(
         .package(path: "Packages/CrowPersistence"),
         .package(path: "Packages/CrowClaude"),
         .package(path: "Packages/CrowIPC"),
+        .package(path: "Packages/CrowCLI"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],
     targets: [
@@ -51,8 +52,7 @@ let package = Package(
         .executableTarget(
             name: "CrowCLI",
             dependencies: [
-                "CrowIPC",
-                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+                .product(name: "CrowCLILib", package: "CrowCLI"),
             ],
             path: "Sources/CrowCLI"
         ),
