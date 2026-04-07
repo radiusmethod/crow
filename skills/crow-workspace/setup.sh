@@ -8,7 +8,10 @@
 #
 # All output goes to stderr except the final JSON result on stdout.
 
-set -euo pipefail
+set -uo pipefail
+# NOTE: We intentionally do NOT use `set -e`. Each fallible command is
+# handled explicitly with `if ! ...` or `|| die/log` so that we always
+# emit structured JSON on failure instead of silently exiting.
 
 # ─── Defaults ────────────────────────────────────────────────────────────────
 
@@ -145,11 +148,24 @@ parse_args() {
   fi
 }
 
+# ─── Preflight ───────────────────────────────────────────────────────────────
+
+preflight() {
+  if ! command -v crow >/dev/null 2>&1; then
+    die "preflight" "crow binary not found in PATH"
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    die "preflight" "git binary not found in PATH"
+  fi
+}
+
 # ─── Git Worktree ────────────────────────────────────────────────────────────
 
 setup_worktree() {
   log "Fetching origin..."
-  git -C "$REPO_PATH" fetch origin 2>&1 >&2 || die "git_fetch" "git fetch origin failed"
+  if ! git -C "$REPO_PATH" fetch origin >&2 2>&1; then
+    die "git_fetch" "git fetch origin failed"
+  fi
 
   # Determine which branch and tracking mode to use
   local use_branch="$BRANCH"
@@ -165,7 +181,7 @@ setup_worktree() {
   else
     # Check if branch already exists on remote
     local remote_check
-    remote_check=$(git -C "$REPO_PATH" ls-remote --heads origin "$BRANCH" 2>/dev/null || true)
+    remote_check=$(git -C "$REPO_PATH" ls-remote --heads origin "$BRANCH" 2>/dev/null) || true
     if [[ -n "$remote_check" ]]; then
       track_flag="--track"
       base_ref="origin/$BRANCH"
@@ -176,18 +192,28 @@ setup_worktree() {
   fi
 
   log "Creating worktree at $WORKTREE_PATH..."
-  if ! git -C "$REPO_PATH" worktree add "$WORKTREE_PATH" \
+  local wt_err
+  if ! wt_err=$(git -C "$REPO_PATH" worktree add "$WORKTREE_PATH" \
        -b "$use_branch" \
        $track_flag \
-       "$base_ref" 2>&1 >&2; then
-    # Branch might already exist locally — try deleting and retrying
-    log "Worktree add failed, attempting branch cleanup..."
+       "$base_ref" 2>&1); then
+    # Branch or worktree might already exist — clean up and retry
+    log "Worktree add failed, attempting cleanup..."
+    log "  Error was: $wt_err"
+    # Remove any existing worktree at this path first
+    git -C "$REPO_PATH" worktree remove "$WORKTREE_PATH" --force 2>/dev/null || true
+    # Prune stale worktree references
+    git -C "$REPO_PATH" worktree prune 2>/dev/null || true
+    # Now delete the branch (safe after worktree removal)
     git -C "$REPO_PATH" branch -D "$use_branch" 2>/dev/null || true
-    git -C "$REPO_PATH" worktree add "$WORKTREE_PATH" \
-      -b "$use_branch" \
-      $track_flag \
-      "$base_ref" 2>&1 >&2 \
-      || die "git_worktree_add" "Failed to create worktree at $WORKTREE_PATH"
+
+    log "Retrying worktree creation..."
+    if ! wt_err=$(git -C "$REPO_PATH" worktree add "$WORKTREE_PATH" \
+         -b "$use_branch" \
+         $track_flag \
+         "$base_ref" 2>&1); then
+      die "git_worktree_add" "Failed to create worktree at $WORKTREE_PATH: $wt_err"
+    fi
   fi
 
   log "Worktree created successfully"
@@ -200,8 +226,9 @@ create_session() {
   if [[ -z "$SESSION_ID" ]]; then
     log "Creating session: $SESSION_NAME"
     local result
-    result=$(crow new-session --name "$SESSION_NAME") \
-      || die "new_session" "crow new-session failed: $result"
+    if ! result=$(crow new-session --name "$SESSION_NAME" 2>&1); then
+      die "new_session" "crow new-session failed: $result"
+    fi
     SESSION_ID=$(echo "$result" | grep -o '"session_id":"[^"]*"' | cut -d'"' -f4)
     if [[ -z "$SESSION_ID" ]]; then
       die "new_session" "Could not parse session_id from: $result"
@@ -211,26 +238,28 @@ create_session() {
     log "Using existing session: $SESSION_ID"
   fi
 
-  # Step 2: Set ticket metadata (if URL provided and this is a new session)
+  # Step 2: Set ticket metadata (if URL provided)
   if [[ -n "$TICKET_URL" && -n "$TICKET_NUMBER" ]]; then
     log "Setting ticket metadata..."
-    local ticket_cmd="crow set-ticket --session $SESSION_ID --url \"$TICKET_URL\""
-    [[ -n "$TICKET_TITLE" ]] && ticket_cmd+=" --title \"$TICKET_TITLE\""
-    ticket_cmd+=" --number $TICKET_NUMBER"
-    eval "$ticket_cmd" >/dev/null 2>&1 \
+    local ticket_args=(crow set-ticket --session "$SESSION_ID" --url "$TICKET_URL")
+    [[ -n "$TICKET_TITLE" ]] && ticket_args+=(--title "$TICKET_TITLE")
+    ticket_args+=(--number "$TICKET_NUMBER")
+    "${ticket_args[@]}" >/dev/null 2>&1 \
       || log "Warning: set-ticket failed (may already be set)"
   fi
 
   # Step 3: Register worktree
   log "Registering worktree..."
-  local wt_cmd="crow add-worktree --session $SESSION_ID"
-  wt_cmd+=" --repo \"$REPO\""
-  wt_cmd+=" --repo-path \"$REPO_PATH\""
-  wt_cmd+=" --path \"$WORKTREE_PATH\""
-  wt_cmd+=" --branch \"$BRANCH\""
-  [[ "$PRIMARY" == "true" ]] && wt_cmd+=" --primary"
-  eval "$wt_cmd" >/dev/null 2>&1 \
-    || die "add_worktree" "crow add-worktree failed"
+  local wt_args=(crow add-worktree --session "$SESSION_ID"
+    --repo "$REPO"
+    --repo-path "$REPO_PATH"
+    --path "$WORKTREE_PATH"
+    --branch "$BRANCH")
+  [[ "$PRIMARY" == "true" ]] && wt_args+=(--primary)
+  local wt_result
+  if ! wt_result=$("${wt_args[@]}" 2>&1); then
+    die "add_worktree" "crow add-worktree failed: $wt_result"
+  fi
 
   # Step 4: Add ticket link (if URL provided)
   if [[ -n "$TICKET_URL" ]]; then
@@ -335,7 +364,6 @@ GRAPHQL
   field_id=$(echo "$field_result" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
   # Extract "In progress" option — look for the option name then grab its id
-  # Use a simple approach: find the line with "In progress" (or "In Progress") and extract the preceding id
   option_id=$(echo "$field_result" | tr ',' '\n' | grep -B1 '"In [Pp]rogress"' | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | head -1)
 
   if [[ -z "$field_id" || -z "$option_id" ]]; then
@@ -400,7 +428,7 @@ launch_claude() {
   # Resolve claude binary
   local claude_bin="$CLAUDE_BINARY"
   if [[ -z "$claude_bin" ]]; then
-    claude_bin=$(which claude 2>/dev/null || true)
+    claude_bin=$(command -v claude 2>/dev/null) || true
     if [[ -z "$claude_bin" ]]; then
       die "launch_claude" "claude binary not found — provide --claude-binary"
     fi
@@ -409,11 +437,12 @@ launch_claude() {
   # Create terminal
   log "Creating terminal..."
   local term_result
-  term_result=$(crow new-terminal --session "$SESSION_ID" \
+  if ! term_result=$(crow new-terminal --session "$SESSION_ID" \
     --cwd "$WORKTREE_PATH" \
     --name "Claude Code" \
-    --managed) \
-    || die "new_terminal" "crow new-terminal failed: $term_result"
+    --managed 2>&1); then
+    die "new_terminal" "crow new-terminal failed: $term_result"
+  fi
 
   TERMINAL_ID=$(echo "$term_result" | grep -o '"terminal_id":"[^"]*"' | cut -d'"' -f4)
   if [[ -z "$TERMINAL_ID" ]]; then
@@ -431,8 +460,9 @@ launch_claude() {
   # Send launch command
   log "Launching Claude Code..."
   local send_text="cd $WORKTREE_PATH && $claude_bin --permission-mode plan \"\$(cat $prompt_path)\"\\n"
-  crow send --session "$SESSION_ID" --terminal "$TERMINAL_ID" "$send_text" >/dev/null 2>&1 \
-    || die "send_launch" "crow send failed"
+  if ! crow send --session "$SESSION_ID" --terminal "$TERMINAL_ID" "$send_text" >/dev/null 2>&1; then
+    die "send_launch" "crow send failed"
+  fi
 
   log "Claude Code launched"
 }
@@ -456,6 +486,7 @@ emit_result() {
 
 main() {
   parse_args "$@"
+  preflight
 
   setup_worktree
   create_session
