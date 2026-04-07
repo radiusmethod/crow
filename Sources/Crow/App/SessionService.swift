@@ -191,7 +191,7 @@ final class SessionService {
         // Remove worktrees from disk: git worktree remove + branch delete
         // Skip cleanup for worktrees that point at the main repo checkout (not a real worktree)
         for wt in wts {
-            let isMainCheckout = Self.isMainRepoCheckout(wt)
+            let isMainCheckout = wt.isMainRepoCheckout
 
             if isMainCheckout {
                 NSLog("Skipping worktree cleanup for main checkout: \(wt.worktreePath) (branch: \(wt.branch))")
@@ -207,7 +207,7 @@ final class SessionService {
                 NSLog("Removed worktree: \(wt.worktreePath) \(removeResult)")
 
                 // Delete the local branch (only if not a protected branch)
-                if !Self.isProtectedBranch(wt.branch) {
+                if !SessionWorktree.isProtectedBranch(wt.branch) {
                     _ = try? await shell("git", "-C", wt.repoPath, "branch", "-D", wt.branch)
                 }
 
@@ -256,40 +256,25 @@ final class SessionService {
     }
 
     // MARK: - Worktree Safety Checks
-
-    /// Returns true if the worktree entry points at the main repo checkout (not a real git worktree).
-    private static func isMainRepoCheckout(_ wt: SessionWorktree) -> Bool {
-        // Normalize paths for comparison (resolve symlinks, trailing slashes)
-        let worktree = (wt.worktreePath as NSString).standardizingPath
-        let repo = (wt.repoPath as NSString).standardizingPath
-
-        if worktree == repo { return true }
-        if isProtectedBranch(wt.branch) { return true }
-
-        return false
-    }
-
-    /// Returns true if a branch name is a protected default branch that should never be deleted.
-    private static func isProtectedBranch(_ branch: String) -> Bool {
-        let name = branch
-            .replacingOccurrences(of: "refs/heads/", with: "")
-            .replacingOccurrences(of: "origin/", with: "")
-            .lowercased()
-        let protectedNames: Set<String> = ["main", "master", "develop", "dev", "trunk", "release"]
-        return protectedNames.contains(name)
-    }
+    // Protected branch and main-checkout detection are centralized on SessionWorktree in CrowCore.
 
     private func shell(_ args: String...) async throws -> String {
         let process = Process()
-        let pipe = Pipe()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
-        process.standardOutput = pipe
-        process.standardError = pipe
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
         try process.run()
         process.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8) ?? ""
+        let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "SessionService", code: Int(process.terminationStatus),
+                          userInfo: [NSLocalizedDescriptionKey: stderr])
+        }
+        return stdout
     }
 
     /// Resolve org/repo slug from a repo's git remote URL.
@@ -369,7 +354,7 @@ final class SessionService {
                     if knownPaths.contains(standardPath) { continue }
 
                     // Skip protected branches
-                    if Self.isProtectedBranch(wt.branch) { continue }
+                    if SessionWorktree.isProtectedBranch(wt.branch) { continue }
 
                     // This is an orphan — recover it
                     NSLog("[SessionService] Recovered orphan worktree: \(wt.path) branch=\(wt.branch)")
@@ -425,7 +410,7 @@ final class SessionService {
 
         let parts = dirName.components(separatedBy: "-")
         // Look for a numeric part after the repo name prefix
-        if let repoPrefix = parts.first {
+        if !parts.isEmpty {
             for (i, part) in parts.enumerated() where i > 0 {
                 if let num = Int(part) {
                     ticketNumber = num
