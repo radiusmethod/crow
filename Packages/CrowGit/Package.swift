@@ -12,5 +12,6 @@ let package = Package(
     ],
     targets: [
         .target(name: "CrowGit", dependencies: ["CrowCore"]),
+        .testTarget(name: "CrowGitTests", dependencies: ["CrowGit"]),
     ]
 )
