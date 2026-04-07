@@ -321,6 +321,7 @@ final class SessionService {
         let stderrPipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
+        process.environment = ShellEnvironment.shared.env
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
         try process.run()
@@ -350,6 +351,7 @@ final class SessionService {
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
+        process.environment = ShellEnvironment.shared.env
         process.standardOutput = pipe
         process.standardError = Pipe()
         try process.run()

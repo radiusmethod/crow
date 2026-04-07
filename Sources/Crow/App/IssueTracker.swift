@@ -342,6 +342,7 @@ final class IssueTracker {
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
+        process.environment = ShellEnvironment.shared.env
         process.standardOutput = pipe
         process.standardError = Pipe()
         try process.run()
@@ -882,11 +883,9 @@ final class IssueTracker {
             let pipe = Pipe()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = args
-            if !env.isEmpty {
-                var environment = ProcessInfo.processInfo.environment
-                for (k, v) in env { environment[k] = v }
-                process.environment = environment
-            }
+            process.environment = env.isEmpty
+                ? ShellEnvironment.shared.env
+                : ShellEnvironment.shared.merging(env)
             process.standardOutput = pipe
             process.standardError = Pipe()
             try process.run()
@@ -913,6 +912,7 @@ final class IssueTracker {
             let errPipe = Pipe()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = args
+            process.environment = ShellEnvironment.shared.env
             process.standardOutput = outPipe
             process.standardError = errPipe
             do { try process.run() } catch { return ShellResult(stdout: "", stderr: error.localizedDescription, exitCode: -1) }
