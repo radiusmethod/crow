@@ -84,6 +84,19 @@ final class SessionService {
                 )
             }
         }
+
+        // Hydrate global terminals (not tied to any session)
+        let globalTerminals = data.terminals.filter { $0.sessionID == AppState.globalTerminalSessionID }
+        if !globalTerminals.isEmpty {
+            appState.terminals[AppState.globalTerminalSessionID] = globalTerminals
+            for terminal in globalTerminals {
+                TerminalManager.shared.preInitialize(
+                    id: terminal.id,
+                    workingDirectory: terminal.cwd,
+                    command: terminal.command
+                )
+            }
+        }
     }
 
     /// Bridge `TerminalManager.SurfaceState` callbacks to `AppState.terminalReadiness`.
@@ -613,6 +626,39 @@ final class SessionService {
         appState.terminals[sessionID]?.removeAll { $0.id == terminalID }
         appState.terminalReadiness.removeValue(forKey: terminalID)
         appState.autoLaunchTerminals.remove(terminalID)
+
+        if appState.activeTerminalID[sessionID] == terminalID {
+            appState.activeTerminalID[sessionID] = appState.terminals[sessionID]?.first?.id
+        }
+
+        store.mutate { data in data.terminals.removeAll { $0.id == terminalID } }
+    }
+
+    // MARK: - Global Terminal Management
+
+    /// Add a new global terminal tab (not tied to any session).
+    func addGlobalTerminal() {
+        let sessionID = AppState.globalTerminalSessionID
+        let cwd = ConfigStore.loadDevRoot()
+            ?? FileManager.default.homeDirectoryForCurrentUser.path
+        let count = appState.terminals(for: sessionID).count
+        let terminal = SessionTerminal(
+            sessionID: sessionID,
+            name: "Terminal \(count + 1)",
+            cwd: cwd,
+            isManaged: false
+        )
+        appState.terminals[sessionID, default: []].append(terminal)
+        appState.activeTerminalID[sessionID] = terminal.id
+        store.mutate { data in data.terminals.append(terminal) }
+        TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: cwd)
+    }
+
+    /// Close a global terminal tab.
+    func closeGlobalTerminal(terminalID: UUID) {
+        let sessionID = AppState.globalTerminalSessionID
+        TerminalManager.shared.destroy(id: terminalID)
+        appState.terminals[sessionID]?.removeAll { $0.id == terminalID }
 
         if appState.activeTerminalID[sessionID] == terminalID {
             appState.activeTerminalID[sessionID] = appState.terminals[sessionID]?.first?.id
