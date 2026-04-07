@@ -190,6 +190,7 @@ struct Scaffolder {
               "Bash(GITLAB_HOST=* glab mr view:*)",
               "Bash(GITLAB_HOST=* glab mr list:*)",
               "Bash(git -C:*)",
+              "Write(.claude/prompts/**)",
               "Bash(git fetch:*)",
               "Bash(git worktree:*)",
               "Bash(git ls-remote:*)",
