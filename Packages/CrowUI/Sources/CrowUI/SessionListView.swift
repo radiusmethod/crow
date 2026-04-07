@@ -24,6 +24,12 @@ public struct SessionListView: View {
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
 
+            // Review board row
+            ReviewBoardSidebarRow(appState: appState)
+                .tag(AppState.reviewBoardSessionID)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+
             // Manager + Allow List row
             if appState.managerSession != nil {
                 ManagerAllowListRow(appState: appState)
@@ -41,6 +47,24 @@ public struct SessionListView: View {
                         .listRowBackground(Color.clear)
                         .contextMenu {
                             sessionContextMenu(session)
+                        }
+                }
+            }
+
+            // Review sessions
+            if !appState.reviewSessions.isEmpty {
+                SectionDivider(title: "Reviews")
+                ForEach(filteredSessions(appState.reviewSessions)) { session in
+                    SessionRow(session: session, appState: appState)
+                        .tag(session.id)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                sessionToDelete = session
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
                         }
                 }
             }

@@ -197,8 +197,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.appState.selectedSessionID = AppState.managerSessionID
         }
 
+        // Wire "Start Review" action — creates review session for a PR
+        appState.onStartReview = { [weak self] prURL in
+            guard let self else { return }
+            Task { await self.sessionService?.createReviewSession(prURL: prURL) }
+        }
+
         // Start issue tracker
         let tracker = IssueTracker(appState: appState)
+        tracker.onNewReviewRequests = { [weak self] newRequests in
+            for request in newRequests {
+                self?.notificationManager?.notifyReviewRequest(request)
+            }
+        }
         tracker.start()
         self.issueTracker = tracker
 

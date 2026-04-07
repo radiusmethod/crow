@@ -11,6 +11,13 @@ final class IssueTracker {
     private let pollInterval: TimeInterval = 60 // 1 minute
     private var isRefreshing = false
 
+    /// Callback for new review request notifications (set by AppDelegate).
+    var onNewReviewRequests: (([ReviewRequest]) -> Void)?
+
+    /// Previously seen review request IDs for delta detection.
+    private var previousReviewRequestIDs: Set<String> = []
+    private var isFirstFetch = true
+
     init(appState: AppState) {
         self.appState = appState
     }
@@ -95,11 +102,43 @@ final class IssueTracker {
 
         appState.assignedIssues = allIssues
 
+        // Fetch PR review requests for the current user
+        if checkedGitHub {
+            appState.isLoadingReviews = true
+            var reviews = await fetchReviewRequests()
+
+            // Cross-reference with existing review sessions
+            for i in reviews.indices {
+                if let session = appState.reviewSessions.first(where: {
+                    appState.links(for: $0.id).contains(where: { $0.linkType == .pr && $0.url == reviews[i].url })
+                }) {
+                    reviews[i].reviewSessionID = session.id
+                }
+            }
+
+            // Delta detection for notifications
+            let currentIDs = Set(reviews.map(\.id))
+            let newIDs = currentIDs.subtracting(previousReviewRequestIDs)
+            previousReviewRequestIDs = currentIDs
+
+            if !isFirstFetch && !newIDs.isEmpty {
+                let newRequests = reviews.filter { newIDs.contains($0.id) }
+                onNewReviewRequests?(newRequests)
+            }
+            isFirstFetch = false
+
+            appState.reviewRequests = reviews
+            appState.isLoadingReviews = false
+        }
+
         // Sync session status for tickets that are "In Review" on the project board
         syncInReviewSessions(issues: allIssues)
 
         // Auto-complete sessions whose linked issue/PR is no longer open
         await autoCompleteFinishedSessions(openIssues: allIssues.filter { $0.state == "open" })
+
+        // Auto-complete review sessions whose linked PR is no longer open
+        await autoCompleteFinishedReviews()
     }
 
     // MARK: - GitHub
@@ -744,6 +783,93 @@ final class IssueTracker {
 
         // Update local session status to .inReview
         appState.onSetSessionInReview?(sessionID)
+    }
+
+    // MARK: - Review Requests
+
+    private func fetchReviewRequests() async -> [ReviewRequest] {
+        // gh search prs doesn't support headRefName/baseRefName fields — fetch basic list first
+        guard let output = try? await shell(
+            "gh", "search", "prs",
+            "--review-requested", "@me",
+            "--state", "open",
+            "--sort", "updated",
+            "--json", "number,title,url,repository,author,isDraft,updatedAt",
+            "--limit", "50"
+        ) else { return [] }
+
+        guard let data = output.data(using: .utf8),
+              let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        var requests: [ReviewRequest] = []
+
+        for item in items {
+            guard let number = item["number"] as? Int,
+                  let title = item["title"] as? String,
+                  let url = item["url"] as? String else { continue }
+
+            let repoDict = item["repository"] as? [String: Any]
+            let repoName = repoDict?["nameWithOwner"] as? String ?? ""
+            let authorDict = item["author"] as? [String: Any]
+            let authorLogin = authorDict?["login"] as? String ?? ""
+            let isDraft = item["isDraft"] as? Bool ?? false
+            let updatedStr = item["updatedAt"] as? String
+            let updatedAt = updatedStr.flatMap { dateFormatter.date(from: $0) }
+
+            // Fetch branch info via gh pr view (supports headRefName/baseRefName)
+            var headBranch = ""
+            var baseBranch = ""
+            if let prOutput = try? await shell(
+                "gh", "pr", "view", url, "--json", "headRefName,baseRefName"
+            ), let prData = prOutput.data(using: .utf8),
+               let prJSON = try? JSONSerialization.jsonObject(with: prData) as? [String: Any] {
+                headBranch = prJSON["headRefName"] as? String ?? ""
+                baseBranch = prJSON["baseRefName"] as? String ?? ""
+            }
+
+            requests.append(ReviewRequest(
+                id: "github:\(repoName)#\(number)",
+                prNumber: number,
+                title: title,
+                url: url,
+                repo: repoName,
+                author: authorLogin,
+                headBranch: headBranch,
+                baseBranch: baseBranch,
+                isDraft: isDraft,
+                requestedAt: updatedAt,
+                provider: .github
+            ))
+        }
+
+        // Sort newest first so stale review requests sink to the bottom
+        return requests.sorted { ($0.requestedAt ?? .distantPast) > ($1.requestedAt ?? .distantPast) }
+    }
+
+    /// Auto-complete review sessions whose linked PR is no longer open (merged or closed).
+    private func autoCompleteFinishedReviews() async {
+        let activeReviews = appState.sessions.filter { $0.kind == .review && $0.status == .active }
+
+        for session in activeReviews {
+            let sessionLinks = appState.links(for: session.id)
+            guard let prLink = sessionLinks.first(where: { $0.linkType == .pr }) else { continue }
+
+            guard let output = try? await shell(
+                "gh", "pr", "view", prLink.url, "--json", "state"
+            ) else { continue }
+
+            guard let data = output.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let state = json["state"] as? String else { continue }
+
+            if state == "MERGED" || state == "CLOSED" {
+                print("[IssueTracker] Review session '\(session.name)' — PR \(state.lowercased()), marking completed")
+                appState.onCompleteSession?(session.id)
+            }
+        }
     }
 
     // MARK: - Shell

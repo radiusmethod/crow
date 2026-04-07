@@ -8,6 +8,7 @@ import Foundation
 public enum NotificationEvent: String, Codable, Sendable, CaseIterable, Identifiable {
     case taskComplete
     case agentWaiting
+    case reviewRequested
 
     public var id: String { rawValue }
 
@@ -15,6 +16,7 @@ public enum NotificationEvent: String, Codable, Sendable, CaseIterable, Identifi
         switch self {
         case .taskComplete: "Task Complete"
         case .agentWaiting: "Agent Waiting"
+        case .reviewRequested: "Review Requested"
         }
     }
 
@@ -22,6 +24,7 @@ public enum NotificationEvent: String, Codable, Sendable, CaseIterable, Identifi
         switch self {
         case .taskComplete: "Claude finished responding"
         case .agentWaiting: "Claude needs your input or permission"
+        case .reviewRequested: "Someone requested your review on a PR"
         }
     }
 
@@ -29,6 +32,7 @@ public enum NotificationEvent: String, Codable, Sendable, CaseIterable, Identifi
         switch self {
         case .taskComplete: "Glass"
         case .agentWaiting: "Funk"
+        case .reviewRequested: "Glass"
         }
     }
 

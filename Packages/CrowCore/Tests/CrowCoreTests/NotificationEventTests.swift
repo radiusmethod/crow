@@ -3,7 +3,7 @@ import Testing
 @testable import CrowCore
 
 @Test func notificationEventAllCasesCount() {
-    #expect(NotificationEvent.allCases.count == 2)
+    #expect(NotificationEvent.allCases.count == 3)
 }
 
 @Test func notificationEventDefaultSoundsNonEmpty() {

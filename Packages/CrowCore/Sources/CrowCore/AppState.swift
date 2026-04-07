@@ -36,6 +36,9 @@ public final class AppState {
     /// Fixed UUID for the allow list tab.
     nonisolated public static let allowListSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
 
+    /// Fixed UUID for the review board tab.
+    nonisolated public static let reviewBoardSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
+
     public var managerSession: Session? {
         sessions.first { $0.id == Self.managerSessionID }
     }
@@ -76,6 +79,20 @@ public final class AppState {
     /// Must be cleaned up when a session is deleted (see `SessionService.deleteSession`).
     public var prStatus: [UUID: PRStatus] = [:]
 
+    // MARK: - Review Requests
+
+    /// PRs where the current user has been requested as a reviewer.
+    public var reviewRequests: [ReviewRequest] = []
+    public var isLoadingReviews: Bool = false
+
+    /// IDs of review requests the user has already seen (for badge count).
+    public var seenReviewRequestIDs: Set<String> = []
+
+    /// Number of unseen review requests (for sidebar badge).
+    public var unseenReviewCount: Int {
+        reviewRequests.filter { !seenReviewRequestIDs.contains($0.id) }.count
+    }
+
     /// Whether the VS Code `code` CLI is available on this system.
     public var vsCodeAvailable: Bool = false
 
@@ -113,6 +130,9 @@ public final class AppState {
 
     /// Called when user clicks "Work on" for an assigned issue.
     public var onWorkOnIssue: ((String) -> Void)?  // receives issue URL
+
+    /// Called when user clicks "Start Review" for a PR review request.
+    public var onStartReview: ((String) -> Void)?  // receives PR URL
 
     /// Called to launch Claude in a terminal that just became ready.
     public var onLaunchClaude: ((UUID) -> Void)?  // receives terminal ID
@@ -154,12 +174,13 @@ public final class AppState {
 
     public var selectedSession: Session? {
         guard selectedSessionID != Self.ticketBoardSessionID,
-              selectedSessionID != Self.allowListSessionID else { return nil }
+              selectedSessionID != Self.allowListSessionID,
+              selectedSessionID != Self.reviewBoardSessionID else { return nil }
         return sessions.first { $0.id == selectedSessionID }
     }
 
     public var activeSessions: [Session] {
-        sessions.filter { $0.status == .active && $0.id != Self.managerSessionID }
+        sessions.filter { $0.status == .active && $0.id != Self.managerSessionID && $0.kind == .work }
     }
 
     public var inReviewSessions: [Session] {
@@ -168,6 +189,10 @@ public final class AppState {
 
     public var completedSessions: [Session] {
         sessions.filter { $0.status == .completed || $0.status == .archived }
+    }
+
+    public var reviewSessions: [Session] {
+        sessions.filter { $0.kind == .review && $0.status != .completed && $0.status != .archived }
     }
 
     public func worktrees(for sessionID: UUID) -> [SessionWorktree] {
