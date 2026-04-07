@@ -513,8 +513,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // repo_path is the main repo (for git commands). Defaults to path if not provided.
                 let repoPath = params["repo_path"]?.stringValue ?? path
                 let wt = SessionWorktree(sessionID: sessionID, repoName: repo, repoPath: repoPath, worktreePath: path,
-                                         branch: branch, workspace: params["workspace"]?.stringValue ?? "",
-                                         isPrimary: params["primary"]?.boolValue ?? false)
+                                         branch: branch, isPrimary: params["primary"]?.boolValue ?? false)
                 return await MainActor.run {
                     capturedAppState.worktrees[sessionID, default: []].append(wt)
                     capturedStore.mutate { $0.worktrees.append(wt) }

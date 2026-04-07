@@ -6,7 +6,7 @@ Orchestrates work sessions in **Crow** by setting up git worktrees and creating 
 
 ## Important: Sandbox Bypass
 
-All `crow`, `gh`, and `glab` commands require `dangerouslyDisableSandbox: true` because they communicate via Unix socket or need network/TLS access.
+All `crow`, `gh`, `glab`, and `git worktree` commands require `dangerouslyDisableSandbox: true` because they communicate via Unix socket, need network/TLS access, or write outside the sandbox-allowed directories.
 
 ## Activation
 
@@ -121,6 +121,8 @@ These values are used in worktree creation, session linking, and the prompt temp
 
 ### Naming Convention
 
+**CRITICAL: Worktrees go DIRECTLY under the workspace folder, at the same level as the main repo clone. NOT in a subfolder.**
+
 **For ticket URLs (no existing PR):**
 ```
 {devRoot}/{workspace}/{repo}-{ticket_number}-{brief_slug}
@@ -129,10 +131,19 @@ Branch: `feature/{repo}-{ticket_number}-{brief_slug}`
 
 The brief slug is 2-4 key words from the ticket title.
 
-Examples:
+**Concrete example with full paths:**
+Given: devRoot=`/Users/jane/Dev`, workspace=`RadiusMethod`, repo=`citadel` (cloned at `/Users/jane/Dev/RadiusMethod/citadel`), ticket #197 "Fix tab URL hash routing"
+
 ```
-loki #252 "Update grafana-enterprise.md"    → loki-252-update-grafana-docs
-citadel #45 "Add JWT validation endpoint"   → citadel-45-jwt-validation
+Worktree path: /Users/jane/Dev/RadiusMethod/citadel-197-fix-tab-url-hash
+Branch:        feature/citadel-197-fix-tab-url-hash
+Git command:   git -C /Users/jane/Dev/RadiusMethod/citadel worktree add /Users/jane/Dev/RadiusMethod/citadel-197-fix-tab-url-hash -b feature/citadel-197-fix-tab-url-hash --no-track origin/main
+```
+
+More examples:
+```
+loki #252 "Update grafana-enterprise.md"    → {devRoot}/MyGitLab/loki-252-update-grafana-docs
+citadel #45 "Add JWT validation endpoint"   → {devRoot}/RadiusMethod/citadel-45-jwt-validation
 ```
 
 **For ticket URLs with an existing PR:**
@@ -144,6 +155,12 @@ Use the PR's `headRefName` as the branch — do NOT generate a new name. Derive 
 ```
 
 Where `{pr_branch_slug}` is the `headRefName` with any `feature/` prefix stripped. For example, if the PR branch is `feature/citadel-45-jwt-validation`, the worktree path is `{devRoot}/RadiusMethod/citadel-45-jwt-validation`.
+
+**WRONG — do NOT create subdirectories:**
+```
+WRONG: {devRoot}/{workspace}/{repo}-worktrees/{feature}
+WRONG: {devRoot}/{workspace}/worktrees/{repo}-{feature}
+```
 
 **For natural language (no ticket):**
 ```
@@ -178,68 +195,124 @@ git -C {repo_path} worktree add {path} \
 
 ## crow Session Creation
 
-All `crow` commands require `dangerouslyDisableSandbox: true`.
+All `crow` and `git worktree` commands require `dangerouslyDisableSandbox: true`.
+
+### Session Naming Convention
+
+The session name **MUST** match the worktree directory name (which is the branch slug without the `feature/` prefix):
+
+- **Ticket-based:** `{repo}-{ticket_number}-{slug}` (e.g., `crow-51-drag-drop-photo`)
+- **PR-based:** `{repo}-{pr_branch_slug}` (e.g., `citadel-45-jwt-validation`)
+- **Natural language:** `{repo}-{feature-slug}` (e.g., `citadel-update-auth`)
+
+This keeps session names, worktree paths, and branch names consistent.
 
 ### Complete Step-by-Step Flow
 
+> **IMPORTANT: Execute steps 1-9 SEQUENTIALLY — one at a time, never in parallel.**
+> Parallel calls cascade on failure (a failed `add-worktree` cancels sibling `add-link` calls).
+
 ```bash
 # 1. Create session (parse session_id from JSON output)
-crow new-session --name "{feature_name}"
-# Output: {"session_id":"<uuid>","name":"feature_name"}
+#    The name MUST match the worktree directory name
+crow new-session --name "{repo}-{ticket_number}-{slug}"
+# Output: {"session_id":"<uuid>","name":"crow-51-drag-drop-photo"}
+# >>> Wait for completion — parse session_id before proceeding <<<
 
 # 2. Set ticket metadata (only if URL was provided)
 crow set-ticket --session {session_id} \
   --url "{ticket_url}" \
   --title "{ticket_title}" \
   --number {ticket_number}
+# >>> Wait for completion <<<
 
 # 3. Register each worktree (after creating with git)
+#    IMPORTANT: --repo-path is the MAIN repo path (e.g., .../citadel)
+#    --path is the WORKTREE path (e.g., .../citadel-197-slug)
 crow add-worktree --session {session_id} \
   --repo "{repo_name}" \
+  --repo-path "{main_repo_path}" \
   --path "{worktree_path}" \
   --branch "feature/{name}" \
   --primary   # for the first/main repo
+# >>> Wait for completion <<<
 
 # 4. Add ticket link (only if URL was provided)
 crow add-link --session {session_id} \
   --label "Issue" \
   --url "{ticket_url}" \
   --type ticket
+# >>> Wait for completion <<<
 
 # 4a. Add PR link (only if an existing PR was detected)
 crow add-link --session {session_id} \
   --label "PR #{pr_number}" \
   --url "{pr_url}" \
   --type pr
+# >>> Wait for completion <<<
+
+# 4b. Auto-assign and set project status (GitHub issues only, best-effort)
+#     All gh commands require dangerouslyDisableSandbox: true.
+#     Don't fail the workspace setup if these error.
+#
+#     Step A: Assign yourself to the issue
+gh issue edit {ticket_url} --add-assignee @me
+#
+#     Step B: Set the issue's project status to "In progress"
+#     This requires multiple GraphQL calls chained together:
+#     1. Get the projectItem ID and project ID for the issue
+#     2. Get the Status field ID from the project
+#     3. Get the option ID for "In progress" from the Status field options
+#     4. Mutate the field value
+#
+#     Use gh api graphql with --jq to extract values. Chain them:
+#       - query repository.issue.projectItems.nodes[0] for {itemId, project.id}
+#       - query node(id: projectId).field(name: "Status") for fieldId and options
+#       - find the option where name == "In progress" (case-sensitive, match exactly)
+#       - call updateProjectV2ItemFieldValue mutation
+#     If the issue is not on any project, skip silently.
 
 # 5. Write prompt to temp file
-cat > $TMPDIR/crow-prompt-{feature_name}.md << 'PROMPT'
+#    IMPORTANT: Write to {devRoot}/.claude/prompts/ — NOT $TMPDIR (which differs per session)
+#    The prompt MUST start with /plan to enter plan mode
+mkdir -p {devRoot}/.claude/prompts
+cat > {devRoot}/.claude/prompts/crow-prompt-{session_name}.md << 'PROMPT'
 {prompt content — see template below}
 PROMPT
 
-# 6. Create Claude Code terminal in the primary worktree
+# 6. Create a shell terminal in the primary worktree (NO command — just a shell)
 crow new-terminal --session {session_id} \
   --cwd "{primary_worktree_path}" \
   --name "Claude Code" \
-  --command "claude --permission-mode plan \"$(cat $TMPDIR/crow-prompt-{feature_name}.md)\""
+  --managed
+# Output: {"terminal_id":"<uuid>","session_id":"..."}
+# IMPORTANT: Capture the terminal_id from the output!
 
-# 7. Switch to the new session
+# 7. Switch to the new session so the terminal gets created in the UI
 crow select-session --session {session_id}
+
+# 8. Wait for the shell to initialize (the terminal needs to be visible and ready)
+sleep 3
+
+# 9. Send the claude launch command to the terminal
+#    CRITICAL: End the text with literal \n — the app converts \n to Enter.
+#    Use single quotes so the shell doesn't expand $(cat ...).
+#    Use --permission-mode plan to start Claude in plan mode.
+#    Use full path to claude binary.
+crow send --session {session_id} --terminal {terminal_id} 'cd {primary_worktree_path} && {claude_binary_path} --permission-mode plan "$(cat {devRoot}/.claude/prompts/crow-prompt-{session_name}.md)"\n'
 ```
 
 ## First Prompt Template
 
 IMPORTANT: Always use full absolute paths, never abbreviated (`...`) or home-relative (`~`) paths.
 
-The prompt is written to a temp file at `$TMPDIR/crow-prompt-{feature_name}.md`. It starts with `/plan` to enter plan mode.
+The prompt is written to `{devRoot}/.claude/prompts/crow-prompt-{session_name}.md`. It starts with `/plan` to enter plan mode.
 
 **Repo descriptions for the prompt table:**
 
 Extract dynamically from first non-heading line of CLAUDE.md or README.md. If no description is found, leave the Description column empty.
 
 ~~~markdown
-/plan
-
 # Workspace Context
 
 | Repository | Path | Branch | Description |
@@ -249,12 +322,15 @@ Extract dynamically from first non-heading line of CLAUDE.md or README.md. If no
 | my-config | /Users/name/Dev/MyGitLab/my-config | - | Configuration overrides |
 
 ## Ticket
+
+IMPORTANT: All gh/glab commands MUST use dangerouslyDisableSandbox: true. They will fail with TLS certificate errors otherwise. Do NOT attempt sandboxed first.
+
 ```bash
 gh issue view https://github.com/org/repo/issues/123 --comments
 ```
 
 ## Instructions
-1. Study the ticket thoroughly, including all comments and related tickets as well as each of the repos, with the intent of accomplishing the ticket
+1. Study the ticket thoroughly — use dangerouslyDisableSandbox: true for ALL gh/glab commands
 2. Create an implementation plan
 ~~~
 
@@ -324,9 +400,9 @@ crow get-session --session <uuid>
 crow set-status --session <uuid> active|completed|archived
 crow delete-session --session <uuid>
 crow set-ticket --session <uuid> --url "..." [--title "..."] [--number N]
-crow add-worktree --session <uuid> --repo "name" --path "/..." --branch "..." [--primary]
+crow add-worktree --session <uuid> --repo "name" --repo-path "/main/repo/path" --path "/worktree/path" --branch "..." [--primary]
 crow list-worktrees --session <uuid>
-crow new-terminal --session <uuid> --cwd "/..." [--name "..."] [--command "..."]
+crow new-terminal --session <uuid> --cwd "/..." [--name "..."] [--managed]
 crow list-terminals --session <uuid>
 crow send --session <uuid> --terminal <uuid> "text"
 crow add-link --session <uuid> --label "..." --url "..." --type ticket|pr|repo|custom
