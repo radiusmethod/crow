@@ -51,7 +51,7 @@ import Testing
     store.mutate { data in
         data.worktrees.append(SessionWorktree(
             sessionID: sessionID, repoName: "crow", repoPath: "/repo",
-            worktreePath: "/wt", branch: "feature/x", workspace: "ws"
+            worktreePath: "/wt", branch: "feature/x"
         ))
         data.links.append(SessionLink(
             sessionID: sessionID, label: "PR", url: "https://example.com", linkType: .pr
@@ -104,11 +104,11 @@ import Testing
     store.mutate { data in
         data.worktrees.append(SessionWorktree(
             sessionID: session1, repoName: "a", repoPath: "/a",
-            worktreePath: "/wt-a", branch: "feature/a", workspace: "ws"
+            worktreePath: "/wt-a", branch: "feature/a"
         ))
         data.worktrees.append(SessionWorktree(
             sessionID: session2, repoName: "b", repoPath: "/b",
-            worktreePath: "/wt-b", branch: "feature/b", workspace: "ws"
+            worktreePath: "/wt-b", branch: "feature/b"
         ))
         data.links.append(SessionLink(
             sessionID: session1, label: "Issue", url: "https://example.com/1", linkType: .ticket

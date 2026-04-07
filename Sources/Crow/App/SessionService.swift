@@ -71,6 +71,17 @@ final class SessionService {
                     TerminalManager.shared.trackReadiness(for: terminal.id)
                 }
             }
+
+            // Pre-initialize all terminal surfaces in the offscreen window so
+            // Ghostty can create surfaces and spawn shells without the user
+            // navigating to each tab.
+            for terminal in terminals {
+                TerminalManager.shared.preInitialize(
+                    id: terminal.id,
+                    workingDirectory: terminal.cwd,
+                    command: terminal.command
+                )
+            }
         }
     }
 
@@ -87,6 +98,10 @@ final class SessionService {
                 self.appState.terminalReadiness[terminalID] = .surfaceCreated
             case .shellReady:
                 self.appState.terminalReadiness[terminalID] = .shellReady
+                // Auto-launch Claude now that the shell is ready.
+                // Previously this was triggered by the SwiftUI view's onChange,
+                // but with offscreen pre-init the view may not be rendered yet.
+                self.launchClaude(terminalID: terminalID)
             }
         }
     }
@@ -154,6 +169,9 @@ final class SessionService {
                     data.terminals.append(terminal)
                 }
             }
+
+            // Pre-initialize in offscreen window so Manager terminal starts immediately
+            TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: devRoot, command: claudePath)
         }
 
         // Select Manager on launch (selectedSessionID isn't persisted)
@@ -360,7 +378,7 @@ final class SessionService {
 
                     // This is an orphan — recover it
                     NSLog("[SessionService] Recovered orphan worktree: \(wt.path) branch=\(wt.branch)")
-                    await recoverOrphan(worktreePath: wt.path, branch: wt.branch, repoName: repoDir, repoPath: repoPath, workspace: wsDir)
+                    await recoverOrphan(worktreePath: wt.path, branch: wt.branch, repoName: repoDir, repoPath: repoPath)
                 }
             }
         }
@@ -401,7 +419,7 @@ final class SessionService {
         return entries
     }
 
-    private func recoverOrphan(worktreePath: String, branch: String, repoName: String, repoPath: String, workspace: String) async {
+    private func recoverOrphan(worktreePath: String, branch: String, repoName: String, repoPath: String) async {
         let dirName = (worktreePath as NSString).lastPathComponent
 
         // Try to parse ticket number from directory name (e.g., "citadel-209-slug" → 209)
@@ -464,7 +482,6 @@ final class SessionService {
             repoPath: repoPath,
             worktreePath: worktreePath,
             branch: branch,
-            workspace: workspace,
             isPrimary: true
         )
 
@@ -481,6 +498,8 @@ final class SessionService {
         appState.terminals[session.id] = [terminal]
         appState.terminalReadiness[terminal.id] = .uninitialized
         TerminalManager.shared.trackReadiness(for: terminal.id)
+        // Pre-initialize in offscreen window so recovered terminal starts immediately
+        TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: worktreePath)
 
         if let ticketURL {
             let link = SessionLink(sessionID: session.id, label: "Issue #\(ticketNumber ?? 0)", url: ticketURL, linkType: .ticket)
@@ -530,6 +549,8 @@ final class SessionService {
         appState.terminals[sessionID, default: []].append(terminal)
         appState.activeTerminalID[sessionID] = terminal.id
         store.mutate { data in data.terminals.append(terminal) }
+        // Pre-initialize in offscreen window so shell starts immediately
+        TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: cwd)
     }
 
     /// Close a non-managed terminal tab.

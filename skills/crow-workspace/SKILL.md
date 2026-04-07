@@ -6,7 +6,7 @@ Orchestrates work sessions in **Crow** by setting up git worktrees and creating 
 
 ## Important: Sandbox Bypass
 
-All `crow`, `gh`, and `glab` commands require `dangerouslyDisableSandbox: true` because they communicate via Unix socket or need network/TLS access.
+All `crow`, `gh`, `glab`, and `git worktree` commands require `dangerouslyDisableSandbox: true` because they communicate via Unix socket, need network/TLS access, or write outside the sandbox-allowed directories.
 
 ## Activation
 
@@ -195,7 +195,7 @@ git -C {repo_path} worktree add {path} \
 
 ## crow Session Creation
 
-All `crow` commands require `dangerouslyDisableSandbox: true`.
+All `crow` and `git worktree` commands require `dangerouslyDisableSandbox: true`.
 
 ### Session Naming Convention
 
@@ -209,41 +209,47 @@ This keeps session names, worktree paths, and branch names consistent.
 
 ### Complete Step-by-Step Flow
 
+> **IMPORTANT: Execute steps 1-9 SEQUENTIALLY — one at a time, never in parallel.**
+> Parallel calls cascade on failure (a failed `add-worktree` cancels sibling `add-link` calls).
+
 ```bash
 # 1. Create session (parse session_id from JSON output)
 #    The name MUST match the worktree directory name
 crow new-session --name "{repo}-{ticket_number}-{slug}"
 # Output: {"session_id":"<uuid>","name":"crow-51-drag-drop-photo"}
+# >>> Wait for completion — parse session_id before proceeding <<<
 
 # 2. Set ticket metadata (only if URL was provided)
 crow set-ticket --session {session_id} \
   --url "{ticket_url}" \
   --title "{ticket_title}" \
   --number {ticket_number}
+# >>> Wait for completion <<<
 
 # 3. Register each worktree (after creating with git)
 #    IMPORTANT: --repo-path is the MAIN repo path (e.g., .../citadel)
 #    --path is the WORKTREE path (e.g., .../citadel-197-slug)
-#    --workspace is the workspace folder name (e.g., "RadiusMethod", "MyGitLab")
 crow add-worktree --session {session_id} \
   --repo "{repo_name}" \
   --repo-path "{main_repo_path}" \
   --path "{worktree_path}" \
   --branch "feature/{name}" \
-  --workspace "{workspace_name}" \
   --primary   # for the first/main repo
+# >>> Wait for completion <<<
 
 # 4. Add ticket link (only if URL was provided)
 crow add-link --session {session_id} \
   --label "Issue" \
   --url "{ticket_url}" \
   --type ticket
+# >>> Wait for completion <<<
 
 # 4a. Add PR link (only if an existing PR was detected)
 crow add-link --session {session_id} \
   --label "PR #{pr_number}" \
   --url "{pr_url}" \
   --type pr
+# >>> Wait for completion <<<
 
 # 4b. Auto-assign and set project status (GitHub issues only, best-effort)
 #     All gh commands require dangerouslyDisableSandbox: true.
@@ -282,13 +288,11 @@ crow new-terminal --session {session_id} \
 # Output: {"terminal_id":"<uuid>","session_id":"..."}
 # IMPORTANT: Capture the terminal_id from the output!
 
-# 7. Switch to the new session so the terminal gets created in the UI
+# 7. Switch to the new session
 crow select-session --session {session_id}
 
-# 8. Wait for the shell to initialize (the terminal needs to be visible and ready)
-sleep 3
-
-# 9. Send the claude launch command to the terminal
+# 8. Send the claude launch command to the terminal
+#    The shell is already running (pre-initialized in background) — no sleep needed.
 #    CRITICAL: End the text with literal \n — the app converts \n to Enter.
 #    Use single quotes so the shell doesn't expand $(cat ...).
 #    Use --permission-mode plan to start Claude in plan mode.
