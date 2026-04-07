@@ -24,9 +24,8 @@ public struct SessionListView: View {
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
 
-            // Review board row
-            ReviewBoardSidebarRow(appState: appState)
-                .tag(AppState.reviewBoardSessionID)
+            // Reviews + Terminals row
+            ReviewTerminalsSidebarRow(appState: appState)
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
 

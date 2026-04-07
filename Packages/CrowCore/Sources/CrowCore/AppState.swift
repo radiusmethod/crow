@@ -39,6 +39,9 @@ public final class AppState {
     /// Fixed UUID for the review board tab.
     nonisolated public static let reviewBoardSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
 
+    /// Fixed UUID for the global terminals page.
+    nonisolated public static let globalTerminalSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000004")!
+
     public var managerSession: Session? {
         sessions.first { $0.id == Self.managerSessionID }
     }
@@ -143,6 +146,12 @@ public final class AppState {
     /// Called to close a non-managed terminal tab.
     public var onCloseTerminal: ((UUID, UUID) -> Void)?  // receives (sessionID, terminalID)
 
+    /// Called to add a new global terminal tab.
+    public var onAddGlobalTerminal: (() -> Void)?
+
+    /// Called to close a global terminal tab.
+    public var onCloseGlobalTerminal: ((UUID) -> Void)?  // receives terminalID
+
     // MARK: - Closures wired by AppDelegate
 
     /// Called to delete a session and clean up its worktrees.
@@ -175,7 +184,8 @@ public final class AppState {
     public var selectedSession: Session? {
         guard selectedSessionID != Self.ticketBoardSessionID,
               selectedSessionID != Self.allowListSessionID,
-              selectedSessionID != Self.reviewBoardSessionID else { return nil }
+              selectedSessionID != Self.reviewBoardSessionID,
+              selectedSessionID != Self.globalTerminalSessionID else { return nil }
         return sessions.first { $0.id == selectedSessionID }
     }
 

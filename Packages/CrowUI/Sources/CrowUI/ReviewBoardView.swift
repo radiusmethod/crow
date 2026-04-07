@@ -175,8 +175,8 @@ struct ReviewRow: View {
 
 // MARK: - Sidebar Row
 
-/// Compact sidebar row showing pending review count.
-public struct ReviewBoardSidebarRow: View {
+/// Combined Reviews and Terminals toggle buttons in the sidebar.
+public struct ReviewTerminalsSidebarRow: View {
     @Bindable var appState: AppState
 
     public init(appState: AppState) {
@@ -184,45 +184,76 @@ public struct ReviewBoardSidebarRow: View {
     }
 
     public var body: some View {
-        HStack {
-            Spacer()
-            HStack(spacing: 6) {
-                Image(systemName: "eye.circle")
-                    .font(.system(size: 12))
-                    .foregroundStyle(CorveilTheme.gold)
+        HStack(spacing: 6) {
+            reviewButton
+            terminalButton
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var reviewButton: some View {
+        let isActive = appState.selectedSessionID == AppState.reviewBoardSessionID
+        return Button {
+            appState.selectedSessionID = AppState.reviewBoardSessionID
+        } label: {
+            HStack(spacing: 4) {
                 Text("Reviews")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(CorveilTheme.gold)
+                    .font(.system(size: 12, weight: .bold))
                 if appState.isLoadingReviews {
                     ProgressView()
                         .controlSize(.mini)
                 }
                 if appState.reviewRequests.count > 0 {
                     Text("\(appState.reviewRequests.count)")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 10, weight: .semibold))
                         .monospacedDigit()
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(unseenCount > 0 ? CorveilTheme.gold.opacity(0.2) : Color.secondary.opacity(0.15))
-                        .foregroundStyle(unseenCount > 0 ? CorveilTheme.gold : CorveilTheme.textSecondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(appState.unseenReviewCount > 0 ? CorveilTheme.gold.opacity(0.2) : Color.secondary.opacity(0.15))
+                        .foregroundStyle(appState.unseenReviewCount > 0 ? CorveilTheme.gold : CorveilTheme.textSecondary)
                         .clipShape(Capsule())
                 }
             }
-            Spacer()
+            .foregroundStyle(isActive ? CorveilTheme.gold : CorveilTheme.goldDark)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isActive ? CorveilTheme.bgCard : CorveilTheme.bgSurface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(
+                                isActive ? CorveilTheme.goldDark.opacity(0.6) : CorveilTheme.goldDark.opacity(0.3),
+                                lineWidth: 1
+                            )
+                    )
+            )
         }
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(CorveilTheme.bgSurface)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(CorveilTheme.borderSubtle, lineWidth: 1)
-                )
-        )
-        .padding(.vertical, 2)
+        .buttonStyle(.plain)
     }
 
-    private var unseenCount: Int {
-        appState.unseenReviewCount
+    private var terminalButton: some View {
+        let isActive = appState.selectedSessionID == AppState.globalTerminalSessionID
+        return Button {
+            appState.selectedSessionID = AppState.globalTerminalSessionID
+        } label: {
+            Text("Terminals")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(isActive ? CorveilTheme.gold : CorveilTheme.goldDark)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isActive ? CorveilTheme.bgCard : CorveilTheme.bgSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(
+                                    isActive ? CorveilTheme.goldDark.opacity(0.6) : CorveilTheme.goldDark.opacity(0.3),
+                                    lineWidth: 1
+                                )
+                        )
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
