@@ -85,6 +85,11 @@ public final class AppState {
     /// Terminal readiness state per terminal ID.
     public var terminalReadiness: [UUID: TerminalReadiness] = [:]
 
+    /// Terminal IDs eligible for auto-launch of `claude --continue`.
+    /// Only restored (hydrated) and recovered orphan terminals are added here,
+    /// not brand-new terminals created via the `new-terminal` RPC.
+    public var autoLaunchTerminals: Set<UUID> = []
+
     // MARK: - Hook Events (per-session Observable wrappers)
 
     /// Per-session hook state. Using @Observable class wrappers so mutations to one

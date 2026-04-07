@@ -605,6 +605,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     TerminalManager.shared.destroy(id: terminalID)
                     capturedAppState.terminals[sessionID]?.removeAll { $0.id == terminalID }
                     capturedAppState.terminalReadiness.removeValue(forKey: terminalID)
+                    capturedAppState.autoLaunchTerminals.remove(terminalID)
                     if capturedAppState.activeTerminalID[sessionID] == terminalID {
                         capturedAppState.activeTerminalID[sessionID] = capturedAppState.terminals[sessionID]?.first?.id
                     }
@@ -625,12 +626,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 text = text.replacingOccurrences(of: "\\t", with: "\t")
                 NSLog("crow send: text length=\(text.count), ends_with_newline=\(text.hasSuffix("\n")), ends_with_cr=\(text.hasSuffix("\r"))")
                 await MainActor.run {
-                    // If the surface doesn't exist yet, create it from stored terminal data
+                    // If the surface doesn't exist yet, pre-initialize it so the shell starts
                     if TerminalManager.shared.existingSurface(for: terminalID) == nil {
                         if let terminals = capturedAppState.terminals[sessionID],
                            let terminal = terminals.first(where: { $0.id == terminalID }) {
-                            _ = TerminalManager.shared.surface(
-                                for: terminalID,
+                            TerminalManager.shared.preInitialize(
+                                id: terminalID,
                                 workingDirectory: terminal.cwd,
                                 command: terminal.command
                             )
