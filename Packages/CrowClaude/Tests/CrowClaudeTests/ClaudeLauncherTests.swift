@@ -13,8 +13,7 @@ import Testing
         repoName: "my-repo",
         repoPath: "/repos/my-repo",
         worktreePath: "/worktrees/my-repo-42-feature",
-        branch: "feature/42-cool",
-        workspace: "Dev"
+        branch: "feature/42-cool"
     )
 
     let prompt = await launcher.generatePrompt(
@@ -70,8 +69,7 @@ import Testing
         repoName: "repo",
         repoPath: "/repos/repo",
         worktreePath: "/worktrees/repo-1-feat",
-        branch: "feature/1-feat",
-        workspace: "Dev"
+        branch: "feature/1-feat"
     )
 
     let prompt = await launcher.generatePrompt(
@@ -152,16 +150,14 @@ import Testing
         repoName: "frontend",
         repoPath: "/repos/frontend",
         worktreePath: "/wt/frontend-1-feat",
-        branch: "feature/1-feat",
-        workspace: "Dev"
+        branch: "feature/1-feat"
     )
     let wt2 = SessionWorktree(
         sessionID: session.id,
         repoName: "backend",
         repoPath: "/repos/backend",
         worktreePath: "/wt/backend-1-feat",
-        branch: "feature/1-feat",
-        workspace: "Dev"
+        branch: "feature/1-feat"
     )
 
     let prompt = await launcher.generatePrompt(
