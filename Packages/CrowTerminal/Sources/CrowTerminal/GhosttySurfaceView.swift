@@ -4,6 +4,7 @@ import GhosttyKit
 /// NSView subclass that hosts a libghostty terminal surface with Metal rendering.
 public final class GhosttySurfaceView: NSView {
     private var surface: ghostty_surface_t?
+    private var pendingText: [String] = []
     private var markedTextStorage = NSMutableAttributedString()
     private var trackingArea: NSTrackingArea?
 
@@ -82,6 +83,15 @@ public final class GhosttySurfaceView: NSView {
 
         if surface != nil {
             NSLog("[Ghostty] createSurface() succeeded, hasCallback=\(onSurfaceCreated != nil)")
+            // Flush any text that arrived before the surface was ready
+            if !pendingText.isEmpty {
+                NSLog("[Ghostty] Flushing %d pending text segments", pendingText.count)
+                let pending = pendingText
+                pendingText = []
+                for text in pending {
+                    writeText(text)
+                }
+            }
             onSurfaceCreated?()
         } else {
             NSLog("[Ghostty] createSurface() FAILED — surface is nil")
@@ -363,7 +373,8 @@ public final class GhosttySurfaceView: NSView {
     /// to carriage returns (`\r`) which the PTY interprets as Enter keypresses.
     public func writeText(_ text: String) {
         guard let surface else {
-            NSLog("[GhosttySurfaceView] writeText: no surface!")
+            NSLog("[GhosttySurfaceView] writeText: no surface yet, buffering %d chars", text.count)
+            pendingText.append(text)
             return
         }
         let parts = text.components(separatedBy: "\n")
