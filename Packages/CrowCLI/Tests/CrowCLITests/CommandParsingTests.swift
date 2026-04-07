@@ -1,0 +1,46 @@
+import Foundation
+import Testing
+import ArgumentParser
+@testable import CrowCLILib
+
+// MARK: - Command Argument Parsing Tests
+
+private let validUUID = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+@Test func hookEventCmdParsesValidArgs() throws {
+    let cmd = try HookEventCmd.parse(["--session", validUUID, "--event", "Stop"])
+    #expect(cmd.session == validUUID)
+    #expect(cmd.event == "Stop")
+}
+
+@Test func hookEventCmdRejectsInvalidUUID() {
+    // Validation functions are tested directly (matching existing ValidationTests pattern)
+    #expect(throws: (any Error).self) {
+        try validateUUID("not-a-uuid", label: "session UUID")
+    }
+}
+
+@Test func setStatusParsesArgs() throws {
+    let cmd = try SetStatus.parse(["--session", validUUID, "active"])
+    #expect(cmd.session == validUUID)
+    #expect(cmd.status == "active")
+}
+
+@Test func setStatusRejectsInvalidStatus() {
+    #expect(throws: (any Error).self) {
+        try validateSessionStatus("invalid-status")
+    }
+}
+
+@Test func addLinkParsesAllArgs() throws {
+    let cmd = try AddLink.parse(["--session", validUUID, "--label", "PR", "--url", "https://example.com", "--type", "pr"])
+    #expect(cmd.session == validUUID)
+    #expect(cmd.label == "PR")
+    #expect(cmd.url == "https://example.com")
+    #expect(cmd.type == "pr")
+}
+
+@Test func addLinkDefaultTypeIsCustom() throws {
+    let cmd = try AddLink.parse(["--session", validUUID, "--label", "Docs", "--url", "https://docs.com"])
+    #expect(cmd.type == "custom")
+}
