@@ -386,11 +386,10 @@ public final class GhosttySurfaceView: NSView {
             }
             // For each \n boundary (except the last segment), send Enter
             if i < parts.count - 1 {
-                "\r".withCString { ptr in
-                    ghostty_surface_text(surface, ptr, 1)
-                }
-                // Also send Return as a key event — ghostty_surface_text alone
-                // does not reliably trigger Enter in all terminal contexts.
+                // Send Return as a key event. We intentionally do NOT send \r
+                // via ghostty_surface_text — for long text, the \r can race
+                // with PTY buffer processing and submit before the final
+                // characters from the preceding text call are delivered.
                 var key = ghostty_input_key_s()
                 key.action = GHOSTTY_ACTION_PRESS
                 key.mods = GHOSTTY_MODS_NONE
