@@ -41,13 +41,19 @@ if [ ! -f "$BUILD_DIR/CrowApp" ]; then
     exit 1
 fi
 
+if [ ! -f "$BUILD_DIR/crow" ]; then
+    echo "ERROR: CLI binary not found at $BUILD_DIR/crow"
+    exit 1
+fi
+
 echo "==> Creating app bundle (v$VERSION)..."
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
-# Copy binary
+# Copy binaries
 cp "$BUILD_DIR/CrowApp" "$APP_DIR/Contents/MacOS/"
+cp "$BUILD_DIR/crow" "$APP_DIR/Contents/MacOS/"
 
 # Copy Ghostty resources if available
 if [ -d "$FRAMEWORKS_DIR/ghostty-resources" ]; then
