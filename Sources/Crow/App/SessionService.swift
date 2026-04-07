@@ -736,8 +736,7 @@ final class SessionService {
         appState.links[session.id] = [prLink]
         appState.terminalReadiness[terminal.id] = .uninitialized
         TerminalManager.shared.trackReadiness(for: terminal.id)
-
-        // Pre-initialize terminal surface in offscreen window
+        appState.autoLaunchTerminals.insert(terminal.id)
         TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: clonePath, command: nil)
 
         // Persist

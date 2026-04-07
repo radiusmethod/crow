@@ -1,188 +1,141 @@
-# Crow Review PR Skill
+# Crow Review PR
 
-## Purpose
-
-Performs thorough code reviews on GitHub pull requests. Reads the PR diff, understands the codebase context, provides a detailed review, and posts comments back to GitHub — all with user approval before submission.
+Perform a comprehensive code and security review on a GitHub pull request, then post the findings as a PR review.
 
 ## Important: Sandbox Bypass
 
-All `gh` commands require `dangerouslyDisableSandbox: true` because they need network/TLS access.
+All `gh` and `git` commands require `dangerouslyDisableSandbox: true` because they need network/TLS access.
+
+## Arguments
+
+- `$ARGUMENTS` - The PR URL or number to review (required)
 
 ## Activation
 
 This skill activates when:
 - User invokes `/crow-review-pr` command
 - User asks to "review a PR" or "review this pull request"
-- This is a review session (the session was created via the Reviews board)
+- This is a review session (the session was created via the Crow Reviews board)
 
-## Workflow
+## Instructions
 
-### Step 1: Identify the PR
+You are performing a code and security review on PR $ARGUMENTS. Follow these steps:
 
-Get the PR URL from the session's links:
-
-```bash
-crow list-links --session {session_uuid}
-```
-
-Look for a link with type `pr`. Extract the URL.
-
-If no PR link is found, ask the user for the PR URL.
-
-### Step 2: Fetch PR Details
+### Step 1: Checkout the PR
 
 ```bash
-gh pr view {pr_url} --json title,body,baseRefName,headRefName,files,additions,deletions,commits,author,labels,reviewRequests
+gh pr checkout $ARGUMENTS
 ```
 
-This gives you:
-- **title** and **body**: The PR description and context
-- **baseRefName** / **headRefName**: The target and source branches
-- **files**: List of changed files with additions/deletions
-- **commits**: Commit messages for understanding the work
-- **author**: Who created the PR
+### Step 2: Gather PR Information
 
-### Step 3: Read the Diff
+Get the PR details including title, description, and changed files:
 
 ```bash
-gh pr diff {pr_url}
+gh pr view $ARGUMENTS --json title,body,headRefName,baseRefName,additions,deletions,changedFiles,files
 ```
 
-This returns the full unified diff of all changes. For large PRs, you may want to also read specific files:
+### Step 3: Review the Code
+
+Read all changed files in the PR. For each file, analyze:
+
+**Security Review:**
+- Authentication/authorization issues
+- Input validation vulnerabilities
+- Injection risks (SQL, command, XSS)
+- Secrets/credentials exposure
+- Cryptographic weaknesses
+- Insecure configurations
+- OWASP Top 10 concerns
+
+**Code Quality:**
+- Logic errors
+- Error handling
+- Resource leaks
+- Race conditions
+- API design issues
+- Missing tests for new code
+
+### Step 4: Run Static Analysis
+
+For Go projects:
+```bash
+cd core && go vet ./... 2>&1
+cd core && go test ./... -v 2>&1 | head -50
+```
+
+For JavaScript/TypeScript projects:
+```bash
+npm run lint 2>&1 | head -50
+```
+
+For Swift projects:
+```bash
+swift build 2>&1 | tail -20
+```
+
+For Python projects:
+```bash
+ruff check . 2>&1 | head -50
+```
+
+### Step 5: Post Review
+
+Based on your findings, determine the appropriate review action:
+
+- **Approve**: No critical or blocking issues found → use `--approve`
+- **Request Changes**: Critical or blocking issues found → use `--request-changes`
+- **Comment**: Informational only, no strong opinion either way → use `--comment`
+
+Post the review using the appropriate flag:
 
 ```bash
-gh pr diff {pr_url} -- {specific_file_path}
+# If approving:
+gh pr review $ARGUMENTS --approve --body "YOUR_REVIEW_HERE"
+
+# If requesting changes:
+gh pr review $ARGUMENTS --request-changes --body "YOUR_REVIEW_HERE"
+
+# If commenting only:
+gh pr review $ARGUMENTS --comment --body "YOUR_REVIEW_HERE"
 ```
 
-### Step 4: Understand Context
+Use this format for the review:
 
-1. Read `CLAUDE.md` and `README.md` in the repo root for project conventions
-2. For each changed file, read the full file (not just the diff) to understand surrounding context
-3. Check if tests were added or updated for the changes
-4. Look at the commit history on the branch:
-   ```bash
-   git log --oneline origin/{baseRefName}..HEAD
-   ```
+```markdown
+## Code & Security Review
 
-### Step 5: Analyze the Changes
+### Critical Issues (if any)
+[List blocking issues that must be fixed]
 
-Review the PR for:
+### Security Review
+**Strengths:**
+- [Positive security aspects]
 
-1. **Correctness**: Does the code do what the PR description claims? Are there logic errors, off-by-one mistakes, or missing edge cases?
+**Concerns:**
+- [Security issues found]
 
-2. **Security**: Any injection vulnerabilities (SQL, XSS, command injection)? Improper input validation? Hardcoded secrets? Insecure defaults?
+### Code Quality
+- [Code quality issues]
 
-3. **Performance**: Unnecessary allocations? N+1 queries? Missing indexes? Blocking operations in hot paths?
+### Summary Table
+| Priority | Issue |
+|----------|-------|
+| Red | Must fix items |
+| Yellow | Should fix items |
+| Green | Consider items |
 
-4. **Code Quality**: Does it follow the project's conventions? Is it readable? Are abstractions appropriate? Any code duplication?
-
-5. **Testing**: Are there adequate tests? Do they cover edge cases? Are they testing the right things (behavior, not implementation)?
-
-6. **Architecture**: Does the change fit the existing architecture? Any accidental coupling? Is the abstraction level right?
-
-### Step 6: Present the Review
-
-Format your review as:
-
-```
-## PR Review: {title}
-
-### Summary
-{1-2 sentence overview of what the PR does and your overall assessment}
-
-### Verdict: {APPROVE | REQUEST_CHANGES | COMMENT}
-
-### Issues Found
-{Numbered list of issues, each with:}
-- Severity: critical / major / minor / nit
-- File: {path}:{line}
-- Description: what's wrong and why
-- Suggestion: how to fix it
-
-### Positive Notes
-{Things done well — acknowledge good patterns, thorough tests, clean abstractions}
+**Recommendation:** [Approve / Request Changes / Comment — with reasoning]
 ```
 
-**IMPORTANT**: Always present the review to the user for approval BEFORE submitting. Say:
+### Important Notes
 
-> Here is my review. Would you like me to:
-> 1. Submit as-is
-> 2. Modify the review
-> 3. Cancel without submitting
-
-### Step 7: Submit the Review
-
-Only after the user approves:
-
-#### For a simple review comment (no inline comments):
-
-```bash
-gh pr review {pr_url} --comment --body "review text here"
-```
-
-Or to approve:
-```bash
-gh pr review {pr_url} --approve --body "review text here"
-```
-
-Or to request changes:
-```bash
-gh pr review {pr_url} --request-changes --body "review text here"
-```
-
-#### For inline comments on specific lines:
-
-Use the GitHub API to create a review with inline comments:
-
-```bash
-gh api repos/{owner}/{repo}/pulls/{number}/reviews \
-  --method POST \
-  -f body="Overall review summary" \
-  -f event="COMMENT" \
-  -f 'comments[][path]=src/example.swift' \
-  -f 'comments[][line]=42' \
-  -f 'comments[][body]=Specific comment about this line'
-```
-
-Note: The `line` field refers to the line number in the **new version** of the file (right side of the diff). Use `side=RIGHT` (default) for comments on added/modified lines.
-
-For comments on deleted lines, use `side=LEFT` with the old line number.
-
-## Important Constraints
-
-- **Never auto-submit**: Always wait for user approval before posting any review
-- **Never auto-approve**: Even if the code looks good, present the review first
-- **Be constructive**: Frame feedback as suggestions, not demands. Explain the "why"
-- **Acknowledge good work**: Don't only point out problems
-- **Respect conventions**: If the project has a style guide or CLAUDE.md conventions, follow them in your review
-- **Be specific**: Reference exact files, line numbers, and code snippets
-- **All `gh` and `crow` commands require `dangerouslyDisableSandbox: true`**
-
-## Error Handling
-
-| Error | Response |
-|-------|----------|
-| PR URL not found | Ask user for the PR URL |
-| `gh` auth error | Suggest: `gh auth refresh` |
-| Large diff (>5000 lines) | Focus on the most critical files; note that you reviewed a subset |
-| Rate limit | Wait and retry, inform user |
-
-## Examples
-
-### Basic Review
-```
-/crow-review-pr
-```
-→ Reads PR from session links, fetches diff, analyzes, presents review for approval
-
-### Review with Specific Focus
-```
-/crow-review-pr — focus on security implications
-```
-→ Same flow but with security-focused analysis
-
-### Review a Specific PR
-```
-/crow-review-pr https://github.com/org/repo/pull/123
-```
-→ Reviews the specified PR regardless of session links
+- Be thorough but concise
+- Prioritize security issues
+- Include file:line references for specific issues
+- Don't include sensitive information in the review
+- If tests fail, note which ones and why
+- Use `--approve` when the PR looks good (no red/blocking items)
+- Use `--request-changes` when there are critical issues that must be fixed before merge
+- Use `--comment` only when you have no strong recommendation either way
+- All `gh` and `git` commands require `dangerouslyDisableSandbox: true`
