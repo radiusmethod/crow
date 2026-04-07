@@ -60,6 +60,12 @@ struct Scaffolder {
         let skillTemplate = Self.bundledSkill()
         try skillTemplate.write(toFile: skillPath, atomically: true, encoding: .utf8)
 
+        // Always overwrite setup.sh with the latest version and make executable
+        let setupScriptPath = (skillsDir as NSString).appendingPathComponent("setup.sh")
+        let setupScript = Self.bundledSetupScript()
+        try setupScript.write(toFile: setupScriptPath, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: setupScriptPath)
+
         // Always overwrite the review-pr skill with the latest version
         let reviewSkillPath = (reviewSkillsDir as NSString).appendingPathComponent("SKILL.md")
         let reviewSkillTemplate = Self.bundledReviewSkill()
@@ -121,6 +127,22 @@ struct Scaffolder {
         """
     }
 
+    /// The crow-workspace setup.sh script bundled with the app.
+    static func bundledSetupScript() -> String {
+        if let content = loadFromRepo("skills/crow-workspace/setup.sh") {
+            return content
+        }
+        if let url = Bundle.main.url(forResource: "crow-workspace-setup.sh", withExtension: "template"),
+           let content = try? String(contentsOf: url) {
+            return content
+        }
+        return """
+        #!/bin/bash
+        echo '{"status":"error","message":"setup.sh not bundled"}'
+        exit 1
+        """
+    }
+
     /// The crow-review-pr SKILL.md template bundled with the app.
     static func bundledReviewSkill() -> String {
         if let content = loadFromRepo("skills/crow-review-pr/SKILL.md") {
@@ -152,6 +174,8 @@ struct Scaffolder {
           "permissions": {
             "allow": [
               "Bash(crow *)",
+              "Bash(bash .claude/skills/crow-workspace/setup.sh *)",
+              "Bash(.claude/skills/crow-workspace/setup.sh *)",
               "Bash(gh issue view:*)",
               "Bash(gh issue create:*)",
               "Bash(gh issue edit:*)",

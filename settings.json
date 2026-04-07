@@ -2,6 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(crow *)",
+      "Bash(bash .claude/skills/crow-workspace/setup.sh *)",
+      "Bash(.claude/skills/crow-workspace/setup.sh *)",
       "Bash(crow new-session:*)",
       "Bash(crow rename-session:*)",
       "Bash(crow select-session:*)",
