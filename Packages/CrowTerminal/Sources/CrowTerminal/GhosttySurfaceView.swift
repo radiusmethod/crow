@@ -369,8 +369,8 @@ public final class GhosttySurfaceView: NSView {
 
     /// Write text to the terminal's PTY input (for crow CLI `send` command).
     ///
-    /// Text segments are sent via `ghostty_surface_text`. Newlines are converted
-    /// to carriage returns (`\r`) which the PTY interprets as Enter keypresses.
+    /// Text segments are sent via `ghostty_surface_text`. Newlines are submitted
+    /// by sending both `\r` to the PTY and a key event for Return (keycode 36).
     public func writeText(_ text: String) {
         guard let surface else {
             NSLog("[GhosttySurfaceView] writeText: no surface yet, buffering %d chars", text.count)
@@ -384,11 +384,20 @@ public final class GhosttySurfaceView: NSView {
                     ghostty_surface_text(surface, ptr, UInt(part.utf8.count))
                 }
             }
-            // For each \n boundary (except the last segment), send \r to the PTY
+            // For each \n boundary (except the last segment), send Enter
             if i < parts.count - 1 {
                 "\r".withCString { ptr in
                     ghostty_surface_text(surface, ptr, 1)
                 }
+                // Also send Return as a key event — ghostty_surface_text alone
+                // does not reliably trigger Enter in all terminal contexts.
+                var key = ghostty_input_key_s()
+                key.action = GHOSTTY_ACTION_PRESS
+                key.mods = GHOSTTY_MODS_NONE
+                key.keycode = 36  // macOS Return key
+                _ = ghostty_surface_key(surface, key)
+                key.action = GHOSTTY_ACTION_RELEASE
+                _ = ghostty_surface_key(surface, key)
             }
         }
         NSLog("[GhosttySurfaceView] writeText: sent \(text.count) chars, \(parts.count - 1) newlines")
