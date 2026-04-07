@@ -12,6 +12,11 @@ public final class GhosttyApp {
     private init() {}
 
     public func initialize() {
+        guard app == nil else {
+            NSLog("[GhosttyApp] Already initialized, skipping duplicate initialize() call")
+            return
+        }
+
         // Initialize ghostty
         ghostty_init(0, nil)
 
@@ -65,6 +70,7 @@ public final class GhosttyApp {
         startTickTimer()
     }
 
+    /// Process pending Ghostty events. Called by the tick timer and the wakeup callback.
     public func tick() {
         guard let app else { return }
         ghostty_app_tick(app)
@@ -72,6 +78,7 @@ public final class GhosttyApp {
 
     private var tickTimer: Timer?
 
+    /// Start the 60 FPS timer that drives Ghostty's render and event-processing loop.
     private func startTickTimer() {
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -85,7 +92,7 @@ public final class GhosttyApp {
         target: ghostty_target_s,
         action: ghostty_action_s
     ) -> Bool {
-        // For now, log actions but don't handle them
+        NSLog("[GhosttyApp] Unhandled action: tag=\(action.tag)")
         return false
     }
 
@@ -104,8 +111,8 @@ public final class GhosttyApp {
         scroll-to-bottom = keystroke, no-output
         """
 
-        let tmpDir = ProcessInfo.processInfo.environment["TMPDIR"] ?? "/tmp"
-        let configPath = "\(tmpDir)/corveil-ghostty.conf"
+        let tmpDir = ProcessInfo.processInfo.environment["TMPDIR"] ?? NSTemporaryDirectory()
+        let configPath = "\(tmpDir)/crow-ghostty.conf"
 
         do {
             try overrides.write(toFile: configPath, atomically: true, encoding: .utf8)

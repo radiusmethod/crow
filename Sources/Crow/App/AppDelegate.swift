@@ -902,12 +902,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Replace bare `claude` in a command string with the full path to the real binary,
     /// skipping the CMUX wrapper.
     nonisolated static func resolveClaudeInCommand(_ command: String) -> String {
-        let candidates = [
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/claude").path,
-            "/usr/local/bin/claude",
-            "/opt/homebrew/bin/claude",
-        ]
-        for path in candidates {
+        for path in SessionService.claudeBinaryCandidates {
             if FileManager.default.isExecutableFile(atPath: path) {
                 // Replace "claude" at word boundaries with the full path
                 // Handle: "claude ...", "claude", "/path/to/claude ..."

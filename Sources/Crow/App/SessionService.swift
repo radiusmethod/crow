@@ -85,7 +85,10 @@ final class SessionService {
         }
     }
 
-    /// Wire TerminalManager readiness callbacks to update AppState.
+    /// Bridge `TerminalManager.SurfaceState` callbacks to `AppState.terminalReadiness`.
+    ///
+    /// Maps `SurfaceState.created` → `.surfaceCreated` and `.shellReady` → `.shellReady`,
+    /// only for terminals already registered in `terminalReadiness` (managed work session terminals).
     func wireTerminalReadiness() {
         NSLog("[SessionService] wireTerminalReadiness — setting onStateChanged callback")
         TerminalManager.shared.onStateChanged = { [weak self] terminalID, state in
@@ -107,6 +110,9 @@ final class SessionService {
     }
 
     /// Send `claude --continue` to a terminal and mark it as launched.
+    ///
+    /// Writes hook configuration to the session's worktree first so that
+    /// Claude Code picks up the hooks on startup.
     func launchClaude(terminalID: UUID) {
         guard appState.terminalReadiness[terminalID] == .shellReady else { return }
 
@@ -550,7 +556,7 @@ final class SessionService {
 
     // MARK: - Terminal Tab Management
 
-    /// Add a new plain-shell terminal tab to a session.
+    /// Add a new plain-shell (unmanaged) terminal tab to a session.
     func addTerminal(sessionID: UUID) {
         let cwd = appState.primaryWorktree(for: sessionID)?.worktreePath
             ?? FileManager.default.homeDirectoryForCurrentUser.path
@@ -564,7 +570,7 @@ final class SessionService {
         TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: cwd)
     }
 
-    /// Close a non-managed terminal tab.
+    /// Close a non-managed terminal tab. Managed terminals cannot be closed individually.
     func closeTerminal(sessionID: UUID, terminalID: UUID) {
         guard let terminals = appState.terminals[sessionID],
               let terminal = terminals.first(where: { $0.id == terminalID }),
@@ -623,13 +629,16 @@ final class SessionService {
 
     // MARK: - Find Claude Binary
 
+    /// Standard search paths for the Claude CLI binary, in priority order.
+    nonisolated static let claudeBinaryCandidates = [
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/claude").path,
+        "/usr/local/bin/claude",
+        "/opt/homebrew/bin/claude",
+    ]
+
     /// Find the real claude binary, skipping CMUX wrapper.
-    private static func findClaudeBinary() -> String? {
-        let candidates = [
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/claude").path,
-            "/usr/local/bin/claude",
-            "/opt/homebrew/bin/claude",
-        ]
+    static func findClaudeBinary() -> String? {
+        let candidates = claudeBinaryCandidates
         for path in candidates {
             if FileManager.default.isExecutableFile(atPath: path) {
                 return path
