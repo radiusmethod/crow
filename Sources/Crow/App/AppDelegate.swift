@@ -605,6 +605,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     TerminalManager.shared.destroy(id: terminalID)
                     capturedAppState.terminals[sessionID]?.removeAll { $0.id == terminalID }
                     capturedAppState.terminalReadiness.removeValue(forKey: terminalID)
+                    capturedAppState.autoLaunchTerminals.remove(terminalID)
                     if capturedAppState.activeTerminalID[sessionID] == terminalID {
                         capturedAppState.activeTerminalID[sessionID] = capturedAppState.terminals[sessionID]?.first?.id
                     }

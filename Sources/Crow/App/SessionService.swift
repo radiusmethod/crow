@@ -69,6 +69,7 @@ final class SessionService {
                 for terminal in terminals where terminal.isManaged {
                     appState.terminalReadiness[terminal.id] = .uninitialized
                     TerminalManager.shared.trackReadiness(for: terminal.id)
+                    appState.autoLaunchTerminals.insert(terminal.id)
                 }
             }
 
@@ -115,6 +116,8 @@ final class SessionService {
     /// Claude Code picks up the hooks on startup.
     func launchClaude(terminalID: UUID) {
         guard appState.terminalReadiness[terminalID] == .shellReady else { return }
+        // Only auto-launch for restored/recovered terminals, not brand-new ones
+        guard appState.autoLaunchTerminals.remove(terminalID) != nil else { return }
 
         // Write/refresh hook config for the session's worktree
         if let sessionID = appState.terminals.first(where: { _, terminals in
@@ -264,6 +267,10 @@ final class SessionService {
         appState.sessions.removeAll { $0.id == id }
         appState.worktrees.removeValue(forKey: id)
         appState.links.removeValue(forKey: id)
+        // Clean up auto-launch set for deleted session's terminals
+        if let terms = appState.terminals[id] {
+            for t in terms { appState.autoLaunchTerminals.remove(t.id) }
+        }
         appState.terminals.removeValue(forKey: id)
         appState.activeTerminalID.removeValue(forKey: id)
         appState.removeHookState(for: id)
@@ -540,6 +547,7 @@ final class SessionService {
         appState.links[session.id] = links.isEmpty ? nil : links
         appState.terminalReadiness[terminal.id] = .uninitialized
         TerminalManager.shared.trackReadiness(for: terminal.id)
+        appState.autoLaunchTerminals.insert(terminal.id)
         // Pre-initialize in offscreen window so recovered terminal starts immediately
         TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: worktreePath)
 
@@ -579,6 +587,7 @@ final class SessionService {
         TerminalManager.shared.destroy(id: terminalID)
         appState.terminals[sessionID]?.removeAll { $0.id == terminalID }
         appState.terminalReadiness.removeValue(forKey: terminalID)
+        appState.autoLaunchTerminals.remove(terminalID)
 
         if appState.activeTerminalID[sessionID] == terminalID {
             appState.activeTerminalID[sessionID] = appState.terminals[sessionID]?.first?.id
