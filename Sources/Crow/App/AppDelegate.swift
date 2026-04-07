@@ -233,7 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Start socket server
-        startSocketServer(store: store, devRoot: devRoot)
+        startSocketServer(store: store, devRoot: devRoot, sessionService: service)
 
         NSLog("[Crow] Main app launch complete — creating window")
 
@@ -383,10 +383,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Validation.isValidSessionName(name)
     }
 
-    private func startSocketServer(store: JSONStore, devRoot: String) {
+    private func startSocketServer(store: JSONStore, devRoot: String, sessionService: SessionService) {
         let capturedAppState = appState
         let capturedStore = store
         let capturedNotifManager = notificationManager
+        let capturedService = sessionService
 
         let router = CommandRouter(handlers: [
             "new-session": { @Sendable params in
@@ -474,17 +475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     throw RPCError.invalidParams("session_id required")
                 }
                 guard id != AppState.managerSessionID else { throw RPCError.applicationError("Cannot delete manager session") }
-                await MainActor.run {
-                    capturedAppState.sessions.removeAll { $0.id == id }
-                    capturedAppState.worktrees.removeValue(forKey: id)
-                    capturedAppState.links.removeValue(forKey: id)
-                    capturedAppState.terminals.removeValue(forKey: id)
-                    capturedStore.mutate { data in
-                        data.sessions.removeAll { $0.id == id }; data.worktrees.removeAll { $0.sessionID == id }
-                        data.links.removeAll { $0.sessionID == id }; data.terminals.removeAll { $0.sessionID == id }
-                    }
-                    if capturedAppState.selectedSessionID == id { capturedAppState.selectedSessionID = capturedAppState.sessions.first?.id }
-                }
+                await capturedService.deleteSession(id: id)
                 return ["deleted": .bool(true)]
             },
             "set-ticket": { @Sendable params in
