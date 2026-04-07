@@ -10,6 +10,13 @@ import Foundation
 /// A notification only fires if the global toggle, the category toggle, **and** the
 /// per-event toggle are all enabled.
 public struct NotificationSettings: Codable, Sendable, Equatable {
+    /// Available built-in macOS system sounds.
+    public static let builtInSounds = [
+        "Basso", "Blow", "Bottle", "Frog", "Funk",
+        "Glass", "Hero", "Morse", "Ping", "Pop",
+        "Purr", "Sosumi", "Submarine", "Tink",
+    ]
+
     /// Master mute — suppresses all sounds and system notifications.
     public var globalMute: Bool
 

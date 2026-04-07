@@ -116,11 +116,16 @@ final class SessionService {
         })?.key,
            let worktree = appState.primaryWorktree(for: sessionID),
            let crowPath = HookConfigGenerator.findCrowBinary() {
-            try? HookConfigGenerator.writeHookConfig(
-                worktreePath: worktree.worktreePath,
-                sessionID: sessionID,
-                crowPath: crowPath
-            )
+            do {
+                try HookConfigGenerator.writeHookConfig(
+                    worktreePath: worktree.worktreePath,
+                    sessionID: sessionID,
+                    crowPath: crowPath
+                )
+            } catch {
+                NSLog("[SessionService] Failed to write hook config for session %@: %@",
+                      sessionID.uuidString, error.localizedDescription)
+            }
         }
 
         let claudePath = Self.findClaudeBinary() ?? "claude"

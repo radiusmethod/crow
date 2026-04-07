@@ -66,3 +66,14 @@ import Testing
     let config = decoded.config(for: .taskComplete)
     #expect(config.enabled == true)
 }
+
+// MARK: - builtInSounds
+
+@Test func builtInSoundsNonEmpty() {
+    #expect(!NotificationSettings.builtInSounds.isEmpty)
+    // Default sounds for all events should be in the built-in list
+    for event in NotificationEvent.allCases {
+        #expect(NotificationSettings.builtInSounds.contains(event.defaultSound),
+                "Default sound '\(event.defaultSound)' for \(event) not in builtInSounds")
+    }
+}

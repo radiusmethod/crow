@@ -13,11 +13,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private var hasRequestedPermission = false
 
     /// Available built-in macOS system sounds.
-    static let builtInSounds = [
-        "Basso", "Blow", "Bottle", "Frog", "Funk",
-        "Glass", "Hero", "Morse", "Ping", "Pop",
-        "Purr", "Sosumi", "Submarine", "Tink",
-    ]
+    static let builtInSounds = NotificationSettings.builtInSounds
 
     init(appState: AppState, settings: NotificationSettings) {
         self.appState = appState
@@ -32,6 +28,11 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     func updateSettings(_ settings: NotificationSettings) {
         self.settings = settings
+    }
+
+    /// Remove deduplication state for a session (call on session deletion).
+    func clearSession(_ id: UUID) {
+        lastNotified.removeValue(forKey: id)
     }
 
     // MARK: - UNUserNotificationCenterDelegate

@@ -150,7 +150,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         service.ensureManagerSession(devRoot: devRoot)
 
         // Wire closures for UI actions
-        appState.onDeleteSession = { [weak service] id in
+        appState.onDeleteSession = { [weak self, weak service] id in
+            self?.notificationManager?.clearSession(id)
             await service?.deleteSession(id: id)
         }
         appState.onCompleteSession = { [weak service] id in
@@ -644,11 +645,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                        text.contains("claude") {
                         if let worktree = capturedAppState.primaryWorktree(for: sessionID),
                            let crowPath = HookConfigGenerator.findCrowBinary() {
-                            try? HookConfigGenerator.writeHookConfig(
-                                worktreePath: worktree.worktreePath,
-                                sessionID: sessionID,
-                                crowPath: crowPath
-                            )
+                            do {
+                                try HookConfigGenerator.writeHookConfig(
+                                    worktreePath: worktree.worktreePath,
+                                    sessionID: sessionID,
+                                    crowPath: crowPath
+                                )
+                            } catch {
+                                NSLog("[AppDelegate] Failed to write hook config for session %@: %@",
+                                      sessionID.uuidString, error.localizedDescription)
+                            }
                         }
                         capturedAppState.terminalReadiness[terminalID] = .claudeLaunched
                     }

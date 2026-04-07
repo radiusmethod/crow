@@ -52,3 +52,13 @@ import Testing
     #expect(NotificationEvent.from(eventName: "PostToolUse") == nil)
     #expect(NotificationEvent.from(eventName: "") == nil)
 }
+
+// MARK: - Codable round-trip
+
+@Test func notificationEventCodableRoundTrip() throws {
+    for event in NotificationEvent.allCases {
+        let data = try JSONEncoder().encode(event)
+        let decoded = try JSONDecoder().decode(NotificationEvent.self, from: data)
+        #expect(decoded == event)
+    }
+}
