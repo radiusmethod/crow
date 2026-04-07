@@ -26,15 +26,15 @@ crow list-links --session <uuid>
 
 ### Worktree Commands
 ```
-crow add-worktree --session <uuid> --repo "name" --path "/full/path" --branch "feature/..." [--primary]
+crow add-worktree --session <uuid> --repo "name" --repo-path "/main/repo" --path "/worktree/path" --branch "feature/..." [--primary]
 crow list-worktrees --session <uuid>
 ```
 
 ### Terminal Commands
 ```
-crow new-terminal --session <uuid> --cwd "/path" [--name "Claude Code"] [--command "claude ..."]
+crow new-terminal --session <uuid> --cwd "/path" [--name "Claude Code"] [--managed]
 crow list-terminals --session <uuid>
-crow send --session <uuid> --terminal <uuid> "text to send\n"
+crow send --session <uuid> --terminal <uuid> "text to send"
 ```
 
 ## Important Notes
