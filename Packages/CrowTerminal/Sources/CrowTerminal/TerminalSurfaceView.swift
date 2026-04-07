@@ -20,6 +20,46 @@ public final class TerminalManager {
 
     private init() {}
 
+    // MARK: - Offscreen Pre-Initialization
+
+    /// Hidden window used to pre-initialize Ghostty surfaces without user interaction.
+    /// Ghostty requires an NSView in a window for `viewDidMoveToWindow()` to trigger
+    /// `createSurface()`. This offscreen window satisfies that requirement so terminals
+    /// can start in the background without the user navigating to the tab.
+    private lazy var offscreenWindow: NSWindow = {
+        let w = NSWindow(
+            contentRect: NSRect(x: -10000, y: -10000, width: 800, height: 600),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        w.isReleasedWhenClosed = false
+        // Do NOT call orderFront — window stays invisible and off-screen
+        return w
+    }()
+
+    /// Pre-initialize a terminal surface in the offscreen window.
+    /// The surface will be moved to the real view hierarchy when the user views the tab.
+    public func preInitialize(id: UUID, workingDirectory: String, command: String? = nil) {
+        guard surfaces[id] == nil else {
+            NSLog("[TerminalManager] preInitialize(\(id)) — already exists")
+            return
+        }
+        NSLog("[TerminalManager] preInitialize(\(id)) — creating surface in offscreen window")
+        let view = GhosttySurfaceView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 600),
+            workingDirectory: workingDirectory,
+            command: command
+        )
+        view.onSurfaceCreated = { [weak self] in
+            NSLog("[TerminalManager] onSurfaceCreated (offscreen) for \(id)")
+            self?.surfaceDidCreate(id: id)
+        }
+        surfaces[id] = view
+        // Adding to offscreenWindow triggers viewDidMoveToWindow → createSurface()
+        offscreenWindow.contentView?.addSubview(view)
+    }
+
     public func surface(for id: UUID, workingDirectory: String, command: String? = nil) -> GhosttySurfaceView {
         if let existing = surfaces[id] {
             NSLog("[TerminalManager] surface(for: \(id)) — returning EXISTING view")
