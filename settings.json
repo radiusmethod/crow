@@ -55,6 +55,7 @@
       "Bash(sleep:*)",
       "Read",
       "Write",
+      "Write(.claude/prompts/**)",
       "Edit",
       "Glob",
       "Grep"

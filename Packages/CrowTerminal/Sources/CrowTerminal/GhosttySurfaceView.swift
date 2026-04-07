@@ -4,6 +4,7 @@ import GhosttyKit
 /// NSView subclass that hosts a libghostty terminal surface with Metal rendering.
 public final class GhosttySurfaceView: NSView {
     private var surface: ghostty_surface_t?
+    private var pendingText: [String] = []
     private var markedTextStorage = NSMutableAttributedString()
     private var trackingArea: NSTrackingArea?
 
@@ -82,6 +83,15 @@ public final class GhosttySurfaceView: NSView {
 
         if surface != nil {
             NSLog("[Ghostty] createSurface() succeeded, hasCallback=\(onSurfaceCreated != nil)")
+            // Flush any text that arrived before the surface was ready
+            if !pendingText.isEmpty {
+                NSLog("[Ghostty] Flushing %d pending text segments", pendingText.count)
+                let pending = pendingText
+                pendingText = []
+                for text in pending {
+                    writeText(text)
+                }
+            }
             onSurfaceCreated?()
         } else {
             NSLog("[Ghostty] createSurface() FAILED — surface is nil")
@@ -359,11 +369,12 @@ public final class GhosttySurfaceView: NSView {
 
     /// Write text to the terminal's PTY input (for crow CLI `send` command).
     ///
-    /// Text segments are sent via `ghostty_surface_text`. Newlines are converted
-    /// to carriage returns (`\r`) which the PTY interprets as Enter keypresses.
+    /// Text segments are sent via `ghostty_surface_text`. Newlines are submitted
+    /// by sending both `\r` to the PTY and a key event for Return (keycode 36).
     public func writeText(_ text: String) {
         guard let surface else {
-            NSLog("[GhosttySurfaceView] writeText: no surface!")
+            NSLog("[GhosttySurfaceView] writeText: no surface yet, buffering %d chars", text.count)
+            pendingText.append(text)
             return
         }
         let parts = text.components(separatedBy: "\n")
@@ -373,11 +384,19 @@ public final class GhosttySurfaceView: NSView {
                     ghostty_surface_text(surface, ptr, UInt(part.utf8.count))
                 }
             }
-            // For each \n boundary (except the last segment), send \r to the PTY
+            // For each \n boundary (except the last segment), send Enter
             if i < parts.count - 1 {
-                "\r".withCString { ptr in
-                    ghostty_surface_text(surface, ptr, 1)
-                }
+                // Send Return as a key event. We intentionally do NOT send \r
+                // via ghostty_surface_text — for long text, the \r can race
+                // with PTY buffer processing and submit before the final
+                // characters from the preceding text call are delivered.
+                var key = ghostty_input_key_s()
+                key.action = GHOSTTY_ACTION_PRESS
+                key.mods = GHOSTTY_MODS_NONE
+                key.keycode = 36  // macOS Return key
+                _ = ghostty_surface_key(surface, key)
+                key.action = GHOSTTY_ACTION_RELEASE
+                _ = ghostty_surface_key(surface, key)
             }
         }
         NSLog("[GhosttySurfaceView] writeText: sent \(text.count) chars, \(parts.count - 1) newlines")
