@@ -557,6 +557,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         capturedAppState.terminalReadiness[terminal.id] = .uninitialized
                         TerminalManager.shared.trackReadiness(for: terminal.id)
                     }
+                    // Pre-initialize in offscreen window so shell starts immediately
+                    TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: cwd, command: command)
                     return ["terminal_id": .string(terminal.id.uuidString), "session_id": .string(idStr)]
                 }
             },

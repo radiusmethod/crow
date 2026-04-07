@@ -288,13 +288,11 @@ crow new-terminal --session {session_id} \
 # Output: {"terminal_id":"<uuid>","session_id":"..."}
 # IMPORTANT: Capture the terminal_id from the output!
 
-# 7. Switch to the new session so the terminal gets created in the UI
+# 7. Switch to the new session
 crow select-session --session {session_id}
 
-# 8. Wait for the shell to initialize (the terminal needs to be visible and ready)
-sleep 3
-
-# 9. Send the claude launch command to the terminal
+# 8. Send the claude launch command to the terminal
+#    The shell is already running (pre-initialized in background) — no sleep needed.
 #    CRITICAL: End the text with literal \n — the app converts \n to Enter.
 #    Use single quotes so the shell doesn't expand $(cat ...).
 #    Use --permission-mode plan to start Claude in plan mode.
