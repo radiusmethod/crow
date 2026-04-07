@@ -457,6 +457,26 @@ public final class GhosttySurfaceView: NSView {
     }
 }
 
+// MARK: - Accessibility
+
+extension GhosttySurfaceView {
+    public override func isAccessibilityElement() -> Bool {
+        return true
+    }
+
+    public override func accessibilityRole() -> NSAccessibility.Role? {
+        return .textArea
+    }
+
+    public override func accessibilityHelp() -> String? {
+        return "Terminal content area"
+    }
+
+    public override func accessibilitySelectedTextRange() -> NSRange {
+        return selectedRange()
+    }
+}
+
 // MARK: - NSTextInputClient (separate extension to avoid concurrency issues)
 
 extension GhosttySurfaceView: @preconcurrency NSTextInputClient {
