@@ -36,6 +36,20 @@ public struct SessionListView: View {
                     .listRowBackground(Color.clear)
             }
 
+            // Attention section (sessions needing user input)
+            if !appState.attentionSessions.isEmpty {
+                SectionDivider(title: "Attention", count: appState.attentionSessions.count)
+                ForEach(filteredSessions(appState.attentionSessions)) { session in
+                    SessionRow(session: session, appState: appState)
+                        .tag(session.id)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .contextMenu {
+                            sessionContextMenu(session)
+                        }
+                }
+            }
+
             // Active sessions
             if !appState.activeSessions.isEmpty {
                 SectionDivider(title: "Active")
@@ -170,16 +184,27 @@ struct SidebarBrandmark: View {
 /// Uppercase section label used to group sessions in the sidebar.
 struct SectionDivider: View {
     let title: String
+    var count: Int? = nil
 
     var body: some View {
-        Text(title)
-            .font(.system(size: 10, weight: .bold))
-            .tracking(1.5)
-            .textCase(.uppercase)
-            .foregroundStyle(CorveilTheme.goldDark)
-            .padding(.top, 10)
-            .padding(.bottom, 2)
-            .listRowSeparator(.hidden)
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 10, weight: .bold))
+                .tracking(1.5)
+                .textCase(.uppercase)
+                .foregroundStyle(CorveilTheme.goldDark)
+            if let count, count > 0 {
+                Text("\(count)")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(.orange))
+            }
+        }
+        .padding(.top, 10)
+        .padding(.bottom, 2)
+        .listRowSeparator(.hidden)
     }
 }
 
@@ -448,7 +473,8 @@ struct SessionRow: View {
     }
 
     private var needsAttention: Bool {
-        appState.hookState(for: session.id).pendingNotification != nil
+        let state = appState.hookState(for: session.id)
+        return state.pendingNotification != nil || state.claudeState == .done
     }
 
     private var rowBackgroundColor: Color {

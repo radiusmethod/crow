@@ -189,12 +189,56 @@ public final class AppState {
         return sessions.first { $0.id == selectedSessionID }
     }
 
+    // MARK: - Attention Section
+
+    /// Sessions that need user attention (permission prompt, question, or task done).
+    /// Sorted by longest-waiting first.
+    public var attentionSessions: [Session] {
+        sessions
+            .filter { session in
+                guard session.id != Self.managerSessionID else { return false }
+                guard session.status != .completed && session.status != .archived else { return false }
+                let state = hookState(for: session.id)
+                return state.pendingNotification != nil || state.claudeState == .done
+            }
+            .sorted { a, b in
+                attentionTimestamp(for: a.id) < attentionTimestamp(for: b.id)
+            }
+    }
+
+    /// IDs of sessions currently in the Attention section, for filtering from normal groups.
+    public var attentionSessionIDs: Set<UUID> {
+        Set(attentionSessions.map(\.id))
+    }
+
+    /// Timestamp when a session entered its attention-worthy state.
+    private func attentionTimestamp(for sessionID: UUID) -> Date {
+        let state = hookState(for: sessionID)
+        if let notification = state.pendingNotification {
+            return notification.timestamp
+        }
+        if let lastEvent = state.hookEvents.last {
+            return lastEvent.timestamp
+        }
+        return .distantFuture
+    }
+
+    // MARK: - Session Groups
+
     public var activeSessions: [Session] {
-        sessions.filter { $0.status == .active && $0.id != Self.managerSessionID && $0.kind == .work }
+        let attentionIDs = attentionSessionIDs
+        return sessions.filter {
+            $0.status == .active && $0.id != Self.managerSessionID && $0.kind == .work
+            && !attentionIDs.contains($0.id)
+        }
     }
 
     public var inReviewSessions: [Session] {
-        sessions.filter { $0.status == .inReview && $0.id != Self.managerSessionID }
+        let attentionIDs = attentionSessionIDs
+        return sessions.filter {
+            $0.status == .inReview && $0.id != Self.managerSessionID
+            && !attentionIDs.contains($0.id)
+        }
     }
 
     public var completedSessions: [Session] {
@@ -202,7 +246,11 @@ public final class AppState {
     }
 
     public var reviewSessions: [Session] {
-        sessions.filter { $0.kind == .review && $0.status != .completed && $0.status != .archived }
+        let attentionIDs = attentionSessionIDs
+        return sessions.filter {
+            $0.kind == .review && $0.status != .completed && $0.status != .archived
+            && !attentionIDs.contains($0.id)
+        }
     }
 
     public func worktrees(for sessionID: UUID) -> [SessionWorktree] {
@@ -275,8 +323,10 @@ public final class AppState {
     }
 
     /// Find the active session linked to a given issue (by matching ticket URL).
+    /// Checks all sessions (not just the filtered `activeSessions` group) so that
+    /// sessions temporarily in the Attention section are still found.
     public func activeSession(for issue: AssignedIssue) -> Session? {
-        activeSessions.first { $0.ticketURL == issue.url }
+        sessions.first { $0.status == .active && $0.ticketURL == issue.url }
     }
 
     /// Maps `.unknown` project status to `.backlog` for display purposes.
