@@ -373,7 +373,7 @@ final class SessionService {
 
                     // This is an orphan — recover it
                     NSLog("[SessionService] Recovered orphan worktree: \(wt.path) branch=\(wt.branch)")
-                    await recoverOrphan(worktreePath: wt.path, branch: wt.branch, repoName: repoDir, repoPath: repoPath, workspace: wsDir)
+                    await recoverOrphan(worktreePath: wt.path, branch: wt.branch, repoName: repoDir, repoPath: repoPath)
                 }
             }
         }
@@ -414,7 +414,7 @@ final class SessionService {
         return entries
     }
 
-    private func recoverOrphan(worktreePath: String, branch: String, repoName: String, repoPath: String, workspace: String) async {
+    private func recoverOrphan(worktreePath: String, branch: String, repoName: String, repoPath: String) async {
         let dirName = (worktreePath as NSString).lastPathComponent
 
         // Try to parse ticket number from directory name (e.g., "citadel-209-slug" → 209)
@@ -477,7 +477,6 @@ final class SessionService {
             repoPath: repoPath,
             worktreePath: worktreePath,
             branch: branch,
-            workspace: workspace,
             isPrimary: true
         )
 

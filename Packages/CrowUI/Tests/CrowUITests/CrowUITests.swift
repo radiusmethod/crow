@@ -83,8 +83,7 @@ private func makeWorktree(
         repoName: repoName,
         repoPath: repoPath,
         worktreePath: worktreePath,
-        branch: branch,
-        workspace: "TestOrg"
+        branch: branch
     )
 }
 

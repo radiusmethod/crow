@@ -81,8 +81,7 @@ struct Scaffolder {
         # Crow — Manager Context
 
         See crow --help for CLI reference.
-        All crow commands require dangerouslyDisableSandbox: true.
-        All gh/glab commands require dangerouslyDisableSandbox: true.
+        All crow, gh, glab, and git worktree commands require dangerouslyDisableSandbox: true.
         Write temp files to $TMPDIR, not /tmp.
 
         ## Known Issues / Corrections
@@ -105,7 +104,7 @@ struct Scaffolder {
         This skill activates when user invokes `/crow-workspace` command.
 
         ## Important
-        All `crow` CLI commands require `dangerouslyDisableSandbox: true`.
+        All `crow` CLI and `git worktree` commands require `dangerouslyDisableSandbox: true`.
         See the CLAUDE.md in this directory for the full crow CLI reference.
         """
     }
