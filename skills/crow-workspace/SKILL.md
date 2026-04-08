@@ -168,30 +168,16 @@ WRONG: {devRoot}/{workspace}/worktrees/{repo}-{feature}
 ```
 Branch: `feature/{feature-slug}`
 
-### Git Commands (Provider-Agnostic)
+### Git Commands
 
-```bash
-git -C {repo_path} fetch origin
-git -C {repo_path} ls-remote --heads origin feature/{name}
+Git worktree creation is handled by `setup.sh`. The script automatically selects the correct flags:
+- **PR branch**: `--track origin/{pr_branch}`
+- **Existing remote branch**: `--track origin/{branch}`
+- **New branch**: `--no-track origin/main`
 
-# Existing remote branch (no PR):
-git -C {repo_path} worktree add {path} \
-  -b feature/{name} \
-  --track origin/feature/{name}
+Always uses `-b` to create a local branch (avoids detached HEAD). If the branch already exists locally, the script deletes it and retries.
 
-# New branch (no PR, no remote branch):
-git -C {repo_path} worktree add {path} \
-  -b feature/{name} \
-  --no-track \
-  origin/main
-
-# PR branch (existing PR detected):
-git -C {repo_path} worktree add {path} \
-  -b {pr_branch} \
-  --track origin/{pr_branch}
-```
-
-**Important:** Always use `-b` to create a local branch. Without it, the worktree ends up in detached HEAD state. Use `--no-track` for new branches to prevent accidental push to main.
+**Important:** Always use `--no-track` for new branches to prevent accidental push to main.
 
 ## crow Session Creation
 
@@ -209,95 +195,102 @@ This keeps session names, worktree paths, and branch names consistent.
 
 ### Complete Step-by-Step Flow
 
-> **IMPORTANT: Execute steps 1-9 SEQUENTIALLY — one at a time, never in parallel.**
-> Parallel calls cascade on failure (a failed `add-worktree` cancels sibling `add-link` calls).
+After the LLM resolves names (slug, branch, worktree path, session name), detects any existing PR, and composes the prompt content, the setup is executed by calling `setup.sh`.
+
+> **IMPORTANT:** All `crow`, `gh`, `glab`, and `git` commands require `dangerouslyDisableSandbox: true`. The `setup.sh` call itself must use `dangerouslyDisableSandbox: true` since it runs these commands internally.
+
+#### Step 1: Write the prompt file
+
+The LLM writes the prompt content (see template below) to a file:
 
 ```bash
-# 1. Create session (parse session_id from JSON output)
-#    The name MUST match the worktree directory name
-crow new-session --name "{repo}-{ticket_number}-{slug}"
-# Output: {"session_id":"<uuid>","name":"crow-51-drag-drop-photo"}
-# >>> Wait for completion — parse session_id before proceeding <<<
-
-# 2. Set ticket metadata (only if URL was provided)
-crow set-ticket --session {session_id} \
-  --url "{ticket_url}" \
-  --title "{ticket_title}" \
-  --number {ticket_number}
-# >>> Wait for completion <<<
-
-# 3. Register each worktree (after creating with git)
-#    IMPORTANT: --repo-path is the MAIN repo path (e.g., .../citadel)
-#    --path is the WORKTREE path (e.g., .../citadel-197-slug)
-crow add-worktree --session {session_id} \
-  --repo "{repo_name}" \
-  --repo-path "{main_repo_path}" \
-  --path "{worktree_path}" \
-  --branch "feature/{name}" \
-  --primary   # for the first/main repo
-# >>> Wait for completion <<<
-
-# 4. Add ticket link (only if URL was provided)
-crow add-link --session {session_id} \
-  --label "Issue" \
-  --url "{ticket_url}" \
-  --type ticket
-# >>> Wait for completion <<<
-
-# 4a. Add PR link (only if an existing PR was detected)
-crow add-link --session {session_id} \
-  --label "PR #{pr_number}" \
-  --url "{pr_url}" \
-  --type pr
-# >>> Wait for completion <<<
-
-# 4b. Auto-assign and set project status (GitHub issues only, best-effort)
-#     All gh commands require dangerouslyDisableSandbox: true.
-#     Don't fail the workspace setup if these error.
-#
-#     Step A: Assign yourself to the issue
-gh issue edit {ticket_url} --add-assignee @me
-#
-#     Step B: Set the issue's project status to "In progress"
-#     This requires multiple GraphQL calls chained together:
-#     1. Get the projectItem ID and project ID for the issue
-#     2. Get the Status field ID from the project
-#     3. Get the option ID for "In progress" from the Status field options
-#     4. Mutate the field value
-#
-#     Use gh api graphql with --jq to extract values. Chain them:
-#       - query repository.issue.projectItems.nodes[0] for {itemId, project.id}
-#       - query node(id: projectId).field(name: "Status") for fieldId and options
-#       - find the option where name == "In progress" (case-sensitive, match exactly)
-#       - call updateProjectV2ItemFieldValue mutation
-#     If the issue is not on any project, skip silently.
-
-# 5. Write prompt to temp file
-#    IMPORTANT: Write to {devRoot}/.claude/prompts/ — NOT $TMPDIR (which differs per session)
-#    The prompt MUST start with /plan to enter plan mode
 mkdir -p {devRoot}/.claude/prompts
 cat > {devRoot}/.claude/prompts/crow-prompt-{session_name}.md << 'PROMPT'
 {prompt content — see template below}
 PROMPT
+```
 
-# 6. Create a shell terminal in the primary worktree (NO command — just a shell)
-crow new-terminal --session {session_id} \
-  --cwd "{primary_worktree_path}" \
-  --name "Claude Code" \
-  --managed
-# Output: {"terminal_id":"<uuid>","session_id":"..."}
-# IMPORTANT: Capture the terminal_id from the output!
+#### Step 2: Run setup.sh
 
-# 7. Switch to the new session
-crow select-session --session {session_id}
+```bash
+.claude/skills/crow-workspace/setup.sh \
+  --dev-root "{devRoot}" \
+  --workspace "{workspace}" \
+  --repo "{repo}" \
+  --repo-path "{repo_path}" \
+  --slug "{slug}" \
+  --branch "{branch}" \
+  --worktree-path "{worktree_path}" \
+  --session-name "{session_name}" \
+  --provider "{provider}" \
+  --cli "{cli}" \
+  --ticket-url "{ticket_url}" \
+  --ticket-title "{ticket_title}" \
+  --ticket-number {ticket_number} \
+  --prompt-content "{devRoot}/.claude/prompts/crow-prompt-{session_name}.md" \
+  --claude-binary "$(which claude)" \
+  --primary
+```
 
-# 8. Send the claude launch command to the terminal
-#    The shell is already running (pre-initialized in background) — no sleep needed.
-#    CRITICAL: End the text with literal \n — the app converts \n to Enter.
-#    Use single quotes so the shell doesn't expand $(cat ...).
-#    Use --permission-mode plan to start Claude in plan mode.
-#    Use full path to claude binary.
-crow send --session {session_id} --terminal {terminal_id} 'cd {primary_worktree_path} && {claude_binary_path} --permission-mode plan "$(cat {devRoot}/.claude/prompts/crow-prompt-{session_name}.md)"\n'
+If an existing PR was detected, also pass:
+```
+  --pr-number {pr_number} \
+  --pr-url "{pr_url}" \
+  --pr-branch "{pr_branch}"
+```
+
+For GitLab, also pass:
+```
+  --host "{gitlab_host}"
+```
+
+#### Step 3: Parse the result
+
+The script outputs JSON to stdout. On success:
+```json
+{
+  "status": "ok",
+  "session_id": "uuid",
+  "terminal_id": "uuid",
+  "worktree_path": "/path/to/worktree",
+  "branch": "feature/name"
+}
+```
+
+On failure:
+```json
+{
+  "status": "error",
+  "step": "git_worktree_add",
+  "message": "error details",
+  "partial": { "session_id": "uuid-if-created" }
+}
+```
+
+If the script fails, read the error message and apply error handling (see below).
+
+#### Multi-Repo Flow
+
+For cross-workspace setups with multiple repos, call `setup.sh` once per repo:
+
+1. **First repo** (primary): Use `--primary` flag. Capture `session_id` from output.
+2. **Additional repos**: Pass `--session-id {uuid}` from the first call's output and use `--skip-launch` (Claude only launches once, in the primary worktree).
+
+```bash
+# Secondary repo (no launch, attach to existing session):
+.claude/skills/crow-workspace/setup.sh \
+  --session-id "{session_id_from_first_call}" \
+  --dev-root "{devRoot}" \
+  --workspace "{other_workspace}" \
+  --repo "{other_repo}" \
+  --repo-path "{other_repo_path}" \
+  --slug "{slug}" \
+  --branch "main" \
+  --worktree-path "{other_repo_path}" \
+  --session-name "{session_name}" \
+  --provider "{provider}" \
+  --cli "{cli}" \
+  --skip-launch
 ```
 
 ## First Prompt Template
@@ -373,19 +366,23 @@ GITLAB_HOST=gitlab.example.com glab mr view {number} --repo {org/repo} --comment
 
 ## Error Handling and Self-Correction
 
-If a `crow` command fails:
-1. Read the error message from the JSON response
-2. If the error indicates a usage problem (wrong arg format, missing param), append a one-line correction to `{devRoot}/CLAUDE.md` under "## Known Issues / Corrections"
-3. Retry with corrected command
-4. If transient error (socket unavailable), retry up to 3 times with 1s delay
+If `setup.sh` returns a JSON error (`"status": "error"`):
+1. Read the `step` and `message` fields to understand what failed
+2. If the error indicates a usage problem (wrong arg format, missing param), fix the invocation and retry
+3. If `partial.session_id` is present, the session was created before the failure — you can pass `--session-id` to retry without recreating the session
+4. If the error is in `git_worktree_add`, the branch may already exist — try with a different slug
+5. Append a one-line correction to `{devRoot}/CLAUDE.md` under "## Known Issues / Corrections"
 
 | Error | Response |
 |-------|----------|
-| Socket not found | Crow app may not be running. Inform user. |
-| Session not found | Use full UUID from new-session output, not short names |
-| Unknown workspace | Use defaults, warn user |
-| CLI not installed | Report which CLI is needed (gh, glab) |
-| No repos matched | List all repos across all workspaces |
+| `parse_args` — Missing required arguments | Check that all required flags are provided |
+| `git_fetch` — git fetch failed | Check repo path exists and has remote configured |
+| `git_worktree_add` — worktree creation failed | Branch may exist; script auto-retries after cleanup |
+| `new_session` — crow new-session failed | Crow app may not be running. Inform user. |
+| `add_worktree` — crow add-worktree failed | Use full UUID from session, check paths |
+| `new_terminal` — crow new-terminal failed | Session may not exist; check session_id |
+| `send_launch` — crow send failed | Terminal may not be ready; retry |
+| `write_prompt` — prompt file not found | Verify prompt was written before calling setup.sh |
 
 ## crow CLI Reference
 

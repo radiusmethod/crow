@@ -91,7 +91,7 @@ struct ReviewRow: View {
                     Text(request.repo)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("#\(request.prNumber)")
+                    Text("#\(String(request.prNumber))")
                         .font(.callout)
                         .fontWeight(.medium)
                     if request.isDraft {
