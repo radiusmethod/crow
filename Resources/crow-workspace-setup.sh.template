@@ -462,6 +462,12 @@ launch_claude() {
   crow select-session --session "$SESSION_ID" >/dev/null 2>&1 \
     || log "Warning: select-session failed"
 
+  # Wait for the shell to initialize in the new terminal.
+  # The terminal surface is pre-initialized by crow new-terminal, but the
+  # shell process needs time to start and display its prompt.
+  log "Waiting for shell to initialize..."
+  sleep 3
+
   # Build the prompt file path
   local prompt_path="$DEV_ROOT/.claude/prompts/crow-prompt-$SESSION_NAME.md"
 
