@@ -109,7 +109,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Create session service and hydrate state
         let service = SessionService(store: store, appState: appState)
         service.hydrateState()
-        service.wireTerminalReadiness()
         self.sessionService = service
         NSLog("[Crow] Session state hydrated (%d sessions)", appState.sessions.count)
 
