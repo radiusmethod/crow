@@ -15,7 +15,7 @@ public struct ReviewBoardView: View {
         VStack(spacing: 0) {
             reviewBoardHeader
             SectionHelpBanner(
-                description: "Sessions in review status \u{2014} find PRs and work that needs feedback.",
+                description: "PRs where your review has been requested. Quickly kick off a review session from here.",
                 storageKey: "helpDismissed_reviews"
             )
             Divider()

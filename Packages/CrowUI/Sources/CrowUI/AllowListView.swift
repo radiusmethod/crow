@@ -37,7 +37,7 @@ public struct AllowListView: View {
         VStack(spacing: 0) {
             header
             SectionHelpBanner(
-                description: "Pre-approved tool permissions so Claude Code can take actions without prompting each time.",
+                description: "Promote worktree allow-list entries to the global list so you don't have to re-approve them in future worktrees.",
                 storageKey: "helpDismissed_allowList"
             )
             Divider()
