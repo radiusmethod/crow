@@ -14,6 +14,10 @@ public struct ReviewBoardView: View {
     public var body: some View {
         VStack(spacing: 0) {
             reviewBoardHeader
+            SectionHelpBanner(
+                description: "Sessions in review status \u{2014} find PRs and work that needs feedback.",
+                storageKey: "helpDismissed_reviews"
+            )
             Divider()
             reviewList
         }

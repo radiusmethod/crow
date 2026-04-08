@@ -24,6 +24,12 @@ public struct SessionDetailView: View {
     public var body: some View {
         VStack(spacing: 0) {
             sessionHeader
+            if session.id == AppState.managerSessionID {
+                SectionHelpBanner(
+                    description: "Orchestration hub for Crow workspaces. Use /crow-workspace to set up new sessions with worktrees, ticket tracking, and auto-launched Claude Code.",
+                    storageKey: "helpDismissed_manager"
+                )
+            }
             Divider().overlay(CorveilTheme.borderSubtle)
             terminalArea
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

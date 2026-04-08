@@ -36,6 +36,10 @@ public struct AllowListView: View {
     public var body: some View {
         VStack(spacing: 0) {
             header
+            SectionHelpBanner(
+                description: "Pre-approved tool permissions so Claude Code can take actions without prompting each time.",
+                storageKey: "helpDismissed_allowList"
+            )
             Divider()
             toolbar
             Divider()
