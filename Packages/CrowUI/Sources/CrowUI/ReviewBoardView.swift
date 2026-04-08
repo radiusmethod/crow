@@ -14,6 +14,10 @@ public struct ReviewBoardView: View {
     public var body: some View {
         VStack(spacing: 0) {
             reviewBoardHeader
+            SectionHelpBanner(
+                description: "PRs where your review has been requested. Quickly kick off a review session from here.",
+                storageKey: "helpDismissed_reviews"
+            )
             Divider()
             reviewList
         }

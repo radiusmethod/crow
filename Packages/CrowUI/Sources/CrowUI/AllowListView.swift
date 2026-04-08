@@ -36,6 +36,10 @@ public struct AllowListView: View {
     public var body: some View {
         VStack(spacing: 0) {
             header
+            SectionHelpBanner(
+                description: "Promote worktree allow-list entries to the global list so you don't have to re-approve them in future worktrees.",
+                storageKey: "helpDismissed_allowList"
+            )
             Divider()
             toolbar
             Divider()
