@@ -47,6 +47,14 @@ TERMINAL_ID=""
 
 log() { echo "[setup.sh] $*" >&2; }
 
+# Extract a JSON string value by key. Handles both compact and pretty-printed JSON.
+# Usage: json_val "key" <<< "$json_string"
+json_val() {
+  local key="$1"
+  # Normalize whitespace: collapse the JSON to one line, strip spaces around : and quotes
+  tr -d '\n' | sed 's/[[:space:]]*:[[:space:]]*/:/g' | grep -o "\"$key\":\"[^\"]*\"" | cut -d'"' -f4 | head -1
+}
+
 die() {
   local step="$1" msg="$2"
   local partial=""
@@ -229,7 +237,7 @@ create_session() {
     if ! result=$(crow new-session --name "$SESSION_NAME" 2>&1); then
       die "new_session" "crow new-session failed: $result"
     fi
-    SESSION_ID=$(echo "$result" | grep -o '"session_id":"[^"]*"' | cut -d'"' -f4)
+    SESSION_ID=$(json_val "session_id" <<< "$result")
     if [[ -z "$SESSION_ID" ]]; then
       die "new_session" "Could not parse session_id from: $result"
     fi
@@ -444,7 +452,7 @@ launch_claude() {
     die "new_terminal" "crow new-terminal failed: $term_result"
   fi
 
-  TERMINAL_ID=$(echo "$term_result" | grep -o '"terminal_id":"[^"]*"' | cut -d'"' -f4)
+  TERMINAL_ID=$(json_val "terminal_id" <<< "$term_result")
   if [[ -z "$TERMINAL_ID" ]]; then
     die "new_terminal" "Could not parse terminal_id from: $term_result"
   fi
