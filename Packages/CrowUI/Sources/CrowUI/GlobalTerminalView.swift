@@ -17,6 +17,10 @@ public struct GlobalTerminalView: View {
     public var body: some View {
         VStack(spacing: 0) {
             header
+            SectionHelpBanner(
+                description: "Standalone terminals that live outside of any session. Useful for long-lived processes, monitoring, or ad-hoc shell access.",
+                storageKey: "helpDismissed_terminals"
+            )
             Divider().overlay(CorveilTheme.borderSubtle)
             terminalArea
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
