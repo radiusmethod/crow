@@ -118,29 +118,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Check for runtime dependencies (non-blocking)
         Task {
             let missing = await Task.detached {
-                var result: [String] = []
                 let tools = ["gh", "git", "claude", "glab", "code"]
-                for tool in tools {
-                    let proc = Process()
-                    proc.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-                    proc.arguments = [tool]
-                    proc.standardOutput = FileHandle.nullDevice
-                    proc.standardError = FileHandle.nullDevice
-                    do {
-                        try proc.run()
-                        proc.waitUntilExit()
-                        if proc.terminationStatus != 0 {
-                            NSLog("[Crow] Runtime dependency not found: %@", tool)
-                            result.append(tool)
-                        }
-                    } catch {
-                        NSLog("[Crow] Could not check for %@: %@", tool, error.localizedDescription)
-                        result.append(tool)
-                    }
-                }
-                return result
+                return tools.filter { !ShellEnvironment.shared.hasCommand($0) }
             }.value
             if !missing.isEmpty {
+                for tool in missing {
+                    NSLog("[Crow] Runtime dependency not found: %@", tool)
+                }
                 appState.missingDependencies = missing
             }
         }

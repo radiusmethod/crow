@@ -127,11 +127,9 @@ public actor ProviderManager {
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
-        if !env.isEmpty {
-            var environment = ProcessInfo.processInfo.environment
-            for (key, value) in env { environment[key] = value }
-            process.environment = environment
-        }
+        process.environment = env.isEmpty
+            ? ShellEnvironment.shared.env
+            : ShellEnvironment.shared.merging(env)
         process.standardOutput = pipe
         process.standardError = pipe
         try process.run()
