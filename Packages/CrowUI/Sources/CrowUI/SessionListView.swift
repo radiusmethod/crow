@@ -295,7 +295,7 @@ struct SessionRow: View {
             if hasBadges {
                 HStack(spacing: 6) {
                     if let num = session.ticketNumber {
-                        CapsuleBadge("Issue #\(num)", color: CorveilTheme.gold)
+                        CapsuleBadge("Issue #\(String(num))", color: CorveilTheme.gold)
                     }
                     if let pr = prLink {
                         PRBadge(label: pr.label, status: prStatus)

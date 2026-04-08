@@ -116,9 +116,10 @@ public final class TerminalManager {
         if monitoredTerminals.contains(id) {
             monitoredTerminals.remove(id)
             // Shell needs time to initialize after surface creation.
-            // Wait 2 seconds then mark as ready — the surface is in a window,
-            // createSurface() has spawned the shell, we just need the shell to start.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            // On app restart, multiple terminals initialize concurrently which
+            // causes shell startup to take longer than a single terminal.
+            // 5 seconds handles the common case; the TODO above tracks proper detection.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
                 guard let self else { return }
                 self.onStateChanged?(id, .shellReady)
             }
