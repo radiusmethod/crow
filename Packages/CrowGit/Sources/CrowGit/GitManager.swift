@@ -122,6 +122,7 @@ public actor GitManager {
         let stderrPipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
+        process.environment = ShellEnvironment.shared.env
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
         try process.run()
