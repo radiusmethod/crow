@@ -72,23 +72,37 @@ final class SessionService {
                     appState.autoLaunchTerminals.insert(terminal.id)
                 }
             }
-
-            // Pre-initialize all terminal surfaces in the offscreen window so
-            // Ghostty can create surfaces and spawn shells without the user
-            // navigating to each tab.
-            for terminal in terminals {
-                TerminalManager.shared.preInitialize(
-                    id: terminal.id,
-                    workingDirectory: terminal.cwd,
-                    command: terminal.command
-                )
-            }
         }
 
         // Hydrate global terminals (not tied to any session)
         let globalTerminals = data.terminals.filter { $0.sessionID == AppState.globalTerminalSessionID }
         if !globalTerminals.isEmpty {
             appState.terminals[AppState.globalTerminalSessionID] = globalTerminals
+        }
+
+        // Wire readiness callback BEFORE pre-initializing surfaces.
+        // preInitialize() triggers viewDidMoveToWindow → createSurface() → surfaceDidCreate()
+        // which fires onStateChanged synchronously. The callback must be wired first
+        // so the .created and .shellReady events are not lost.
+        wireTerminalReadiness()
+
+        // Pre-initialize all terminal surfaces in the offscreen window so
+        // Ghostty can create surfaces and spawn shells without the user
+        // navigating to each tab.
+        for session in appState.sessions {
+            if let terminals = appState.terminals[session.id] {
+                for terminal in terminals {
+                    TerminalManager.shared.preInitialize(
+                        id: terminal.id,
+                        workingDirectory: terminal.cwd,
+                        command: terminal.command
+                    )
+                }
+            }
+        }
+
+        // Pre-initialize global terminals
+        if let globalTerminals = appState.terminals[AppState.globalTerminalSessionID] {
             for terminal in globalTerminals {
                 TerminalManager.shared.preInitialize(
                     id: terminal.id,
@@ -108,13 +122,20 @@ final class SessionService {
         TerminalManager.shared.onStateChanged = { [weak self] terminalID, state in
             guard let self else { return }
             // Only update state for terminals we're tracking (work sessions, not Manager)
-            guard self.appState.terminalReadiness[terminalID] != nil else { return }
-            NSLog("[SessionService] onStateChanged: terminal=\(terminalID), state=\(state)")
+            guard let currentState = self.appState.terminalReadiness[terminalID] else { return }
+            NSLog("[SessionService] onStateChanged: terminal=\(terminalID), state=\(state), current=\(currentState)")
             switch state {
             case .created:
-                self.appState.terminalReadiness[terminalID] = .surfaceCreated
+                // Only advance forward — don't overwrite a later state
+                if currentState < .surfaceCreated {
+                    self.appState.terminalReadiness[terminalID] = .surfaceCreated
+                }
             case .shellReady:
-                self.appState.terminalReadiness[terminalID] = .shellReady
+                // Only advance forward — the `send` handler may have already
+                // set .claudeLaunched before this timer fires.
+                if currentState < .shellReady {
+                    self.appState.terminalReadiness[terminalID] = .shellReady
+                }
                 // Auto-launch Claude now that the shell is ready.
                 // Previously this was triggered by the SwiftUI view's onChange,
                 // but with offscreen pre-init the view may not be rendered yet.

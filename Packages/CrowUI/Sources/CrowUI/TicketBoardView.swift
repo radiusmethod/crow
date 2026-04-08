@@ -291,7 +291,7 @@ struct TicketCard: View {
                     .font(.caption)
                     .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textSecondary)
 
-                Text("#\(issue.number)")
+                Text("#\(String(issue.number))")
                     .font(.system(size: 12, weight: .medium))
                     .monospacedDigit()
                     .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textPrimary)
@@ -367,7 +367,7 @@ struct TicketCard: View {
         HStack(spacing: 3) {
             Image(systemName: "arrow.triangle.pull")
                 .font(.caption2)
-            Text("PR #\(number)")
+            Text("PR #\(String(number))")
                 .font(.caption2)
                 .fontWeight(.medium)
         }

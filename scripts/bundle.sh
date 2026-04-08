@@ -61,6 +61,12 @@ if [ -d "$FRAMEWORKS_DIR/ghostty-resources" ]; then
     echo "    Bundled Ghostty resources"
 fi
 
+# Copy template resources for Scaffolder (CLAUDE.md, SKILL.md, setup.sh, settings)
+for f in "$ROOT_DIR"/Resources/*.template; do
+    [ -f "$f" ] && cp "$f" "$APP_DIR/Contents/Resources/"
+done
+echo "    Bundled template resources"
+
 # TODO: Add CFBundleIconFile and bundle AppIcon.icns once icon asset pipeline is created
 
 # Create Info.plist
