@@ -5,6 +5,7 @@ import CrowUI
 import CrowPersistence
 import CrowTerminal
 import CrowIPC
+import CrowTelemetry
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -18,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var issueTracker: IssueTracker?
     private var notificationManager: NotificationManager?
     private var allowListService: AllowListService?
+    private var telemetryService: TelemetryService?
     private var devRoot: String?
     private var appConfig: AppConfig?
 
@@ -113,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.remoteControlEnabled = config.remoteControlEnabled
 
         // Create session service and hydrate state
-        let service = SessionService(store: store, appState: appState)
+        let service = SessionService(store: store, appState: appState, telemetryPort: config.telemetry.enabled ? config.telemetry.port : nil)
         service.hydrateState()
         self.sessionService = service
         NSLog("[Crow] Session state hydrated (%d sessions)", appState.sessions.count)
@@ -141,6 +143,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Wire closures for UI actions
         appState.onDeleteSession = { [weak self, weak service] id in
             self?.notificationManager?.clearSession(id)
+            if let telemetry = self?.telemetryService {
+                await telemetry.deleteSessionData(for: id)
+            }
             await service?.deleteSession(id: id)
         }
         appState.onCompleteSession = { [weak service] id in
@@ -253,6 +258,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Start socket server
         startSocketServer(store: store, devRoot: devRoot, sessionService: service)
+
+        // Start telemetry receiver if enabled
+        if config.telemetry.enabled {
+            Task {
+                do {
+                    let telemetry = try TelemetryService(
+                        port: config.telemetry.port,
+                        onDataReceived: { [weak self] sessionID in
+                            guard let self else { return }
+                            Task {
+                                guard let analytics = await self.telemetryService?.analytics(for: sessionID) else { return }
+                                self.appState.hookState(for: sessionID).analytics = analytics
+                            }
+                        }
+                    )
+                    try await telemetry.start()
+                    self.telemetryService = telemetry
+                } catch {
+                    NSLog("[Crow] Failed to start telemetry service: %@", error.localizedDescription)
+                }
+            }
+        }
 
         NSLog("[Crow] Main app launch complete — creating window")
 
@@ -954,6 +981,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Persist config in case settings changed during this session
         if let devRoot, let appConfig {
             try? ConfigStore.saveConfig(appConfig, devRoot: devRoot)
+        }
+        if let telemetry = telemetryService {
+            let semaphore = DispatchSemaphore(value: 0)
+            Task {
+                await telemetry.stop()
+                semaphore.signal()
+            }
+            _ = semaphore.wait(timeout: .now() + 2)
         }
         socketServer?.stop()
         GhosttyApp.shared.shutdown()
