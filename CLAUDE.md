@@ -79,6 +79,17 @@ Prevents accidental push to main:
 git worktree add /path -b feature/name --no-track origin/main
 ```
 
+## Concurrency Safety
+
+The crow CLI is safe for concurrent use. Multiple `crow` commands can run simultaneously without race conditions:
+
+- **Socket Server**: Each CLI connection is dispatched to GCD's global concurrent queue. Multiple connections are accepted and processed in parallel.
+- **State Mutations**: All RPC handlers use `await MainActor.run { ... }`, serializing all AppState mutations on the main thread. This prevents data races even when multiple CLI commands arrive simultaneously.
+- **Persistence**: JSONStore uses NSLock to serialize disk writes. Concurrent `mutate()` calls are safe.
+- **Git Operations**: Each `setup.sh` creates its own worktree at a unique path, its own session (unique UUID), and its own terminal. There are no shared resources between parallel workspace setups.
+
+Use `/crow-batch-workspace` to set up multiple workspaces in parallel.
+
 ## Known Issues / Corrections
 
 <!-- Auto-maintained by Claude Code during workspace setup -->

@@ -186,6 +186,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.appState.selectedSessionID = AppState.managerSessionID
         }
 
+        // Wire batch "Work on" issues action — sends multiple URLs to Manager terminal
+        appState.onBatchWorkOnIssues = { [weak self] issueURLs in
+            guard let self, let managerTerminals = self.appState.terminals[AppState.managerSessionID],
+                  let managerTerminal = managerTerminals.first else { return }
+            let urls = issueURLs.joined(separator: "\n")
+            TerminalManager.shared.send(
+                id: managerTerminal.id,
+                text: "/crow-batch-workspace\n\(urls)\n"
+            )
+            self.appState.selectedSessionID = AppState.managerSessionID
+        }
+
         // Wire "Start Review" action — creates review session for a PR
         appState.onStartReview = { [weak self] prURL in
             guard let self else { return }

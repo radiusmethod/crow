@@ -6,6 +6,8 @@ import CrowCore
 /// Full-pane ticket board shown when the Ticket Board tab is selected.
 public struct TicketBoardView: View {
     @Bindable var appState: AppState
+    @State private var isSelectionMode = false
+    @State private var selectedIssueIDs: Set<String> = []
 
     public init(appState: AppState) {
         self.appState = appState
@@ -17,7 +19,15 @@ public struct TicketBoardView: View {
             Divider().overlay(CorveilTheme.borderSubtle)
             PipelineView(appState: appState)
             Divider().overlay(CorveilTheme.borderSubtle)
-            TicketListView(appState: appState)
+            TicketListView(
+                appState: appState,
+                isSelectionMode: isSelectionMode,
+                selectedIssueIDs: $selectedIssueIDs
+            )
+
+            if isSelectionMode && !selectedIssueIDs.isEmpty {
+                batchActionBar
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(CorveilTheme.bgDeep)
@@ -42,6 +52,8 @@ public struct TicketBoardView: View {
                     .font(.caption)
                     .foregroundStyle(CorveilTheme.textSecondary)
 
+                selectToggleButton
+
                 SortMenu(sortOrder: $appState.ticketSortOrder)
             }
 
@@ -51,6 +63,84 @@ public struct TicketBoardView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(CorveilTheme.bgSurface)
+    }
+
+    private var selectToggleButton: some View {
+        Button {
+            isSelectionMode.toggle()
+            if !isSelectionMode {
+                selectedIssueIDs.removeAll()
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isSelectionMode ? "xmark" : "checkmark.circle")
+                    .font(.system(size: 10))
+                Text(isSelectionMode ? "Cancel" : "Select")
+                    .font(.caption)
+            }
+            .foregroundStyle(isSelectionMode ? .red : CorveilTheme.textSecondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelectionMode ? Color.red.opacity(0.1) : CorveilTheme.bgCard)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(isSelectionMode ? Color.red.opacity(0.3) : CorveilTheme.borderSubtle, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var batchActionBar: some View {
+        HStack(spacing: 12) {
+            Text("\(selectedIssueIDs.count) ticket\(selectedIssueIDs.count == 1 ? "" : "s") selected")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(CorveilTheme.textSecondary)
+
+            Spacer()
+
+            Button {
+                isSelectionMode = false
+                selectedIssueIDs.removeAll()
+            } label: {
+                Text("Cancel")
+                    .font(.system(size: 13))
+                    .foregroundStyle(CorveilTheme.textSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                let urls = appState.assignedIssues
+                    .filter { selectedIssueIDs.contains($0.id) }
+                    .map(\.url)
+                appState.onBatchWorkOnIssues?(urls)
+                selectedIssueIDs.removeAll()
+                isSelectionMode = false
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 10))
+                    Text("Start Working (\(selectedIssueIDs.count))")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(CorveilTheme.gold)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(CorveilTheme.bgSurface)
+        .overlay(alignment: .top) {
+            Divider().overlay(CorveilTheme.borderSubtle)
+        }
     }
 }
 
@@ -214,6 +304,8 @@ struct PipelineSegment: View {
 /// Scrollable list of ticket cards, filtered by the selected pipeline stage.
 struct TicketListView: View {
     @Bindable var appState: AppState
+    var isSelectionMode: Bool
+    @Binding var selectedIssueIDs: Set<String>
 
     var body: some View {
         let issues = appState.filteredSortedIssues
@@ -226,7 +318,16 @@ struct TicketListView: View {
                         TicketCard(
                             issue: issue,
                             appState: appState,
-                            isDone: issue.projectStatus == .done
+                            isDone: issue.projectStatus == .done,
+                            isSelectionMode: isSelectionMode,
+                            isSelected: selectedIssueIDs.contains(issue.id),
+                            onToggleSelection: {
+                                if selectedIssueIDs.contains(issue.id) {
+                                    selectedIssueIDs.remove(issue.id)
+                                } else {
+                                    selectedIssueIDs.insert(issue.id)
+                                }
+                            }
                         )
                     }
                 }
@@ -278,60 +379,73 @@ struct TicketCard: View {
     let issue: AssignedIssue
     @Bindable var appState: AppState
     let isDone: Bool
+    var isSelectionMode: Bool = false
+    var isSelected: Bool = false
+    var onToggleSelection: (() -> Void)?
 
     private var linkedSession: Session? {
         appState.activeSession(for: issue)
     }
 
+    private var isSelectable: Bool {
+        linkedSession == nil && !isDone
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Row 1: Repo + issue number + PR badge + timestamp
-            HStack(spacing: 6) {
-                Text(issue.repo)
-                    .font(.caption)
-                    .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textSecondary)
-
-                Text("#\(String(issue.number))")
-                    .font(.system(size: 12, weight: .medium))
-                    .monospacedDigit()
-                    .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textPrimary)
-
-                if let prNum = issue.prNumber {
-                    ticketPRBadge(number: prNum, url: issue.prURL)
-                }
-
-                Spacer()
-
-                if isDone {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green.opacity(0.6))
-                }
-
-                if let date = issue.updatedAt {
-                    Text(date, style: .relative)
-                        .font(.caption2)
-                        .foregroundStyle(CorveilTheme.textMuted)
-                }
+        HStack(spacing: 8) {
+            if isSelectionMode {
+                selectionIndicator
             }
 
-            // Row 2: Title
-            Text(issue.title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textPrimary)
-                .lineLimit(2)
+            VStack(alignment: .leading, spacing: 6) {
+                // Row 1: Repo + issue number + PR badge + timestamp
+                HStack(spacing: 6) {
+                    Text(issue.repo)
+                        .font(.caption)
+                        .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textSecondary)
 
-            // Row 3: Labels + status badge + session link
-            HStack(spacing: 6) {
-                if !issue.labels.isEmpty {
-                    labelRow
+                    Text("#\(String(issue.number))")
+                        .font(.system(size: 12, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textPrimary)
+
+                    if let prNum = issue.prNumber {
+                        ticketPRBadge(number: prNum, url: issue.prURL)
+                    }
+
+                    Spacer()
+
+                    if isDone {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green.opacity(0.6))
+                    }
+
+                    if let date = issue.updatedAt {
+                        Text(date, style: .relative)
+                            .font(.caption2)
+                            .foregroundStyle(CorveilTheme.textMuted)
+                    }
                 }
 
-                statusBadge
+                // Row 2: Title
+                Text(issue.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textPrimary)
+                    .lineLimit(2)
 
-                Spacer()
+                // Row 3: Labels + status badge + session link
+                HStack(spacing: 6) {
+                    if !issue.labels.isEmpty {
+                        labelRow
+                    }
 
-                worktreeAction
+                    statusBadge
+
+                    Spacer()
+
+                    worktreeAction
+                }
             }
         }
         .padding(.horizontal, 10)
@@ -345,6 +459,12 @@ struct TicketCard: View {
                 )
         )
         .opacity(isDone ? 0.7 : 1.0)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if isSelectionMode && isSelectable {
+                onToggleSelection?()
+            }
+        }
     }
 
     private var cardBackground: Color {
@@ -355,6 +475,9 @@ struct TicketCard: View {
     }
 
     private var cardBorder: Color {
+        if isSelectionMode && isSelected {
+            return CorveilTheme.gold.opacity(0.6)
+        }
         if linkedSession != nil {
             return Color.green.opacity(0.2)
         }
@@ -362,6 +485,13 @@ struct TicketCard: View {
     }
 
     // MARK: - Subviews
+
+    private var selectionIndicator: some View {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.system(size: 18))
+            .foregroundStyle(isSelected ? CorveilTheme.gold : CorveilTheme.textMuted.opacity(0.4))
+            .opacity(isSelectable ? 1.0 : 0.3)
+    }
 
     private func ticketPRBadge(number: Int, url: String?) -> some View {
         HStack(spacing: 3) {
@@ -412,7 +542,9 @@ struct TicketCard: View {
 
     @ViewBuilder
     private var worktreeAction: some View {
-        if let session = linkedSession {
+        if isSelectionMode {
+            EmptyView()
+        } else if let session = linkedSession {
             Button {
                 appState.selectedSessionID = session.id
             } label: {

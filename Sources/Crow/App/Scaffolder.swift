@@ -25,6 +25,9 @@ struct Scaffolder {
         let reviewSkillsDir = (claudeDir as NSString).appendingPathComponent("skills/crow-review-pr")
         try fm.createDirectory(atPath: reviewSkillsDir, withIntermediateDirectories: true)
 
+        let batchSkillsDir = (claudeDir as NSString).appendingPathComponent("skills/crow-batch-workspace")
+        try fm.createDirectory(atPath: batchSkillsDir, withIntermediateDirectories: true)
+
         // Create crow-reviews directory for PR review clones
         let reviewsDir = (devRoot as NSString).appendingPathComponent("crow-reviews")
         try fm.createDirectory(atPath: reviewsDir, withIntermediateDirectories: true)
@@ -70,6 +73,11 @@ struct Scaffolder {
         let reviewSkillPath = (reviewSkillsDir as NSString).appendingPathComponent("SKILL.md")
         let reviewSkillTemplate = Self.bundledReviewSkill()
         try reviewSkillTemplate.write(toFile: reviewSkillPath, atomically: true, encoding: .utf8)
+
+        // Always overwrite the batch-workspace skill with the latest version
+        let batchSkillPath = (batchSkillsDir as NSString).appendingPathComponent("SKILL.md")
+        let batchSkillTemplate = Self.bundledBatchSkill()
+        try batchSkillTemplate.write(toFile: batchSkillPath, atomically: true, encoding: .utf8)
 
         // Always overwrite settings.json (permissions for crow, gh, git commands)
         let settingsPath = (claudeDir as NSString).appendingPathComponent("settings.json")
@@ -160,6 +168,27 @@ struct Scaffolder {
 
         ## Important
         All `gh` commands require `dangerouslyDisableSandbox: true`.
+        """
+    }
+
+    /// The crow-batch-workspace SKILL.md template bundled with the app.
+    static func bundledBatchSkill() -> String {
+        if let content = loadFromRepo("skills/crow-batch-workspace/SKILL.md") {
+            return content
+        }
+        if let url = Bundle.main.url(forResource: "crow-batch-workspace-SKILL.md", withExtension: "template"),
+           let content = try? String(contentsOf: url) {
+            return content
+        }
+        return """
+        # Crow Batch Workspace Setup Skill
+
+        ## Activation
+        This skill activates when user invokes `/crow-batch-workspace` command.
+
+        ## Important
+        All `crow` CLI and `git worktree` commands require `dangerouslyDisableSandbox: true`.
+        See the CLAUDE.md in this directory for the full crow CLI reference.
         """
     }
 
