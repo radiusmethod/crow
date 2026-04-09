@@ -134,6 +134,9 @@ public final class AppState {
     /// Called when user clicks "Work on" for an assigned issue.
     public var onWorkOnIssue: ((String) -> Void)?  // receives issue URL
 
+    /// Called when user clicks "Start Working" for multiple selected issues (batch mode).
+    public var onBatchWorkOnIssues: (([String]) -> Void)?  // receives array of issue URLs
+
     /// Called when user clicks "Start Review" for a PR review request.
     public var onStartReview: ((String) -> Void)?  // receives PR URL
 
