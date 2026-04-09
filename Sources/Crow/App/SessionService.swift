@@ -9,7 +9,7 @@ import CrowTerminal
 final class SessionService {
     private let store: JSONStore
     private let appState: AppState
-    private let telemetryPort: UInt16?
+    let telemetryPort: UInt16?
 
     init(store: JSONStore, appState: AppState, telemetryPort: UInt16? = nil) {
         self.store = store
