@@ -35,8 +35,9 @@ crow list-worktrees --session <uuid>
 
 ### Terminal Commands
 ```
-crow new-terminal --session <uuid> --cwd "/path" [--name "Claude Code"] [--command "claude ..."]
+crow new-terminal --session <uuid> --cwd "/path" [--name "Claude Code"] [--command "claude ..."] [--managed]
 crow list-terminals --session <uuid>
+crow close-terminal --session <uuid> --terminal <uuid>
 crow send --session <uuid> --terminal <uuid> "text to send"
 ```
 
