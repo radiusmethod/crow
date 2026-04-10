@@ -367,7 +367,7 @@ final class IssueTracker {
             do {
                 output = try await shell(
                     "gh", "pr", "view", prLink.url,
-                    "--json", "state,mergeable,reviewDecision,statusCheckRollup"
+                    "--json", "state,mergeable,reviewDecision,statusCheckRollup,latestReviews"
                 )
             } catch {
                 print("[IssueTracker] fetchPRStatuses: failed for \(prLink.url): \(error)")
@@ -398,14 +398,26 @@ final class IssueTracker {
                 }
             }
 
-            // Parse review status
-            let reviewStatus: PRStatus.ReviewStatus
+            // Parse review status — reviewDecision reflects branch protection rules,
+            // so fall back to latestReviews for repos without required-reviews protection.
+            var reviewStatus: PRStatus.ReviewStatus
             switch json["reviewDecision"] as? String {
             case "APPROVED": reviewStatus = .approved
             case "CHANGES_REQUESTED": reviewStatus = .changesRequested
             case "REVIEW_REQUIRED": reviewStatus = .reviewRequired
             case "": reviewStatus = .reviewRequired  // empty string means no reviews yet
             default: reviewStatus = .unknown
+            }
+
+            // When reviewDecision is empty (no branch protection), derive from actual reviews
+            if reviewStatus == .reviewRequired || reviewStatus == .unknown,
+               let reviews = json["latestReviews"] as? [[String: Any]], !reviews.isEmpty {
+                let states = reviews.compactMap { $0["state"] as? String }
+                if states.contains("CHANGES_REQUESTED") {
+                    reviewStatus = .changesRequested
+                } else if states.contains("APPROVED") {
+                    reviewStatus = .approved
+                }
             }
 
             // Parse merge status — check PR state first for merged
