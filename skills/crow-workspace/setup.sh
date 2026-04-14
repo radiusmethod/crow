@@ -55,6 +55,24 @@ json_val() {
   tr -d '\n' | sed 's/[[:space:]]*:[[:space:]]*/:/g' | grep -o "\"$key\":\"[^\"]*\"" | cut -d'"' -f4 | head -1
 }
 
+# POSIX single-quote an arg so it's safe to interpolate into a shell command.
+# Mirrors Swift's shellQuote() in ClaudeLaunchArgs: wraps value in '...' and
+# escapes embedded single-quotes as '\''.
+posix_quote() {
+  local s=${1//\'/\'\\\'\'}
+  printf "'%s'" "$s"
+}
+
+# Read the global remoteControlEnabled flag from {devRoot}/.claude/config.json.
+# Returns 0 if true, 1 otherwise. Missing file / malformed JSON / missing
+# key all default to 1 (off), matching AppConfig's decodeIfPresent behavior.
+is_remote_control_enabled() {
+  local config_path="$DEV_ROOT/.claude/config.json"
+  [[ -f "$config_path" ]] || return 1
+  tr -d '\n' < "$config_path" \
+    | grep -qE '"remoteControlEnabled"[[:space:]]*:[[:space:]]*true'
+}
+
 die() {
   local step="$1" msg="$2"
   local partial=""
@@ -473,7 +491,12 @@ launch_claude() {
 
   # Send launch command
   log "Launching Claude Code..."
-  local send_text="cd $WORKTREE_PATH && $claude_bin --permission-mode plan \"\$(cat $prompt_path)\"\\n"
+  local rc_args=""
+  if is_remote_control_enabled; then
+    rc_args=" --rc --name $(posix_quote "$SESSION_NAME")"
+    log "Remote control enabled — launching with --rc --name '$SESSION_NAME'"
+  fi
+  local send_text="cd $WORKTREE_PATH && $claude_bin --permission-mode plan$rc_args \"\$(cat $prompt_path)\"\\n"
   if ! crow send --session "$SESSION_ID" --terminal "$TERMINAL_ID" "$send_text" >/dev/null 2>&1; then
     die "send_launch" "crow send failed"
   fi
