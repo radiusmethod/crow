@@ -266,11 +266,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainWindow.title = "Crow"
         mainWindow.minSize = NSSize(width: 800, height: 500)
         mainWindow.contentView = hostingView
+        // Hard cap window size to the visible screen (menu-bar and dock excluded).
+        // This prevents SwiftUI content min-size propagation from growing the
+        // window past the screen when tabs with .fixedSize content switch in.
+        if let screen = mainWindow.screen ?? NSScreen.main {
+            mainWindow.maxSize = screen.visibleFrame.size
+        }
         mainWindow.center()
         // Set autosave name after center() so a saved frame takes precedence
         mainWindow.setFrameAutosaveName("MainWindow")
         mainWindow.makeKeyAndOrderFront(nil)
         self.window = mainWindow
+
+        // Update maxSize when displays change (external monitor plug/unplug,
+        // resolution change, etc.) so the cap matches the current screen.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let window = self?.window,
+                      let screen = window.screen ?? NSScreen.main else { return }
+                window.maxSize = screen.visibleFrame.size
+            }
+        }
 
         // Set up Settings menu item
         setupMenu()

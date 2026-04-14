@@ -22,7 +22,8 @@ public struct SectionHelpBanner: View {
                 Text(description)
                     .font(.caption)
                     .foregroundStyle(CorveilTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(3)
+                    .truncationMode(.tail)
 
                 Spacer()
 
