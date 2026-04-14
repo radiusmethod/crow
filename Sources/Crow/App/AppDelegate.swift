@@ -190,10 +190,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.onBatchWorkOnIssues = { [weak self] issueURLs in
             guard let self, let managerTerminals = self.appState.terminals[AppState.managerSessionID],
                   let managerTerminal = managerTerminals.first else { return }
-            let urls = issueURLs.joined(separator: "\n")
+            let urls = issueURLs.joined(separator: " ")
             TerminalManager.shared.send(
                 id: managerTerminal.id,
-                text: "/crow-batch-workspace\n\(urls)\n"
+                text: "/crow-batch-workspace \(urls)\n"
             )
             self.appState.selectedSessionID = AppState.managerSessionID
         }
