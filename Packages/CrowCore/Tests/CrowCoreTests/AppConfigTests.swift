@@ -38,6 +38,16 @@ import Testing
     #expect(config.defaults.branchPrefix == "feature/")
     #expect(config.notifications.globalMute == false)
     #expect(config.sidebar.hideSessionDetails == false)
+    #expect(config.remoteControlEnabled == false)
+}
+
+@Test func appConfigRemoteControlRoundTrip() throws {
+    var config = AppConfig()
+    config.remoteControlEnabled = true
+
+    let data = try JSONEncoder().encode(config)
+    let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
+    #expect(decoded.remoteControlEnabled == true)
 }
 
 @Test func appConfigDecodeWithPartialKeys() throws {
