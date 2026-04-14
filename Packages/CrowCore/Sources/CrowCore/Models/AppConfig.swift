@@ -158,7 +158,7 @@ public struct TelemetryConfig: Codable, Sendable, Equatable {
     /// Port for the OTLP HTTP receiver (default: 4318).
     public var port: UInt16
 
-    public init(enabled: Bool = true, port: UInt16 = 4318) {
+    public init(enabled: Bool = false, port: UInt16 = 4318) {
         self.enabled = enabled
         self.port = port
     }
