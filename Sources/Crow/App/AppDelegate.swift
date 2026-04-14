@@ -106,16 +106,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let store = JSONStore()
         self.store = store
 
+        // Mirror the remote-control preference to AppState so hydrate + launch
+        // paths can read the current value without a config round-trip. Must be
+        // set before hydrateState so the Manager terminal's stored command can
+        // be rebuilt to include (or drop) `--rc` before its surface is pre-initialized.
+        appState.remoteControlEnabled = config.remoteControlEnabled
+
         // Create session service and hydrate state
         let service = SessionService(store: store, appState: appState)
         service.hydrateState()
         self.sessionService = service
         NSLog("[Crow] Session state hydrated (%d sessions)", appState.sessions.count)
-
-        // Mirror the remote-control preference to AppState so launch paths
-        // can read the current value without a config round-trip. Must happen
-        // before ensureManagerSession (below) since that path reads the flag.
-        appState.remoteControlEnabled = config.remoteControlEnabled
 
         // Detect orphaned worktrees (runs async, updates UI when done)
         Task { await service.detectOrphanedWorktrees() }

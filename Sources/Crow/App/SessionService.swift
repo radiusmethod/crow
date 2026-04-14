@@ -61,6 +61,29 @@ final class SessionService {
                         )
                     }
                 }
+            } else {
+                // Manager terminal: rebuild its claude command to match the
+                // current remoteControlEnabled preference. Unlike worker sessions
+                // the Manager launches claude directly as the shell command, so
+                // the stored string needs to be correct before preInitialize runs.
+                let claudePath = Self.findClaudeBinary() ?? "claude"
+                let rcEnabled = appState.remoteControlEnabled
+                let managerCommand = claudePath + ClaudeLaunchArgs.argsSuffix(
+                    remoteControl: rcEnabled, sessionName: "Manager"
+                )
+                for i in terminals.indices {
+                    if let cmd = terminals[i].command, cmd.contains("claude") {
+                        terminals[i] = SessionTerminal(
+                            id: terminals[i].id, sessionID: terminals[i].sessionID,
+                            name: terminals[i].name, cwd: terminals[i].cwd,
+                            command: managerCommand, isManaged: terminals[i].isManaged,
+                            createdAt: terminals[i].createdAt
+                        )
+                        if rcEnabled {
+                            appState.remoteControlActiveTerminals.insert(terminals[i].id)
+                        }
+                    }
+                }
             }
             appState.terminals[session.id] = terminals
 
