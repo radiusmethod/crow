@@ -7,6 +7,7 @@ import CrowCore
 /// and Notifications (global + per-event config). Every change is persisted immediately
 /// via the `onSave` callback — there is no explicit "Apply" button.
 public struct SettingsView: View {
+    let appState: AppState
     @State var devRoot: String
     @State var config: AppConfig
     @State private var isAddingWorkspace = false
@@ -15,9 +16,10 @@ public struct SettingsView: View {
     public var onSave: ((String, AppConfig) -> Void)?
     public var onRescaffold: ((String) -> Void)?
 
-    public init(devRoot: String, config: AppConfig,
+    public init(appState: AppState, devRoot: String, config: AppConfig,
                 onSave: ((String, AppConfig) -> Void)? = nil,
                 onRescaffold: ((String) -> Void)? = nil) {
+        self.appState = appState
         self._devRoot = State(initialValue: devRoot)
         self._config = State(initialValue: config)
         self.onSave = onSave
@@ -64,8 +66,28 @@ public struct SettingsView: View {
 
     // MARK: - General Tab
 
+    @ViewBuilder
+    private var githubScopeWarningBanner: some View {
+        if let warning = appState.githubScopeWarning {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(warning)
+                    .font(.caption)
+                    .textSelection(.enabled)
+                Spacer()
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.12))
+            .cornerRadius(6)
+        }
+    }
+
     private var generalTab: some View {
         Form {
+            if appState.githubScopeWarning != nil {
+                Section { githubScopeWarningBanner }
+            }
             Section("Development Root") {
                 HStack {
                     TextField("Path", text: $devRoot)
