@@ -102,6 +102,10 @@ public final class AppState {
     /// Runtime dependencies that were not found at startup (e.g., "gh", "git", "claude").
     public var missingDependencies: [String] = []
 
+    /// Non-fatal GitHub auth warning surfaced in Settings. `nil` means no warning.
+    /// Set by `IssueTracker` when the token lacks a required scope; cleared on next success.
+    public var githubScopeWarning: String?
+
     /// Terminal readiness state per terminal ID.
     public var terminalReadiness: [UUID: TerminalReadiness] = [:]
 

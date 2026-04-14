@@ -87,12 +87,20 @@ public final class GhosttyApp {
         }
     }
 
+    /// Raw action tags that fire constantly during normal focus/scroll/tab-switch.
+    /// GhosttyKit is a precompiled xcframework, so the enum names aren't available
+    /// in Swift — we silence by raw value. Unknown tags still log so new actions
+    /// remain discoverable.
+    nonisolated private static let silencedActionTags: Set<UInt32> = [26, 32, 36, 56]
+
     nonisolated static func handleAction(
         app: ghostty_app_t?,
         target: ghostty_target_s,
         action: ghostty_action_s
     ) -> Bool {
-        NSLog("[GhosttyApp] Unhandled action: tag=\(action.tag)")
+        if !silencedActionTags.contains(UInt32(action.tag.rawValue)) {
+            NSLog("[GhosttyApp] Unhandled action: tag=\(action.tag)")
+        }
         return false
     }
 

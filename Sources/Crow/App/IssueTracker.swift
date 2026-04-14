@@ -18,6 +18,10 @@ final class IssueTracker {
     private var previousReviewRequestIDs: Set<String> = []
     private var isFirstFetch = true
 
+    /// Guards the GitHub-scope console warning so it fires once per session.
+    /// Reset by `clearScopeWarning()` when a subsequent poll succeeds.
+    private var didLogGitHubScopeWarning = false
+
     init(appState: AppState) {
         self.appState = appState
     }
@@ -37,6 +41,25 @@ final class IssueTracker {
     func stop() {
         timer?.invalidate()
         timer = nil
+    }
+
+    /// Surface a missing-scope warning: console once per session, UI banner every time.
+    private func reportScopeWarning(_ scope: String) {
+        let msg = "GitHub token missing '\(scope)' scope — run 'gh auth refresh -s \(scope)'"
+        if !didLogGitHubScopeWarning {
+            print("[IssueTracker] \(msg)")
+            didLogGitHubScopeWarning = true
+        }
+        appState.githubScopeWarning = msg
+    }
+
+    /// Drop the warning after a successful poll. Re-arms the once-per-session log
+    /// so a future regression will print again.
+    private func clearScopeWarning() {
+        if appState.githubScopeWarning != nil {
+            appState.githubScopeWarning = nil
+        }
+        didLogGitHubScopeWarning = false
     }
 
     func refresh() async {
@@ -598,7 +621,7 @@ final class IssueTracker {
             )
             if testResult.exitCode != 0 {
                 if testResult.stderr.contains("INSUFFICIENT_SCOPES") || testResult.stderr.contains("read:project") {
-                    print("[IssueTracker] GitHub token missing 'read:project' scope — run 'gh auth refresh -s read:project'")
+                    reportScopeWarning("read:project")
                 } else {
                     print("[IssueTracker] GraphQL project status query failed (exit \(testResult.exitCode)): \(testResult.stderr.prefix(200))")
                 }
@@ -643,6 +666,8 @@ final class IssueTracker {
                 }
             }
         }
+
+        clearScopeWarning()
     }
 
     // MARK: - Mark In Review
@@ -701,7 +726,7 @@ final class IssueTracker {
 
         if queryResult.exitCode != 0 {
             if queryResult.stderr.contains("INSUFFICIENT_SCOPES") || queryResult.stderr.contains("read:project") || queryResult.stderr.contains("project") {
-                print("[IssueTracker] GitHub token missing 'project' scope — run 'gh auth refresh -s project'")
+                reportScopeWarning("project")
             } else {
                 print("[IssueTracker] GraphQL query failed: \(queryResult.stderr.prefix(200))")
             }
@@ -778,7 +803,7 @@ final class IssueTracker {
 
         if mutationResult.exitCode != 0 {
             if mutationResult.stderr.contains("INSUFFICIENT_SCOPES") {
-                print("[IssueTracker] GitHub token missing 'project' scope — run 'gh auth refresh -s project'")
+                reportScopeWarning("project")
             } else {
                 print("[IssueTracker] Failed to update project status: \(mutationResult.stderr.prefix(200))")
             }

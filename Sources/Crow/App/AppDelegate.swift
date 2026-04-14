@@ -357,6 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let settingsView = SettingsView(
+            appState: appState,
             devRoot: devRoot,
             config: appConfig,
             onSave: { [weak self] newDevRoot, newConfig in
