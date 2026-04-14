@@ -44,9 +44,14 @@ public struct SessionDetailView: View {
             // Row 1: Name + Status
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(session.name)
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(CorveilTheme.gold)
+                    HStack(spacing: 6) {
+                        Text(session.name)
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(CorveilTheme.gold)
+                        if appState.isRemoteControlActive(sessionID: session.id) {
+                            RemoteControlBadge()
+                        }
+                    }
 
                     if let title = session.ticketTitle {
                         Text(title)

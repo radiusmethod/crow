@@ -10,17 +10,20 @@ public struct AppConfig: Codable, Sendable, Equatable {
     public var defaults: ConfigDefaults
     public var notifications: NotificationSettings
     public var sidebar: SidebarSettings
+    public var remoteControlEnabled: Bool
 
     public init(
         workspaces: [WorkspaceInfo] = [],
         defaults: ConfigDefaults = ConfigDefaults(),
         notifications: NotificationSettings = NotificationSettings(),
-        sidebar: SidebarSettings = SidebarSettings()
+        sidebar: SidebarSettings = SidebarSettings(),
+        remoteControlEnabled: Bool = false
     ) {
         self.workspaces = workspaces
         self.defaults = defaults
         self.notifications = notifications
         self.sidebar = sidebar
+        self.remoteControlEnabled = remoteControlEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -29,10 +32,11 @@ public struct AppConfig: Codable, Sendable, Equatable {
         defaults = try container.decodeIfPresent(ConfigDefaults.self, forKey: .defaults) ?? ConfigDefaults()
         notifications = try container.decodeIfPresent(NotificationSettings.self, forKey: .notifications) ?? NotificationSettings()
         sidebar = try container.decodeIfPresent(SidebarSettings.self, forKey: .sidebar) ?? SidebarSettings()
+        remoteControlEnabled = try container.decodeIfPresent(Bool.self, forKey: .remoteControlEnabled) ?? false
     }
 
     private enum CodingKeys: String, CodingKey {
-        case workspaces, defaults, notifications, sidebar
+        case workspaces, defaults, notifications, sidebar, remoteControlEnabled
     }
 }
 

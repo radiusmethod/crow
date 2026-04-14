@@ -197,6 +197,12 @@ struct ManagerAllowListRow: View {
             ) {
                 appState.selectedSessionID = AppState.managerSessionID
             }
+            .overlay(alignment: .topTrailing) {
+                if appState.isRemoteControlActive(sessionID: AppState.managerSessionID) {
+                    RemoteControlBadge(compact: true)
+                        .padding(4)
+                }
+            }
 
             sidebarButton(
                 title: "Allow List",
@@ -264,11 +270,14 @@ struct SessionRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             // Row 1: Name + status indicator
-            HStack {
+            HStack(spacing: 4) {
                 Text(session.name)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(CorveilTheme.textPrimary)
                     .lineLimit(1)
+                if appState.isRemoteControlActive(sessionID: session.id) {
+                    RemoteControlBadge(compact: true)
+                }
                 Spacer()
                 statusIndicator
             }

@@ -13,6 +13,15 @@ public final class AppState {
     /// Whether subtitle rows (ticket title, repo/branch) are hidden in sidebar session rows.
     public var hideSessionDetails: Bool = false
 
+    /// Whether new Claude Code sessions are launched with `--rc` so they can be
+    /// controlled from claude.ai / the Claude mobile app. Mirrors `AppConfig.remoteControlEnabled`.
+    public var remoteControlEnabled: Bool = false
+
+    /// Terminal IDs whose Claude Code was launched with `--rc` — drives the
+    /// per-session indicator badge. Survives toggle changes so existing sessions
+    /// keep showing the badge until they're restarted.
+    public var remoteControlActiveTerminals: Set<UUID> = []
+
     /// Worktrees keyed by session ID.
     public var worktrees: [UUID: [SessionWorktree]] = [:]
 

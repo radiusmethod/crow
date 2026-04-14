@@ -135,6 +135,14 @@ public struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section("Remote Control") {
+                Toggle("Enable remote control for new sessions", isOn: $config.remoteControlEnabled)
+                    .onChange(of: config.remoteControlEnabled) { _, _ in save() }
+                Text("New Claude Code sessions start with --rc so you can control them from claude.ai or the Claude mobile app. Each session's name matches its Crow session name.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
     }

@@ -61,6 +61,29 @@ final class SessionService {
                         )
                     }
                 }
+            } else {
+                // Manager terminal: rebuild its claude command to match the
+                // current remoteControlEnabled preference. Unlike worker sessions
+                // the Manager launches claude directly as the shell command, so
+                // the stored string needs to be correct before preInitialize runs.
+                let claudePath = Self.findClaudeBinary() ?? "claude"
+                let rcEnabled = appState.remoteControlEnabled
+                let managerCommand = claudePath + ClaudeLaunchArgs.argsSuffix(
+                    remoteControl: rcEnabled, sessionName: "Manager"
+                )
+                for i in terminals.indices {
+                    if let cmd = terminals[i].command, cmd.contains("claude") {
+                        terminals[i] = SessionTerminal(
+                            id: terminals[i].id, sessionID: terminals[i].sessionID,
+                            name: terminals[i].name, cwd: terminals[i].cwd,
+                            command: managerCommand, isManaged: terminals[i].isManaged,
+                            createdAt: terminals[i].createdAt
+                        )
+                        if rcEnabled {
+                            appState.remoteControlActiveTerminals.insert(terminals[i].id)
+                        }
+                    }
+                }
             }
             appState.terminals[session.id] = terminals
 
@@ -175,6 +198,9 @@ final class SessionService {
         }
 
         let claudePath = Self.findClaudeBinary() ?? "claude"
+        let sessionName = sessionID.flatMap { id in appState.sessions.first(where: { $0.id == id })?.name }
+        let rcEnabled = appState.remoteControlEnabled
+        let rcArgs = ClaudeLaunchArgs.argsSuffix(remoteControl: rcEnabled, sessionName: sessionName)
 
         // For review sessions, launch claude with the review prompt file
         if let sessionID,
@@ -182,12 +208,15 @@ final class SessionService {
            session.kind == .review,
            let worktree = appState.primaryWorktree(for: sessionID) {
             let promptPath = (worktree.worktreePath as NSString).appendingPathComponent(".crow-review-prompt.md")
-            TerminalManager.shared.send(id: terminalID, text: "\(claudePath) \"$(cat \(promptPath))\"\n")
+            TerminalManager.shared.send(id: terminalID, text: "\(claudePath)\(rcArgs) \"$(cat \(promptPath))\"\n")
         } else {
-            TerminalManager.shared.send(id: terminalID, text: "\(claudePath) --continue\n")
+            TerminalManager.shared.send(id: terminalID, text: "\(claudePath)\(rcArgs) --continue\n")
         }
 
         appState.terminalReadiness[terminalID] = .claudeLaunched
+        if rcEnabled {
+            appState.remoteControlActiveTerminals.insert(terminalID)
+        }
     }
 
     // MARK: - Ensure Manager Session
@@ -213,11 +242,13 @@ final class SessionService {
         if appState.terminals(for: managerID).isEmpty {
             // Find the real claude binary (skip CMUX wrapper)
             let claudePath = Self.findClaudeBinary() ?? "claude"
+            let rcEnabled = appState.remoteControlEnabled
+            let managerCommand = claudePath + ClaudeLaunchArgs.argsSuffix(remoteControl: rcEnabled, sessionName: "Manager")
             let terminal = SessionTerminal(
                 sessionID: managerID,
                 name: "Manager",
                 cwd: devRoot,
-                command: claudePath
+                command: managerCommand
             )
             appState.terminals[managerID] = [terminal]
 
@@ -227,8 +258,12 @@ final class SessionService {
                 }
             }
 
+            if rcEnabled {
+                appState.remoteControlActiveTerminals.insert(terminal.id)
+            }
+
             // Pre-initialize in offscreen window so Manager terminal starts immediately
-            TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: devRoot, command: claudePath)
+            TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: devRoot, command: managerCommand)
         }
 
         // Select Manager on launch (selectedSessionID isn't persisted)

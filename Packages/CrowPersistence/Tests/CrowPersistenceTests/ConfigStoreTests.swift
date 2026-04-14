@@ -12,7 +12,8 @@ import Testing
         workspaces: [WorkspaceInfo(name: "TestOrg")],
         defaults: ConfigDefaults(branchPrefix: "fix/"),
         notifications: NotificationSettings(globalMute: true),
-        sidebar: SidebarSettings(hideSessionDetails: true)
+        sidebar: SidebarSettings(hideSessionDetails: true),
+        remoteControlEnabled: true
     )
 
     try ConfigStore.saveConfig(config, to: claudeDir)
@@ -26,6 +27,24 @@ import Testing
     #expect(loaded?.defaults.branchPrefix == "fix/")
     #expect(loaded?.notifications.globalMute == true)
     #expect(loaded?.sidebar.hideSessionDetails == true)
+    #expect(loaded?.remoteControlEnabled == true)
+}
+
+@Test func configStoreForwardCompatDefaultsRemoteControlOff() throws {
+    // A config.json written by an older Crow build won't include `remoteControlEnabled`.
+    // Decoding must succeed and default the flag to false.
+    let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+
+    let configURL = tmpDir.appendingPathComponent("config.json")
+    // Minimal pre-existing config with no remoteControlEnabled key. All top-level
+    // fields on AppConfig use decodeIfPresent, so an empty object is sufficient.
+    try "{}".write(to: configURL, atomically: true, encoding: .utf8)
+
+    let loaded = ConfigStore.loadConfig(from: configURL)
+    #expect(loaded != nil)
+    #expect(loaded?.remoteControlEnabled == false)
 }
 
 @Test func configStoreLoadMissingFileReturnsNil() {

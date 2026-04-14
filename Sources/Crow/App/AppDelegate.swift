@@ -106,6 +106,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let store = JSONStore()
         self.store = store
 
+        // Mirror the remote-control preference to AppState so hydrate + launch
+        // paths can read the current value without a config round-trip. Must be
+        // set before hydrateState so the Manager terminal's stored command can
+        // be rebuilt to include (or drop) `--rc` before its surface is pre-initialized.
+        appState.remoteControlEnabled = config.remoteControlEnabled
+
         // Create session service and hydrate state
         let service = SessionService(store: store, appState: appState)
         service.hydrateState()
@@ -400,6 +406,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         notificationManager?.updateSettings(config.notifications)
         appState.hideSessionDetails = config.sidebar.hideSessionDetails
+        appState.remoteControlEnabled = config.remoteControlEnabled
     }
 
     // MARK: - Socket Server
@@ -588,22 +595,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard AppDelegate.isPathWithinDevRoot(cwd, devRoot: devRoot) else {
                     throw RPCError.invalidParams("Terminal cwd must be within the configured devRoot")
                 }
-                // Resolve claude binary path if command references claude
-                var command = params["command"]?.stringValue
-                if let cmd = command, cmd.contains("claude") {
-                    command = AppDelegate.resolveClaudeInCommand(cmd)
-                }
+                let rawCommand = params["command"]?.stringValue
                 let isManaged = params["managed"]?.boolValue ?? false
                 let defaultName = isManaged ? "Claude Code" : "Shell"
-                let terminal = SessionTerminal(sessionID: sessionID, name: params["name"]?.stringValue ?? defaultName,
-                                               cwd: cwd, command: command, isManaged: isManaged)
+                let terminalName = params["name"]?.stringValue ?? defaultName
                 return await MainActor.run {
+                    // Resolve claude binary path if command references claude; also
+                    // inject --rc --name when remote control is enabled so the session
+                    // appears in claude.ai's Remote Control panel under the Crow
+                    // session name.
+                    var command = rawCommand
+                    var rcInjected = false
+                    if let cmd = rawCommand, cmd.contains("claude") {
+                        let rcEnabled = capturedAppState.remoteControlEnabled
+                        let sessionName = capturedAppState.sessions.first(where: { $0.id == sessionID })?.name
+                        command = AppDelegate.resolveClaudeInCommand(
+                            cmd,
+                            remoteControl: rcEnabled,
+                            sessionName: sessionName
+                        )
+                        rcInjected = rcEnabled
+                            && !cmd.contains("--rc")
+                            && !cmd.contains("--remote-control")
+                    }
+                    let terminal = SessionTerminal(sessionID: sessionID, name: terminalName,
+                                                   cwd: cwd, command: command, isManaged: isManaged)
                     capturedAppState.terminals[sessionID, default: []].append(terminal)
                     capturedStore.mutate { $0.terminals.append(terminal) }
                     // Track readiness only for managed work session terminals
                     if isManaged && sessionID != AppState.managerSessionID {
                         capturedAppState.terminalReadiness[terminal.id] = .uninitialized
                         TerminalManager.shared.trackReadiness(for: terminal.id)
+                    }
+                    if rcInjected {
+                        capturedAppState.remoteControlActiveTerminals.insert(terminal.id)
                     }
                     // Pre-initialize in offscreen window so shell starts immediately
                     TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: cwd, command: command)
@@ -938,18 +963,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Claude Binary Resolution
 
     /// Replace bare `claude` in a command string with the full path to the real binary,
-    /// skipping the CMUX wrapper.
-    nonisolated static func resolveClaudeInCommand(_ command: String) -> String {
+    /// skipping the CMUX wrapper. When `remoteControl` is true and the command does not
+    /// already request remote control, also inject `--rc --name '<sessionName>'` immediately
+    /// after the claude path so it sits before any trailing prompt argument.
+    nonisolated static func resolveClaudeInCommand(
+        _ command: String,
+        remoteControl: Bool = false,
+        sessionName: String? = nil
+    ) -> String {
         for path in SessionService.claudeBinaryCandidates {
             if FileManager.default.isExecutableFile(atPath: path) {
-                // Replace "claude" at word boundaries with the full path
-                // Handle: "claude ...", "claude", "/path/to/claude ..."
-                var result = command
-                // If command starts with bare "claude" (not already a path)
-                if result.hasPrefix("claude ") || result == "claude" {
-                    result = path + result.dropFirst(6)
+                // Only touch commands that start with the bare `claude` token.
+                let rest: String?
+                if command == "claude" {
+                    rest = ""
+                } else if command.hasPrefix("claude ") {
+                    rest = String(command.dropFirst("claude".count)) // " ..."
+                } else {
+                    rest = nil
                 }
-                return result
+                guard let rest else { return command }
+
+                let wantsRC = remoteControl
+                    && !command.contains("--rc")
+                    && !command.contains("--remote-control")
+                let extra = wantsRC
+                    ? ClaudeLaunchArgs.argsSuffix(remoteControl: true, sessionName: sessionName)
+                    : ""
+                return path + extra + rest
             }
         }
         return command
