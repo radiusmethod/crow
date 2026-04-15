@@ -362,19 +362,30 @@ final class IssueTracker {
 
     private func shellSync(_ args: String...) throws -> String {
         let process = Process()
-        let pipe = Pipe()
+        let outPipe = Pipe()
+        let errPipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
         process.environment = ShellEnvironment.shared.env
-        process.standardOutput = pipe
-        process.standardError = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
         try process.run()
         process.waitUntilExit()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
         guard process.terminationStatus == 0 else {
-            throw NSError(domain: "IssueTracker", code: Int(process.terminationStatus))
+            let stderr = (String(data: errData, encoding: .utf8) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let cmd = args.joined(separator: " ")
+            let desc = "`\(cmd)` exited \(process.terminationStatus)"
+                + (stderr.isEmpty ? "" : ": \(stderr)")
+            throw NSError(
+                domain: "IssueTracker",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: desc]
+            )
         }
-        return String(data: data, encoding: .utf8) ?? ""
+        return String(data: outData, encoding: .utf8) ?? ""
     }
 
     // MARK: - PR Status Enrichment
@@ -917,21 +928,32 @@ final class IssueTracker {
         let env = env
         return try await Task.detached {
             let process = Process()
-            let pipe = Pipe()
+            let outPipe = Pipe()
+            let errPipe = Pipe()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = args
             process.environment = env.isEmpty
                 ? ShellEnvironment.shared.env
                 : ShellEnvironment.shared.merging(env)
-            process.standardOutput = pipe
-            process.standardError = Pipe()
+            process.standardOutput = outPipe
+            process.standardError = errPipe
             try process.run()
             process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
             guard process.terminationStatus == 0 else {
-                throw NSError(domain: "IssueTracker", code: Int(process.terminationStatus))
+                let stderr = (String(data: errData, encoding: .utf8) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                let cmd = args.joined(separator: " ")
+                let desc = "`\(cmd)` exited \(process.terminationStatus)"
+                    + (stderr.isEmpty ? "" : ": \(stderr)")
+                throw NSError(
+                    domain: "IssueTracker",
+                    code: Int(process.terminationStatus),
+                    userInfo: [NSLocalizedDescriptionKey: desc]
+                )
             }
-            return String(data: data, encoding: .utf8) ?? ""
+            return String(data: outData, encoding: .utf8) ?? ""
         }.value
     }
 
