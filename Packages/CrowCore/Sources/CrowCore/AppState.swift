@@ -115,6 +115,14 @@ public final class AppState {
     /// Set by `IssueTracker` when the token lacks a required scope; cleared on next success.
     public var githubScopeWarning: String?
 
+    /// Last observed GitHub GraphQL rate-limit snapshot. `nil` before the first
+    /// successful query. Populated from the `rateLimit` block on each refresh.
+    public var githubRateLimit: GitHubRateLimit?
+
+    /// Non-fatal rate-limit warning surfaced in Settings. `nil` when not throttled.
+    /// Set by `IssueTracker` when polling is suspended; cleared on next success.
+    public var rateLimitWarning: String?
+
     /// Terminal readiness state per terminal ID.
     public var terminalReadiness: [UUID: TerminalReadiness] = [:]
 
@@ -301,6 +309,26 @@ public final class AppState {
     }
 
     public init() {}
+}
+
+// MARK: - GitHub Rate Limit
+
+/// Snapshot of the GitHub GraphQL rate-limit state observed from the `rateLimit`
+/// block on the last successful query.
+public struct GitHubRateLimit: Equatable, Sendable {
+    public let remaining: Int
+    public let limit: Int
+    public let resetAt: Date
+    public let cost: Int
+    public let observedAt: Date
+
+    public init(remaining: Int, limit: Int, resetAt: Date, cost: Int, observedAt: Date) {
+        self.remaining = remaining
+        self.limit = limit
+        self.resetAt = resetAt
+        self.cost = cost
+        self.observedAt = observedAt
+    }
 }
 
 // MARK: - Per-Session Hook State

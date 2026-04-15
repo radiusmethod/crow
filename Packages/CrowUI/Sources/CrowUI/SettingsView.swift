@@ -83,10 +83,30 @@ public struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var rateLimitWarningBanner: some View {
+        if let warning = appState.rateLimitWarning {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "clock.badge.exclamationmark.fill")
+                    .foregroundStyle(.orange)
+                Text(warning)
+                    .font(.caption)
+                    .textSelection(.enabled)
+                Spacer()
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.12))
+            .cornerRadius(6)
+        }
+    }
+
     private var generalTab: some View {
         Form {
             if appState.githubScopeWarning != nil {
                 Section { githubScopeWarningBanner }
+            }
+            if appState.rateLimitWarning != nil {
+                Section { rateLimitWarningBanner }
             }
             Section("Development Root") {
                 HStack {
