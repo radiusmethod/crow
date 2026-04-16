@@ -45,6 +45,9 @@ jobs:
           unset ZIG_LOCAL_CACHE_DIR ZIG_GLOBAL_CACHE_DIR
           make ghostty
 
+      - name: Generate build info
+        run: bash scripts/generate-build-info.sh
+
       - name: Build
         run: swift build
 
