@@ -2,6 +2,8 @@
 
 Thank you for your interest in contributing to Crow! This guide will help you get started.
 
+Please note that this project is released with a [Code of Conduct](CODE_OF_CONDUCT.md). By participating in this project you agree to abide by its terms.
+
 ## Reporting Bugs
 
 Open a [GitHub Issue](https://github.com/radiusmethod/crow/issues/new?template=bug_report.md) with:

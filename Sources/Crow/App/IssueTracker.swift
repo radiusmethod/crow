@@ -341,7 +341,7 @@ final class IssueTracker {
         }
     }
 
-    /// Resolve the org/repo slug (e.g. "radiusmethod/citadel") from a worktree's git remote.
+    /// Resolve the org/repo slug (e.g. "radiusmethod/acme-api") from a worktree's git remote.
     private func resolveRepoSlug(worktree: SessionWorktree) -> String {
         // First try from the repo path's git remote
         if let output = try? shellSync(

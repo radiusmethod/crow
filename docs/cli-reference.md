@@ -154,10 +154,10 @@ Register a git worktree for a session. The app uses `--repo-path` to run git com
 ```bash
 crow add-worktree \
   --session <uuid> \
-  --repo "citadel" \
-  --repo-path "/Users/you/Dev/RadiusMethod/citadel" \
-  --path "/Users/you/Dev/RadiusMethod/citadel-123-feature" \
-  --branch "feature/citadel-123" \
+  --repo "acme-api" \
+  --repo-path "/Users/you/Dev/RadiusMethod/acme-api" \
+  --path "/Users/you/Dev/RadiusMethod/acme-api-123-feature" \
+  --branch "feature/acme-api-123" \
   --primary
 ```
 
