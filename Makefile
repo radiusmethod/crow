@@ -60,13 +60,15 @@ sign: release
 
 # --- Test ---
 
-test:
+test: $(XCFW)
 	@for pkg in Packages/*/; do \
 		if [ -d "$$pkg/Tests" ]; then \
 			echo "==> Testing $$(basename $$pkg)..."; \
 			swift test --package-path "$$pkg"; \
 		fi; \
 	done
+	@echo "==> Testing root package (CrowTests)..."
+	@swift test
 
 # --- Clean ---
 

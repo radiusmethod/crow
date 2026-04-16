@@ -233,7 +233,7 @@ final class IssueTracker {
             let stalePRs = staleCandidateURLs.isEmpty
                 ? []
                 : await fetchStalePRStates(urls: staleCandidateURLs)
-            let allKnownPRs = ghResult.viewerPRs + stalePRs
+            let allKnownPRs = Self.dedupedByURL(ghResult.viewerPRs + stalePRs)
 
             applyPRStatuses(viewerPRs: allKnownPRs)
 
@@ -291,7 +291,7 @@ final class IssueTracker {
         let rateLimit: GitHubRateLimit?
     }
 
-    private struct ViewerPR {
+    struct ViewerPR: Sendable {
         let number: Int
         let url: String
         let state: String          // OPEN / MERGED / CLOSED
@@ -306,10 +306,65 @@ final class IssueTracker {
         let failedCheckNames: [String]
         let latestReviewStates: [String]
 
-        struct LinkedIssue {
+        struct LinkedIssue: Sendable {
             let number: Int
             let repo: String
         }
+    }
+
+    // MARK: - PR Dedup
+
+    /// State-rank precedence used when the same PR URL appears in multiple
+    /// source lists (viewer vs stale-PR follow-up). Higher rank wins.
+    nonisolated static func stateRank(_ state: String) -> Int {
+        switch state {
+        case "MERGED": return 3
+        case "CLOSED": return 2
+        case "OPEN":   return 1
+        default:       return 0
+        }
+    }
+
+    /// Merge two `ViewerPR` records for the same URL. The record with the
+    /// higher state rank wins the state/isDraft/number fields; empty fields
+    /// on the winner are backfilled from the loser so that (e.g.) an
+    /// OPEN→MERGED demotion mid-refresh still carries the checks/reviews
+    /// from the OPEN record (the stale-PR follow-up query leaves those
+    /// fields empty).
+    nonisolated static func mergePRRecords(_ lhs: ViewerPR, _ rhs: ViewerPR) -> ViewerPR {
+        let (winner, loser) = stateRank(lhs.state) >= stateRank(rhs.state)
+            ? (lhs, rhs) : (rhs, lhs)
+        return ViewerPR(
+            number: winner.number,
+            url: winner.url,
+            state: winner.state,
+            mergeable: winner.mergeable != "UNKNOWN" ? winner.mergeable : loser.mergeable,
+            reviewDecision: winner.reviewDecision.isEmpty ? loser.reviewDecision : winner.reviewDecision,
+            isDraft: winner.isDraft,
+            headRefName: winner.headRefName.isEmpty ? loser.headRefName : winner.headRefName,
+            baseRefName: winner.baseRefName.isEmpty ? loser.baseRefName : winner.baseRefName,
+            repoNameWithOwner: winner.repoNameWithOwner.isEmpty ? loser.repoNameWithOwner : winner.repoNameWithOwner,
+            linkedIssueReferences: winner.linkedIssueReferences.isEmpty ? loser.linkedIssueReferences : winner.linkedIssueReferences,
+            checksState: winner.checksState.isEmpty ? loser.checksState : winner.checksState,
+            failedCheckNames: winner.failedCheckNames.isEmpty ? loser.failedCheckNames : winner.failedCheckNames,
+            latestReviewStates: winner.latestReviewStates.isEmpty ? loser.latestReviewStates : winner.latestReviewStates
+        )
+    }
+
+    /// Collapse duplicate URLs using `mergePRRecords`, preserving first-seen
+    /// order so downstream iteration remains deterministic.
+    nonisolated static func dedupedByURL(_ prs: [ViewerPR]) -> [ViewerPR] {
+        var byURL: [String: ViewerPR] = [:]
+        var order: [String] = []
+        for pr in prs {
+            if let existing = byURL[pr.url] {
+                byURL[pr.url] = mergePRRecords(existing, pr)
+            } else {
+                byURL[pr.url] = pr
+                order.append(pr.url)
+            }
+        }
+        return order.compactMap { byURL[$0] }
     }
 
     private static let consolidatedQuery = """
@@ -869,7 +924,7 @@ final class IssueTracker {
     /// in the viewer-PR payload. No extra gh calls.
     private func applyPRStatuses(viewerPRs: [ViewerPR]) {
         guard !viewerPRs.isEmpty else { return }
-        let byURL = Dictionary(uniqueKeysWithValues: viewerPRs.map { ($0.url, $0) })
+        let byURL = Dictionary(viewerPRs.map { ($0.url, $0) }, uniquingKeysWith: Self.mergePRRecords)
 
         let sessionsWithPRs = appState.sessions.filter { $0.id != AppState.managerSessionID }
         for session in sessionsWithPRs {
@@ -957,7 +1012,7 @@ final class IssueTracker {
     /// closed accidentally.
     private func autoCompleteFinishedSessions(openIssues: [AssignedIssue], viewerPRs: [ViewerPR]) {
         let openIssueURLs = Set(openIssues.map(\.url))
-        let prsByURL = Dictionary(uniqueKeysWithValues: viewerPRs.map { ($0.url, $0) })
+        let prsByURL = Dictionary(viewerPRs.map { ($0.url, $0) }, uniquingKeysWith: Self.mergePRRecords)
 
         let candidateSessions = appState.sessions.filter {
             $0.id != AppState.managerSessionID &&
