@@ -220,9 +220,22 @@ final class IssueTracker {
         appState.assignedIssues = allIssues
 
         if let ghResult {
-            // Session PR link detection + PR status enrichment, both from viewerPRs
+            // Session PR link detection runs against open PRs only — we only
+            // ever want to attach a fresh link when there's an open PR.
             applySessionPRLinks(viewerPRs: ghResult.viewerPRs)
-            applyPRStatuses(viewerPRs: ghResult.viewerPRs)
+
+            // For sessions with an existing .pr link whose PR isn't in the open
+            // viewer set, fetch the state in one batched aliased query. This
+            // surfaces merged/closed state without pulling MERGED/CLOSED PRs
+            // for every viewer (which routinely returned 100 PRs / ~86 KB).
+            let openPRURLs = Set(ghResult.viewerPRs.map(\.url))
+            let staleCandidateURLs = collectStalePRURLs(excluding: openPRURLs)
+            let stalePRs = staleCandidateURLs.isEmpty
+                ? []
+                : await fetchStalePRStates(urls: staleCandidateURLs)
+            let allKnownPRs = ghResult.viewerPRs + stalePRs
+
+            applyPRStatuses(viewerPRs: allKnownPRs)
 
             // Review requests (search result) + cross-reference with review sessions
             appState.isLoadingReviews = true
@@ -248,7 +261,7 @@ final class IssueTracker {
             syncInReviewSessions(issues: allIssues)
             autoCompleteFinishedSessions(
                 openIssues: allIssues.filter { $0.state == "open" },
-                viewerPRs: ghResult.viewerPRs
+                viewerPRs: allKnownPRs
             )
             autoCompleteFinishedReviews(openReviewPRURLs: Set(reviews.map(\.url)))
 
@@ -429,6 +442,126 @@ final class IssueTracker {
             return nil
         }
         return parseConsolidatedResponse(result.stdout)
+    }
+
+    // MARK: - Stale PR Follow-up
+
+    /// PR URLs linked to active/paused/inReview sessions that are NOT in
+    /// `openPRURLs`. These are the PRs we need to fetch state for to surface
+    /// merged/closed status on the badge and drive auto-complete.
+    /// Completed sessions are skipped — their badge state is set in-memory
+    /// during the cycle they auto-complete and is preserved thereafter.
+    private func collectStalePRURLs(excluding openPRURLs: Set<String>) -> [String] {
+        var urls: Set<String> = []
+        for session in appState.sessions where session.id != AppState.managerSessionID {
+            switch session.status {
+            case .active, .paused, .inReview:
+                break
+            default:
+                continue
+            }
+            for link in appState.links(for: session.id) where link.linkType == .pr {
+                if !openPRURLs.contains(link.url) {
+                    urls.insert(link.url)
+                }
+            }
+        }
+        return Array(urls)
+    }
+
+    /// Fetch state for a small set of PRs in one aliased GraphQL query.
+    /// Used for PRs that are linked to a session but are no longer in the
+    /// open viewer set (typically merged or closed). Returns minimal `ViewerPR`
+    /// records — only `state`, `url`, repo, and branch refs are populated;
+    /// checks/reviews are left empty since they're moot for closed PRs.
+    private func fetchStalePRStates(urls: [String]) async -> [ViewerPR] {
+        // Parse each URL into (owner, repo, number); skip any we can't parse.
+        var parsed: [(url: String, owner: String, repo: String, number: Int)] = []
+        for url in urls {
+            guard let p = ProviderManager.parseTicketURLComponents(url) else { continue }
+            parsed.append((url, p.org, p.repo, p.number))
+        }
+        guard !parsed.isEmpty else { return [] }
+
+        // Build aliased query: pr0, pr1, ... each fetching one pullRequest.
+        var queryParts: [String] = []
+        var args: [String] = ["gh", "api", "graphql"]
+        for (i, p) in parsed.enumerated() {
+            queryParts.append("""
+              pr\(i): repository(owner: $owner\(i), name: $repo\(i)) {
+                pullRequest(number: $num\(i)) {
+                  number url state mergeable reviewDecision isDraft
+                  headRefName baseRefName
+                  repository { nameWithOwner }
+                }
+              }
+            """)
+            args.append(contentsOf: ["-F", "owner\(i)=\(p.owner)"])
+            args.append(contentsOf: ["-F", "repo\(i)=\(p.repo)"])
+            args.append(contentsOf: ["-F", "num\(i)=\(p.number)"])
+        }
+        var varDecls: [String] = []
+        for i in 0..<parsed.count {
+            varDecls.append("$owner\(i): String!, $repo\(i): String!, $num\(i): Int!")
+        }
+        let query = """
+        query(\(varDecls.joined(separator: ", "))) {
+        \(queryParts.joined(separator: "\n"))
+          rateLimit { remaining limit resetAt cost }
+        }
+        """
+        args.insert(contentsOf: ["-f", "query=\(query)"], at: 3)
+
+        let result = await shellWithStatus(args: args)
+        if result.exitCode != 0 {
+            if handleGraphQLRateLimit(stderr: result.stderr) { return [] }
+            print("[IssueTracker] Stale-PR follow-up failed (exit \(result.exitCode)): \(result.stderr.prefix(200))")
+            return []
+        }
+        return parseStalePRResponse(result.stdout, count: parsed.count)
+    }
+
+    private func parseStalePRResponse(_ output: String, count: Int) -> [ViewerPR] {
+        guard let data = output.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let dataObj = json["data"] as? [String: Any] else { return [] }
+
+        if let rl = parseRateLimit(dataObj["rateLimit"] as? [String: Any]) {
+            appState.githubRateLimit = rl
+        }
+
+        var prs: [ViewerPR] = []
+        for i in 0..<count {
+            guard let repoObj = dataObj["pr\(i)"] as? [String: Any],
+                  let prObj = repoObj["pullRequest"] as? [String: Any],
+                  let number = prObj["number"] as? Int,
+                  let url = prObj["url"] as? String,
+                  let state = prObj["state"] as? String else { continue }
+
+            let mergeable = prObj["mergeable"] as? String ?? "UNKNOWN"
+            let reviewDecision = prObj["reviewDecision"] as? String ?? ""
+            let isDraft = prObj["isDraft"] as? Bool ?? false
+            let headRefName = prObj["headRefName"] as? String ?? ""
+            let baseRefName = prObj["baseRefName"] as? String ?? ""
+            let repoName = (prObj["repository"] as? [String: Any])?["nameWithOwner"] as? String ?? ""
+
+            prs.append(ViewerPR(
+                number: number,
+                url: url,
+                state: state,
+                mergeable: mergeable,
+                reviewDecision: reviewDecision,
+                isDraft: isDraft,
+                headRefName: headRefName,
+                baseRefName: baseRefName,
+                repoNameWithOwner: repoName,
+                linkedIssueReferences: [],
+                checksState: "",
+                failedCheckNames: [],
+                latestReviewStates: []
+            ))
+        }
+        return prs
     }
 
     private func parseConsolidatedResponse(_ output: String) -> ConsolidatedGitHubResponse? {
@@ -781,12 +914,17 @@ final class IssueTracker {
             }
         }
 
-        // Merge — only open PRs are in the payload
+        // Merge — PR state first (MERGED set by the stale-PR follow-up query),
+        // then fall back to mergeable for OPEN PRs.
         let mergeStatus: PRStatus.MergeStatus
-        switch pr.mergeable {
-        case "MERGEABLE": mergeStatus = .mergeable
-        case "CONFLICTING": mergeStatus = .conflicting
-        default: mergeStatus = .unknown
+        if pr.state == "MERGED" {
+            mergeStatus = .merged
+        } else {
+            switch pr.mergeable {
+            case "MERGEABLE": mergeStatus = .mergeable
+            case "CONFLICTING": mergeStatus = .conflicting
+            default: mergeStatus = .unknown
+            }
         }
 
         return PRStatus(
@@ -813,12 +951,13 @@ final class IssueTracker {
     }
 
     /// Check active sessions whose linked ticket is no longer in the open issues
-    /// list. If the session has a PR link that is still open, hold off (the issue
-    /// may have been closed by accident). Otherwise mark completed.
-    /// Only open PRs are in the viewer payload, so absence means merged/closed.
+    /// list. If the session has a PR link, use the merged/closed state from the
+    /// payload (open PRs come from the viewer query, merged/closed PRs from the
+    /// stale-PR follow-up). Open PRs hold off completion in case the issue was
+    /// closed accidentally.
     private func autoCompleteFinishedSessions(openIssues: [AssignedIssue], viewerPRs: [ViewerPR]) {
         let openIssueURLs = Set(openIssues.map(\.url))
-        let openPRURLs = Set(viewerPRs.map(\.url))
+        let prsByURL = Dictionary(uniqueKeysWithValues: viewerPRs.map { ($0.url, $0) })
 
         let candidateSessions = appState.sessions.filter {
             $0.id != AppState.managerSessionID &&
@@ -830,14 +969,24 @@ final class IssueTracker {
 
             let sessionLinks = appState.links(for: session.id)
             if let prLink = sessionLinks.first(where: { $0.linkType == .pr }) {
-                if openPRURLs.contains(prLink.url) {
-                    // PR is still open — don't complete yet even though the
-                    // issue isn't in the open list (may have been manually closed).
-                    continue
+                if let pr = prsByURL[prLink.url] {
+                    switch pr.state {
+                    case "MERGED":
+                        print("[IssueTracker] Session '\(session.name)' — PR merged, marking completed")
+                        appState.onCompleteSession?(session.id)
+                    case "CLOSED":
+                        print("[IssueTracker] Session '\(session.name)' — PR closed, marking completed")
+                        appState.onCompleteSession?(session.id)
+                    default:
+                        // OPEN: hold off (issue may have been closed accidentally).
+                        break
+                    }
+                } else {
+                    // PR not in any payload (deleted, no access, or the
+                    // follow-up query failed) — fall back to absence == done.
+                    print("[IssueTracker] Session '\(session.name)' — PR no longer open, marking completed")
+                    appState.onCompleteSession?(session.id)
                 }
-                // PR is no longer open (merged or closed) → complete
-                print("[IssueTracker] Session '\(session.name)' — PR merged/closed, marking completed")
-                appState.onCompleteSession?(session.id)
                 continue
             }
 
