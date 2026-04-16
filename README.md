@@ -81,7 +81,7 @@ In the Manager tab, tell Claude Code what you want to work on:
 Or use natural language:
 
 ```
-/crow-workspace "add authentication to the citadel API"
+/crow-workspace "add authentication to the acme-api API"
 ```
 
 This will:
