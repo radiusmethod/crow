@@ -1076,9 +1076,12 @@ final class IssueTracker {
             process.standardOutput = outPipe
             process.standardError = errPipe
             try process.run()
-            process.waitUntilExit()
+            // Read pipes BEFORE waitUntilExit to avoid deadlock when
+            // output exceeds the 64 KB pipe buffer (consolidated GraphQL
+            // responses routinely reach ~86 KB).
             let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
             let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
             guard process.terminationStatus == 0 else {
                 let stderr = (String(data: errData, encoding: .utf8) ?? "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1118,9 +1121,10 @@ final class IssueTracker {
             process.standardOutput = outPipe
             process.standardError = errPipe
             do { try process.run() } catch { return ShellResult(stdout: "", stderr: error.localizedDescription, exitCode: -1) }
-            process.waitUntilExit()
+            // Read pipes BEFORE waitUntilExit to avoid pipe-buffer deadlock.
             let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
             let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
             return ShellResult(
                 stdout: String(data: outData, encoding: .utf8) ?? "",
                 stderr: String(data: errData, encoding: .utf8) ?? "",
