@@ -318,14 +318,14 @@ final class IssueTracker {
         }
       }
       viewerPRs: viewer {
-        pullRequests(first: 100, states: [OPEN, MERGED, CLOSED], orderBy: {field: UPDATED_AT, direction: DESC}) {
+        pullRequests(first: 50, states: [OPEN], orderBy: {field: UPDATED_AT, direction: DESC}) {
           nodes {
             number url state mergeable reviewDecision isDraft headRefName baseRefName
             repository { nameWithOwner }
             closingIssuesReferences(first: 5) { nodes { number repository { nameWithOwner } } }
             statusCheckRollup {
               state
-              contexts(first: 50) {
+              contexts(first: 25) {
                 nodes {
                   __typename
                   ... on CheckRun { name conclusion status }
@@ -333,7 +333,7 @@ final class IssueTracker {
                 }
               }
             }
-            latestReviews(first: 10) { nodes { state } }
+            latestReviews(first: 5) { nodes { state } }
           }
         }
       }
@@ -781,16 +781,12 @@ final class IssueTracker {
             }
         }
 
-        // Merge — PR state first, then mergeable
+        // Merge — only open PRs are in the payload
         let mergeStatus: PRStatus.MergeStatus
-        if pr.state == "MERGED" {
-            mergeStatus = .merged
-        } else {
-            switch pr.mergeable {
-            case "MERGEABLE": mergeStatus = .mergeable
-            case "CONFLICTING": mergeStatus = .conflicting
-            default: mergeStatus = .unknown
-            }
+        switch pr.mergeable {
+        case "MERGEABLE": mergeStatus = .mergeable
+        case "CONFLICTING": mergeStatus = .conflicting
+        default: mergeStatus = .unknown
         }
 
         return PRStatus(
@@ -817,11 +813,12 @@ final class IssueTracker {
     }
 
     /// Check active sessions whose linked ticket is no longer in the open issues
-    /// list. If the session has a PR link and the viewer-PR payload shows it
-    /// merged, mark the session as completed. Zero extra gh calls.
+    /// list. If the session has a PR link that is still open, hold off (the issue
+    /// may have been closed by accident). Otherwise mark completed.
+    /// Only open PRs are in the viewer payload, so absence means merged/closed.
     private func autoCompleteFinishedSessions(openIssues: [AssignedIssue], viewerPRs: [ViewerPR]) {
         let openIssueURLs = Set(openIssues.map(\.url))
-        let prsByURL = Dictionary(uniqueKeysWithValues: viewerPRs.map { ($0.url, $0) })
+        let openPRURLs = Set(viewerPRs.map(\.url))
 
         let candidateSessions = appState.sessions.filter {
             $0.id != AppState.managerSessionID &&
@@ -832,20 +829,19 @@ final class IssueTracker {
             if openIssueURLs.contains(ticketURL) { continue }
 
             let sessionLinks = appState.links(for: session.id)
-            if let prLink = sessionLinks.first(where: { $0.linkType == .pr }),
-               let pr = prsByURL[prLink.url] {
-                if pr.state == "MERGED" {
-                    print("[IssueTracker] Session '\(session.name)' — PR merged, marking completed")
-                    appState.onCompleteSession?(session.id)
+            if let prLink = sessionLinks.first(where: { $0.linkType == .pr }) {
+                if openPRURLs.contains(prLink.url) {
+                    // PR is still open — don't complete yet even though the
+                    // issue isn't in the open list (may have been manually closed).
                     continue
                 }
-                // PR exists and isn't merged — don't complete yet even though the
-                // issue isn't in the open list (may have been manually closed).
+                // PR is no longer open (merged or closed) → complete
+                print("[IssueTracker] Session '\(session.name)' — PR merged/closed, marking completed")
+                appState.onCompleteSession?(session.id)
                 continue
             }
 
-            // No PR link, or PR not in viewer's payload — issue isn't open, so
-            // it was closed directly. Mark completed for GitHub; skip GitLab.
+            // No PR link — issue isn't open, so it was closed directly.
             if session.provider == .github || session.provider == nil {
                 print("[IssueTracker] Session '\(session.name)' — issue closed, marking completed")
                 appState.onCompleteSession?(session.id)
