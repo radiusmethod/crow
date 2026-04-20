@@ -57,6 +57,12 @@ public final class TelemetryService: Sendable {
         await database.deleteSessionData(for: crowSessionID)
     }
 
+    /// Delete metrics and events older than the retention window.
+    /// `retentionDays == 0` keeps data forever.
+    public func pruneOldData(retentionDays: Int) async {
+        await database.pruneOldData(retentionDays: retentionDays)
+    }
+
     // MARK: - Private
 
     private static func defaultDataDirectory() -> String {

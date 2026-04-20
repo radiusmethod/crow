@@ -273,9 +273,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 )
                 self.telemetryService = telemetry
+                let retentionDays = config.telemetry.retentionDays
                 Task {
                     do {
                         try await telemetry.start()
+                        await telemetry.pruneOldData(retentionDays: retentionDays)
                     } catch {
                         NSLog("[Crow] Failed to start telemetry service: %@", error.localizedDescription)
                     }

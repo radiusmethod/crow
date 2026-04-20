@@ -179,6 +179,16 @@ public struct SettingsView: View {
                         .onSubmit { save() }
                 }
                 .disabled(!config.telemetry.enabled)
+
+                Picker("Retention", selection: $config.telemetry.retentionDays) {
+                    Text("30 days").tag(30)
+                    Text("90 days").tag(90)
+                    Text("6 months").tag(180)
+                    Text("1 year").tag(365)
+                    Text("Forever").tag(0)
+                }
+                .onChange(of: config.telemetry.retentionDays) { _, _ in save() }
+                .disabled(!config.telemetry.enabled)
             }
         }
         .formStyle(.grouped)

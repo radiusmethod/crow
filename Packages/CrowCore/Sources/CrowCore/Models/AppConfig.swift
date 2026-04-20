@@ -157,9 +157,12 @@ public struct TelemetryConfig: Codable, Sendable, Equatable {
     public var enabled: Bool
     /// Port for the OTLP HTTP receiver (default: 4318).
     public var port: UInt16
+    /// Number of days to retain telemetry data. 0 disables pruning (keep forever).
+    public var retentionDays: Int
 
-    public init(enabled: Bool = false, port: UInt16 = 4318) {
+    public init(enabled: Bool = false, port: UInt16 = 4318, retentionDays: Int = 180) {
         self.enabled = enabled
         self.port = port
+        self.retentionDays = retentionDays
     }
 }

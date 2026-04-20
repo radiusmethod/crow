@@ -217,6 +217,15 @@ public actor TelemetryDatabase {
         execute("DELETE FROM session_map WHERE crow_session_id = '\(sid)'")
     }
 
+    /// Delete metrics and events older than the retention window.
+    /// `retentionDays == 0` is a no-op (retention disabled — keep forever).
+    public func pruneOldData(retentionDays: Int) {
+        guard retentionDays > 0 else { return }
+        let cutoff = Date().timeIntervalSince1970 - Double(retentionDays) * 86400
+        execute("DELETE FROM metrics WHERE received_at < \(cutoff)")
+        execute("DELETE FROM events WHERE received_at < \(cutoff)")
+    }
+
     // MARK: - Private Helpers
 
     @discardableResult
