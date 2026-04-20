@@ -43,7 +43,7 @@ One or more ticket URLs, separated by newlines:
 ```
 /crow-batch-workspace
 https://github.com/RadiusMethod/crow/issues/101
-https://github.com/RadiusMethod/citadel/issues/45
+https://github.com/RadiusMethod/acme-api/issues/45
 https://github.com/RadiusMethod/crow/issues/99
 ```
 
@@ -52,7 +52,7 @@ Or a mix of ticket URLs and natural language:
 ```
 /crow-batch-workspace
 https://github.com/RadiusMethod/crow/issues/101
-"update citadel authentication"
+"update acme-api authentication"
 https://gitlab.example.com/org/repo/-/issues/42
 ```
 
@@ -139,7 +139,7 @@ Parse the JSON output from each `setup.sh` call and present a summary:
 | # | Workspace | Session ID | Status | Branch |
 |---|-----------|------------|--------|--------|
 | 1 | crow-101-parallel-exec | a1b2c3d4-... | ok | feature/crow-101-parallel-exec |
-| 2 | citadel-45-jwt-validation | e5f6a7b8-... | ok | feature/citadel-45-jwt-validation |
+| 2 | acme-api-45-jwt-validation | e5f6a7b8-... | ok | feature/acme-api-45-jwt-validation |
 | 3 | crow-99-fix-terminal-focus | c9d0e1f2-... | error: git_worktree_add | - |
 
 ### Timing
@@ -187,7 +187,7 @@ Same as `/crow-workspace`. See that skill for the full CLI reference.
 ```
 /crow-batch-workspace
 https://github.com/RadiusMethod/crow/issues/101
-https://github.com/RadiusMethod/citadel/issues/45
+https://github.com/RadiusMethod/acme-api/issues/45
 https://github.com/RadiusMethod/crow/issues/99
 ```
 - Resolves all 3 sequentially (fetches tickets, detects PRs, generates names)
@@ -210,8 +210,8 @@ https://gitlab.example.com/org/my-project/-/issues/42
 https://github.com/RadiusMethod/crow/issues/101
 https://github.com/RadiusMethod/crow/issues/102
 https://github.com/RadiusMethod/crow/issues/103
-https://github.com/RadiusMethod/citadel/issues/45
-https://github.com/RadiusMethod/citadel/issues/46
+https://github.com/RadiusMethod/acme-api/issues/45
+https://github.com/RadiusMethod/acme-api/issues/46
 ```
 - 5 parallel `setup.sh` calls
 - Each blocks one GCD thread in the socket server (well within the 64+ thread pool)

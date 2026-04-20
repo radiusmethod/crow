@@ -1,19 +1,19 @@
-name: CI
+name: Cache Warm
 
 on:
-  pull_request:
+  push:
     branches: [main]
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: cache-warm-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   ZIG_VERSION: '0.15.2'
 
 jobs:
-  test:
-    name: Build & Test
+  warm-ghostty:
+    name: Warm Ghostty Cache
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -44,29 +44,3 @@ jobs:
         run: |
           unset ZIG_LOCAL_CACHE_DIR ZIG_GLOBAL_CACHE_DIR
           make ghostty
-
-      - name: Generate build info
-        run: bash scripts/generate-build-info.sh
-
-      - name: Build
-        run: swift build
-
-      - name: Run tests
-        run: |
-          for pkg in Packages/*/; do
-            if [ -d "$pkg/Tests" ]; then
-              echo "==> Testing $(basename "$pkg")..."
-              swift test --package-path "$pkg"
-            fi
-          done
-          echo "==> Testing root package (CrowTests)..."
-          swift test
-
-  shellcheck:
-    name: Shell Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check scripts
-        run: shellcheck scripts/*.sh

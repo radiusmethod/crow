@@ -58,5 +58,10 @@ let package = Package(
             ],
             path: "Sources/CrowCLI"
         ),
+        .testTarget(
+            name: "CrowTests",
+            dependencies: ["Crow"],
+            path: "Tests/CrowTests"
+        ),
     ]
 )

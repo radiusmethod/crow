@@ -404,13 +404,18 @@ struct TicketCard: View {
                         .font(.caption)
                         .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textSecondary)
 
-                    Text("#\(String(issue.number))")
-                        .font(.system(size: 12, weight: .medium))
-                        .monospacedDigit()
-                        .foregroundStyle(isDone ? CorveilTheme.textMuted : CorveilTheme.textPrimary)
+                    LinkChip(
+                        label: "Issue #\(String(issue.number))",
+                        url: issue.url,
+                        icon: "link"
+                    )
 
-                    if let prNum = issue.prNumber {
-                        ticketPRBadge(number: prNum, url: issue.prURL)
+                    if let prNum = issue.prNumber, let prURL = issue.prURL {
+                        LinkChip(
+                            label: "PR #\(String(prNum))",
+                            url: prURL,
+                            icon: "arrow.triangle.pull"
+                        )
                     }
 
                     Spacer()
@@ -491,22 +496,6 @@ struct TicketCard: View {
             .font(.system(size: 18))
             .foregroundStyle(isSelected ? CorveilTheme.gold : CorveilTheme.textMuted.opacity(0.4))
             .opacity(isSelectable ? 1.0 : 0.3)
-    }
-
-    private func ticketPRBadge(number: Int, url: String?) -> some View {
-        HStack(spacing: 3) {
-            Image(systemName: "arrow.triangle.pull")
-                .font(.caption2)
-            Text("PR #\(String(number))")
-                .font(.caption2)
-                .fontWeight(.medium)
-        }
-        .foregroundStyle(.purple)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(.purple.opacity(0.1))
-        .overlay(Capsule().strokeBorder(Color.purple.opacity(0.3), lineWidth: 0.5))
-        .clipShape(Capsule())
     }
 
     private var labelRow: some View {

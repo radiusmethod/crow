@@ -27,6 +27,10 @@ Frameworks/ghostty-resources/
 # Claude Code (session-specific, generated at runtime)
 .claude/settings.local.json
 
+# Environment
+.env
+.env.*
+
 # OS
 .DS_Store
 Thumbs.db

@@ -2,6 +2,8 @@
 
 A native macOS application for managing AI-powered development sessions. Orchestrates git worktrees, Claude Code instances, and GitHub/GitLab issue tracking in a unified interface with an embedded Ghostty terminal.
 
+![Crow — AI-powered development session manager](docs/crow-screenshot.jpeg)
+
 ## Prerequisites
 
 ### System Requirements
@@ -81,7 +83,7 @@ In the Manager tab, tell Claude Code what you want to work on:
 Or use natural language:
 
 ```
-/crow-workspace "add authentication to the citadel API"
+/crow-workspace "add authentication to the acme-api API"
 ```
 
 This will:

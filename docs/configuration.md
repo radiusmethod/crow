@@ -65,9 +65,9 @@ Crow expects repositories organized under workspace folders:
 ```
 ~/Dev/                             # Development root
 ├── RadiusMethod/                  # Workspace (GitHub)
-│   ├── citadel/                   # Main repo checkout
-│   ├── citadel-134-sensor/        # Worktree for issue #134
-│   └── citadel-209-review/        # Worktree for issue #209
+│   ├── acme-api/                   # Main repo checkout
+│   ├── acme-api-134-sensor/        # Worktree for issue #134
+│   └── acme-api-209-review/        # Worktree for issue #209
 └── MyGitLab/                      # Workspace (GitLab)
     ├── my-project/
     └── overrides/
