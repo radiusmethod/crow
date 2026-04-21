@@ -9,10 +9,12 @@ import CrowTerminal
 final class SessionService {
     private let store: JSONStore
     private let appState: AppState
+    let telemetryPort: UInt16?
 
-    init(store: JSONStore, appState: AppState) {
+    init(store: JSONStore, appState: AppState, telemetryPort: UInt16? = nil) {
         self.store = store
         self.appState = appState
+        self.telemetryPort = telemetryPort
     }
 
     // MARK: - Hydrate State from Store
@@ -202,15 +204,31 @@ final class SessionService {
         let rcEnabled = appState.remoteControlEnabled
         let rcArgs = ClaudeLaunchArgs.argsSuffix(remoteControl: rcEnabled, sessionName: sessionName)
 
+        // Build OTEL telemetry env var prefix if enabled
+        let envPrefix: String
+        if let port = telemetryPort, let sessionID {
+            let vars = [
+                "CLAUDE_CODE_ENABLE_TELEMETRY=1",
+                "OTEL_METRICS_EXPORTER=otlp",
+                "OTEL_LOGS_EXPORTER=otlp",
+                "OTEL_EXPORTER_OTLP_PROTOCOL=http/json",
+                "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:\(port)",
+                "OTEL_RESOURCE_ATTRIBUTES=crow.session.id=\(sessionID.uuidString)",
+            ].joined(separator: " ")
+            envPrefix = "export \(vars) && "
+        } else {
+            envPrefix = ""
+        }
+
         // For review sessions, launch claude with the review prompt file
         if let sessionID,
            let session = appState.sessions.first(where: { $0.id == sessionID }),
            session.kind == .review,
            let worktree = appState.primaryWorktree(for: sessionID) {
             let promptPath = (worktree.worktreePath as NSString).appendingPathComponent(".crow-review-prompt.md")
-            TerminalManager.shared.send(id: terminalID, text: "\(claudePath)\(rcArgs) \"$(cat \(promptPath))\"\n")
+            TerminalManager.shared.send(id: terminalID, text: "\(envPrefix)\(claudePath)\(rcArgs) \"$(cat \(promptPath))\"\n")
         } else {
-            TerminalManager.shared.send(id: terminalID, text: "\(claudePath)\(rcArgs) --continue\n")
+            TerminalManager.shared.send(id: terminalID, text: "\(envPrefix)\(claudePath)\(rcArgs) --continue\n")
         }
 
         appState.terminalReadiness[terminalID] = .claudeLaunched

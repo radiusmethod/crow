@@ -163,6 +163,33 @@ public struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section("Telemetry") {
+                Toggle("Enable session analytics", isOn: $config.telemetry.enabled)
+                    .onChange(of: config.telemetry.enabled) { _, _ in save() }
+                Text("Collects cost, token, and tool usage metrics from Claude Code sessions via OpenTelemetry. Requires app restart.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Text("OTLP receiver port")
+                    TextField("Port", value: $config.telemetry.port, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                        .onSubmit { save() }
+                }
+                .disabled(!config.telemetry.enabled)
+
+                Picker("Retention", selection: $config.telemetry.retentionDays) {
+                    Text("30 days").tag(30)
+                    Text("90 days").tag(90)
+                    Text("6 months").tag(180)
+                    Text("1 year").tag(365)
+                    Text("Forever").tag(0)
+                }
+                .onChange(of: config.telemetry.retentionDays) { _, _ in save() }
+                .disabled(!config.telemetry.enabled)
+            }
         }
         .formStyle(.grouped)
     }

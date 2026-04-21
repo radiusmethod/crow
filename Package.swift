@@ -17,6 +17,7 @@ let package = Package(
         .package(path: "Packages/CrowPersistence"),
         .package(path: "Packages/CrowClaude"),
         .package(path: "Packages/CrowIPC"),
+        .package(path: "Packages/CrowTelemetry"),
         .package(path: "Packages/CrowCLI"),
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.5.0"),
     ],
@@ -32,6 +33,7 @@ let package = Package(
                 "CrowPersistence",
                 "CrowClaude",
                 "CrowIPC",
+                "CrowTelemetry",
             ],
             path: "Sources/Crow",
             resources: [

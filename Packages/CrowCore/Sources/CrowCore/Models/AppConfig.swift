@@ -11,19 +11,22 @@ public struct AppConfig: Codable, Sendable, Equatable {
     public var notifications: NotificationSettings
     public var sidebar: SidebarSettings
     public var remoteControlEnabled: Bool
+    public var telemetry: TelemetryConfig
 
     public init(
         workspaces: [WorkspaceInfo] = [],
         defaults: ConfigDefaults = ConfigDefaults(),
         notifications: NotificationSettings = NotificationSettings(),
         sidebar: SidebarSettings = SidebarSettings(),
-        remoteControlEnabled: Bool = false
+        remoteControlEnabled: Bool = false,
+        telemetry: TelemetryConfig = TelemetryConfig()
     ) {
         self.workspaces = workspaces
         self.defaults = defaults
         self.notifications = notifications
         self.sidebar = sidebar
         self.remoteControlEnabled = remoteControlEnabled
+        self.telemetry = telemetry
     }
 
     public init(from decoder: Decoder) throws {
@@ -33,10 +36,11 @@ public struct AppConfig: Codable, Sendable, Equatable {
         notifications = try container.decodeIfPresent(NotificationSettings.self, forKey: .notifications) ?? NotificationSettings()
         sidebar = try container.decodeIfPresent(SidebarSettings.self, forKey: .sidebar) ?? SidebarSettings()
         remoteControlEnabled = try container.decodeIfPresent(Bool.self, forKey: .remoteControlEnabled) ?? false
+        telemetry = try container.decodeIfPresent(TelemetryConfig.self, forKey: .telemetry) ?? TelemetryConfig()
     }
 
     private enum CodingKeys: String, CodingKey {
-        case workspaces, defaults, notifications, sidebar, remoteControlEnabled
+        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, telemetry
     }
 }
 
@@ -144,5 +148,21 @@ public struct SidebarSettings: Codable, Sendable, Equatable {
 
     public init(hideSessionDetails: Bool = false) {
         self.hideSessionDetails = hideSessionDetails
+    }
+}
+
+/// Telemetry collection settings for Claude Code OTLP metrics.
+public struct TelemetryConfig: Codable, Sendable, Equatable {
+    /// Whether the OTLP receiver is enabled.
+    public var enabled: Bool
+    /// Port for the OTLP HTTP receiver (default: 4318).
+    public var port: UInt16
+    /// Number of days to retain telemetry data. 0 disables pruning (keep forever).
+    public var retentionDays: Int
+
+    public init(enabled: Bool = false, port: UInt16 = 4318, retentionDays: Int = 180) {
+        self.enabled = enabled
+        self.port = port
+        self.retentionDays = retentionDays
     }
 }

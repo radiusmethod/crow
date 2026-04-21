@@ -189,6 +189,14 @@ public struct SessionDetailView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             }
+
+            // Row 4: Session Analytics (if telemetry data exists)
+            if let analytics = appState.hookState(for: session.id).analytics {
+                Divider().overlay(CorveilTheme.borderSubtle).padding(.horizontal, 16)
+                SessionAnalyticsStrip(analytics: analytics)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+            }
         }
         .background(CorveilTheme.bgSurface)
     }

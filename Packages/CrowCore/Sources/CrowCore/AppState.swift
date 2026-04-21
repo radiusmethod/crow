@@ -343,6 +343,7 @@ public final class SessionHookState {
     public var pendingNotification: HookNotification?
     public var lastToolActivity: ToolActivity?
     public var hookEvents: [HookEvent] = []
+    public var analytics: SessionAnalytics?
 
     public init() {}
 }
