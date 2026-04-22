@@ -920,6 +920,10 @@ final class SessionService {
         updateSessionStatus(id, to: .inReview)
     }
 
+    func setSessionActive(id: UUID) {
+        updateSessionStatus(id, to: .active)
+    }
+
     // MARK: - Persist Current State
 
     /// Sync all in-memory state back to the JSON store on disk.

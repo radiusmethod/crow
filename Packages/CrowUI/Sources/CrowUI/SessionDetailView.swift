@@ -176,6 +176,18 @@ public struct SessionDetailView: View {
                         .tint(CorveilTheme.gold)
                     }
 
+                    if session.status == .completed {
+                        Button {
+                            appState.onSetSessionActive?(session.id)
+                        } label: {
+                            Label("Move to Active", systemImage: "arrow.uturn.backward.circle")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .tint(CorveilTheme.gold)
+                    }
+
                     Button(role: .destructive) {
                         sessionToDelete = session
                     } label: {
