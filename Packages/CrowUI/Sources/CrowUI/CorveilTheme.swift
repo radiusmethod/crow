@@ -82,7 +82,7 @@ public struct BrandmarkImage: View {
 
     static func load() -> NSImage? {
         for bundle in Bundle.allBundles {
-            if let url = bundle.url(forResource: "CorveilBrandmark", withExtension: "png"),
+            if let url = bundle.url(forResource: "CorveilBrandmark", withExtension: "svg"),
                let image = NSImage(contentsOf: url) {
                 return image
             }
