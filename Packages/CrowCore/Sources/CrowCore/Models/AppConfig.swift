@@ -13,6 +13,9 @@ public struct AppConfig: Codable, Sendable, Equatable {
     public var remoteControlEnabled: Bool
     public var managerAutoPermissionMode: Bool
     public var telemetry: TelemetryConfig
+    /// The agent used for newly created sessions when none is specified.
+    /// Existing persisted configs without this key decode to `.claudeCode`.
+    public var defaultAgentKind: AgentKind
 
     public init(
         workspaces: [WorkspaceInfo] = [],
@@ -21,7 +24,8 @@ public struct AppConfig: Codable, Sendable, Equatable {
         sidebar: SidebarSettings = SidebarSettings(),
         remoteControlEnabled: Bool = false,
         managerAutoPermissionMode: Bool = true,
-        telemetry: TelemetryConfig = TelemetryConfig()
+        telemetry: TelemetryConfig = TelemetryConfig(),
+        defaultAgentKind: AgentKind = .claudeCode
     ) {
         self.workspaces = workspaces
         self.defaults = defaults
@@ -30,6 +34,7 @@ public struct AppConfig: Codable, Sendable, Equatable {
         self.remoteControlEnabled = remoteControlEnabled
         self.managerAutoPermissionMode = managerAutoPermissionMode
         self.telemetry = telemetry
+        self.defaultAgentKind = defaultAgentKind
     }
 
     public init(from decoder: Decoder) throws {
@@ -41,10 +46,11 @@ public struct AppConfig: Codable, Sendable, Equatable {
         remoteControlEnabled = try container.decodeIfPresent(Bool.self, forKey: .remoteControlEnabled) ?? false
         managerAutoPermissionMode = try container.decodeIfPresent(Bool.self, forKey: .managerAutoPermissionMode) ?? true
         telemetry = try container.decodeIfPresent(TelemetryConfig.self, forKey: .telemetry) ?? TelemetryConfig()
+        defaultAgentKind = try container.decodeIfPresent(AgentKind.self, forKey: .defaultAgentKind) ?? .claudeCode
     }
 
     private enum CodingKeys: String, CodingKey {
-        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, telemetry
+        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, telemetry, defaultAgentKind
     }
 }
 

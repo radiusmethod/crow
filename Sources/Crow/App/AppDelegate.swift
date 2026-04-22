@@ -121,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.remoteControlEnabled = config.remoteControlEnabled
         appState.managerAutoPermissionMode = config.managerAutoPermissionMode
         appState.excludeReviewRepos = config.defaults.excludeReviewRepos
+        appState.defaultAgentKind = config.defaultAgentKind
 
         // Create session service and hydrate state
         let service = SessionService(store: store, appState: appState, telemetryPort: config.telemetry.enabled ? config.telemetry.port : nil)
@@ -489,6 +490,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.remoteControlEnabled = config.remoteControlEnabled
         appState.managerAutoPermissionMode = config.managerAutoPermissionMode
         appState.excludeReviewRepos = config.defaults.excludeReviewRepos
+        appState.defaultAgentKind = config.defaultAgentKind
     }
 
     // MARK: - Socket Server
@@ -520,11 +522,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard AppDelegate.isValidSessionName(name) else {
                     throw RPCError.invalidParams("Invalid session name (max \(AppDelegate.maxSessionNameLength) chars, no control characters)")
                 }
+                // Optional `agent_kind` param (e.g. "claude-code"). Falls
+                // back to the app-wide default when absent or empty.
+                let requestedAgentKind = params["agent_kind"]?.stringValue
+                    .flatMap { $0.isEmpty ? nil : AgentKind(rawValue: $0) }
                 return await MainActor.run {
-                    let session = Session(name: name)
+                    let agentKind = requestedAgentKind ?? capturedAppState.defaultAgentKind
+                    let session = Session(name: name, agentKind: agentKind)
                     capturedAppState.sessions.append(session)
                     capturedStore.mutate { $0.sessions.append(session) }
-                    return ["session_id": .string(session.id.uuidString), "name": .string(session.name)]
+                    return [
+                        "session_id": .string(session.id.uuidString),
+                        "name": .string(session.name),
+                        "agent_kind": .string(session.agentKind.rawValue),
+                    ]
                 }
             },
             "rename-session": { @Sendable params in

@@ -247,10 +247,13 @@ final class SessionService {
     func ensureManagerSession(devRoot: String) {
         let managerID = AppState.managerSessionID
         if !appState.sessions.contains(where: { $0.id == managerID }) {
+            // Manager is pinned to Claude Code per the agent-abstraction
+                // spec — never honors AppConfig.defaultAgentKind.
             let manager = Session(
                 id: managerID,
                 name: "Manager",
-                status: .active
+                status: .active,
+                agentKind: .claudeCode
             )
             appState.sessions.insert(manager, at: 0)
 
@@ -630,6 +633,7 @@ final class SessionService {
         let session = Session(
             name: dirName,
             status: .active,
+            agentKind: appState.defaultAgentKind,
             ticketURL: ticket.url,
             ticketTitle: ticket.title,
             ticketNumber: ticket.number,
@@ -848,6 +852,7 @@ final class SessionService {
         let session = Session(
             name: "review-\(repoName)-\(prNumber)",
             kind: .review,
+            agentKind: appState.defaultAgentKind,
             ticketTitle: prTitle,
             provider: .github
         )

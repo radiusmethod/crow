@@ -7,6 +7,8 @@ import CrowCore
 /// through the generic `CodingAgent` interface.
 public struct ClaudeCodeAgent: CodingAgent {
     public let kind: AgentKind = .claudeCode
+    public let displayName: String = "Claude Code"
+    public let iconSystemName: String = "sparkles"
     public let hookConfigWriter: any HookConfigWriter
     public let stateSignalSource: any StateSignalSource
 

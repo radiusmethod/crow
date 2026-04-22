@@ -385,6 +385,10 @@ struct SessionRow: View {
         return appState.terminalReadiness[primary.id]
     }
 
+    private var agent: (any CodingAgent)? {
+        AgentRegistry.shared.agent(for: session.agentKind)
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             if isSelectionMode {
@@ -418,6 +422,12 @@ struct SessionRow: View {
         VStack(alignment: .leading, spacing: 3) {
             // Row 1: Name + status indicator
             HStack(spacing: 4) {
+                if let agent {
+                    Image(systemName: agent.iconSystemName)
+                        .font(.caption2)
+                        .foregroundStyle(CorveilTheme.textSecondary)
+                        .help(agent.displayName)
+                }
                 Text(session.name)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(CorveilTheme.textPrimary)

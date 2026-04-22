@@ -139,6 +139,15 @@ public struct SettingsView: View {
                 }
                 .onChange(of: config.defaults.provider) { _, _ in save() }
 
+                Picker("Default Agent", selection: $config.defaultAgentKind) {
+                    ForEach(AgentRegistry.shared.allAgents(), id: \.kind) { agent in
+                        Label(agent.displayName, systemImage: agent.iconSystemName)
+                            .tag(agent.kind)
+                    }
+                }
+                .onChange(of: config.defaultAgentKind) { _, _ in save() }
+                .disabled(AgentRegistry.shared.allAgents().count < 2)
+
                 TextField("Branch Prefix", text: $config.defaults.branchPrefix)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { save() }

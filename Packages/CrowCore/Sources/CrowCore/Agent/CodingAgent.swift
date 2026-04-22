@@ -7,6 +7,15 @@ public protocol CodingAgent: Sendable {
     /// Stable identifier for this agent implementation.
     var kind: AgentKind { get }
 
+    /// Human-readable name shown in pickers, tooltips, and the session detail
+    /// header (e.g. "Claude Code").
+    var displayName: String { get }
+
+    /// SF Symbol name rendered in the sidebar row and pickers. Kept as a
+    /// string so `CrowCore` stays SwiftUI-free; consumers resolve it via
+    /// `Image(systemName:)`.
+    var iconSystemName: String { get }
+
     /// Writer for the per-worktree hook configuration file.
     var hookConfigWriter: any HookConfigWriter { get }
 
