@@ -190,6 +190,9 @@ public final class AppState {
     /// Called to update session status to .inReview (persists to store).
     public var onSetSessionInReview: ((UUID) -> Void)?
 
+    /// Called to update session status back to .active (persists to store).
+    public var onSetSessionActive: ((UUID) -> Void)?
+
     /// Whether a given session is currently being marked as "In Review" (loading state).
     /// Must be cleaned up when a session is deleted (see `SessionService.deleteSession`).
     public var isMarkingInReview: [UUID: Bool] = [:]
