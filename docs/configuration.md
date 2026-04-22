@@ -58,6 +58,15 @@ All persistent state lives under `~/Library/Application Support/crow/` (see `Pac
 - **`branchPrefix`** — used by the `/crow-workspace` skill when creating new branches.
 - **`excludeDirs`** — ignored when scanning repos for git worktrees.
 
+## Manager Terminal
+
+The Manager tab runs Claude Code at the dev root and drives workspace orchestration. Its behavior is controlled by these top-level keys in `{devRoot}/.claude/config.json`:
+
+- **`managerAutoPermissionMode`** (default: `true`) — passes `--permission-mode auto` to the Manager's `claude` launch so it can run `crow`, `gh`, and `git` commands without per-call approval. Requires Claude Code **v2.1.83+**, a **Max / Team / Enterprise / API** plan, the **Anthropic** API provider (not Bedrock / Vertex / Foundry), and a supported model (**Sonnet 4.6**, **Opus 4.6**, or **Opus 4.7**). On Team/Enterprise plans an admin must enable auto mode in Claude Code admin settings. Turn this off via **Settings → General → Manager Terminal** if your account reports auto mode as unavailable. Worker sessions and CLI-spawned terminals are unaffected by this setting.
+- **`remoteControlEnabled`** (default: `false`) — launches new Claude Code sessions with `--rc` so you can control them from claude.ai or the Claude mobile app.
+
+Changes take effect on next app launch — the Manager's stored command is rebuilt on hydration.
+
 ## Directory Structure
 
 Crow expects repositories organized under workspace folders:

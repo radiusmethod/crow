@@ -11,6 +11,7 @@ public struct AppConfig: Codable, Sendable, Equatable {
     public var notifications: NotificationSettings
     public var sidebar: SidebarSettings
     public var remoteControlEnabled: Bool
+    public var managerAutoPermissionMode: Bool
     public var telemetry: TelemetryConfig
 
     public init(
@@ -19,6 +20,7 @@ public struct AppConfig: Codable, Sendable, Equatable {
         notifications: NotificationSettings = NotificationSettings(),
         sidebar: SidebarSettings = SidebarSettings(),
         remoteControlEnabled: Bool = false,
+        managerAutoPermissionMode: Bool = true,
         telemetry: TelemetryConfig = TelemetryConfig()
     ) {
         self.workspaces = workspaces
@@ -26,6 +28,7 @@ public struct AppConfig: Codable, Sendable, Equatable {
         self.notifications = notifications
         self.sidebar = sidebar
         self.remoteControlEnabled = remoteControlEnabled
+        self.managerAutoPermissionMode = managerAutoPermissionMode
         self.telemetry = telemetry
     }
 
@@ -36,11 +39,12 @@ public struct AppConfig: Codable, Sendable, Equatable {
         notifications = try container.decodeIfPresent(NotificationSettings.self, forKey: .notifications) ?? NotificationSettings()
         sidebar = try container.decodeIfPresent(SidebarSettings.self, forKey: .sidebar) ?? SidebarSettings()
         remoteControlEnabled = try container.decodeIfPresent(Bool.self, forKey: .remoteControlEnabled) ?? false
+        managerAutoPermissionMode = try container.decodeIfPresent(Bool.self, forKey: .managerAutoPermissionMode) ?? true
         telemetry = try container.decodeIfPresent(TelemetryConfig.self, forKey: .telemetry) ?? TelemetryConfig()
     }
 
     private enum CodingKeys: String, CodingKey {
-        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, telemetry
+        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, telemetry
     }
 }
 

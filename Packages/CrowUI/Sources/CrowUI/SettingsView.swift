@@ -164,6 +164,14 @@ public struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Manager Terminal") {
+                Toggle("Launch in auto permission mode", isOn: $config.managerAutoPermissionMode)
+                    .onChange(of: config.managerAutoPermissionMode) { _, _ in save() }
+                Text("Passes --permission-mode auto so the Manager can run crow, gh, and git commands without per-call approval. Requires Claude Code 2.1.83+ on a Max, Team, Enterprise, or API plan with the Anthropic provider. Turn off if your account reports auto mode as unavailable. Takes effect on next app launch.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Telemetry") {
                 Toggle("Enable session analytics", isOn: $config.telemetry.enabled)
                     .onChange(of: config.telemetry.enabled) { _, _ in save() }

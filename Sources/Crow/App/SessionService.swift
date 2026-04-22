@@ -65,13 +65,17 @@ final class SessionService {
                 }
             } else {
                 // Manager terminal: rebuild its claude command to match the
-                // current remoteControlEnabled preference. Unlike worker sessions
-                // the Manager launches claude directly as the shell command, so
-                // the stored string needs to be correct before preInitialize runs.
+                // current remoteControlEnabled and managerAutoPermissionMode
+                // preferences. Unlike worker sessions the Manager launches
+                // claude directly as the shell command, so the stored string
+                // needs to be correct before preInitialize runs.
                 let claudePath = Self.findClaudeBinary() ?? "claude"
                 let rcEnabled = appState.remoteControlEnabled
+                let autoMode = appState.managerAutoPermissionMode
                 let managerCommand = claudePath + ClaudeLaunchArgs.argsSuffix(
-                    remoteControl: rcEnabled, sessionName: "Manager"
+                    remoteControl: rcEnabled,
+                    sessionName: "Manager",
+                    autoPermissionMode: autoMode
                 )
                 for i in terminals.indices {
                     if let cmd = terminals[i].command, cmd.contains("claude") {
@@ -261,7 +265,12 @@ final class SessionService {
             // Find the real claude binary (skip CMUX wrapper)
             let claudePath = Self.findClaudeBinary() ?? "claude"
             let rcEnabled = appState.remoteControlEnabled
-            let managerCommand = claudePath + ClaudeLaunchArgs.argsSuffix(remoteControl: rcEnabled, sessionName: "Manager")
+            let autoMode = appState.managerAutoPermissionMode
+            let managerCommand = claudePath + ClaudeLaunchArgs.argsSuffix(
+                remoteControl: rcEnabled,
+                sessionName: "Manager",
+                autoPermissionMode: autoMode
+            )
             let terminal = SessionTerminal(
                 sessionID: managerID,
                 name: "Manager",
