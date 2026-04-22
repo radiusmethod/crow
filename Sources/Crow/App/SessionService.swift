@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import CrowClaude
 import CrowCore
 import CrowPersistence
 import CrowTerminal
@@ -262,7 +263,7 @@ final class SessionService {
                 }
             case .shellReady:
                 // Only advance forward — the `send` handler may have already
-                // set .claudeLaunched before this timer fires.
+                // set .agentLaunched before this timer fires.
                 if currentState < .shellReady {
                     self.appState.terminalReadiness[terminalID] = .shellReady
                 }
@@ -353,9 +354,9 @@ final class SessionService {
         // Write/refresh hook config for the session's worktree
         if let sessionID,
            let worktree = appState.primaryWorktree(for: sessionID),
-           let crowPath = HookConfigGenerator.findCrowBinary() {
+           let crowPath = ClaudeHookConfigWriter.findCrowBinary() {
             do {
-                try HookConfigGenerator.writeHookConfig(
+                try ClaudeHookConfigWriter().writeHookConfig(
                     worktreePath: worktree.worktreePath,
                     sessionID: sessionID,
                     crowPath: crowPath
@@ -417,7 +418,7 @@ final class SessionService {
             TerminalManager.shared.send(id: terminalID, text: claudeText)
         }
 
-        appState.terminalReadiness[terminalID] = .claudeLaunched
+        appState.terminalReadiness[terminalID] = .agentLaunched
         if rcEnabled {
             appState.remoteControlActiveTerminals.insert(terminalID)
         }
@@ -638,7 +639,7 @@ final class SessionService {
             }
 
             // Remove our hook config from settings.local.json before deleting the worktree
-            HookConfigGenerator.removeHookConfig(worktreePath: item.worktreePath)
+            ClaudeHookConfigWriter().removeHookConfig(worktreePath: item.worktreePath)
 
             var gitRemoveFailed = false
             do {
