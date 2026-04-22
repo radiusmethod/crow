@@ -39,6 +39,7 @@ import Testing
     #expect(config.notifications.globalMute == false)
     #expect(config.sidebar.hideSessionDetails == false)
     #expect(config.remoteControlEnabled == false)
+    #expect(config.managerAutoPermissionMode == true)
 }
 
 @Test func appConfigRemoteControlRoundTrip() throws {
@@ -48,6 +49,28 @@ import Testing
     let data = try JSONEncoder().encode(config)
     let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
     #expect(decoded.remoteControlEnabled == true)
+}
+
+@Test func appConfigManagerAutoPermissionModeRoundTrip() throws {
+    var config = AppConfig()
+    config.managerAutoPermissionMode = false
+
+    let data = try JSONEncoder().encode(config)
+    let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
+    #expect(decoded.managerAutoPermissionMode == false)
+
+    config.managerAutoPermissionMode = true
+    let data2 = try JSONEncoder().encode(config)
+    let decoded2 = try JSONDecoder().decode(AppConfig.self, from: data2)
+    #expect(decoded2.managerAutoPermissionMode == true)
+}
+
+@Test func appConfigManagerAutoPermissionModeDefaultsTrueWhenKeyMissing() throws {
+    // Legacy configs without the key should opt in by default so the Manager
+    // benefits from auto mode without requiring users to re-save settings.
+    let json = #"{"workspaces": [], "remoteControlEnabled": false}"#.data(using: .utf8)!
+    let config = try JSONDecoder().decode(AppConfig.self, from: json)
+    #expect(config.managerAutoPermissionMode == true)
 }
 
 @Test func appConfigDecodeWithPartialKeys() throws {

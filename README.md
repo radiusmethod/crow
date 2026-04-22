@@ -68,7 +68,7 @@ On first launch, a setup wizard guides you through choosing your development roo
 ### The Sidebar
 
 - **Tickets** — Assigned issues grouped by project board status (Backlog, Ready, In Progress, In Review, Done in last 24h). Click a status to filter.
-- **Manager** — A persistent Claude Code terminal for orchestrating work. Use `/crow-workspace` here to create new sessions.
+- **Manager** — A persistent Claude Code terminal for orchestrating work. Use `/crow-workspace` here to create new sessions. Launches in `--permission-mode auto` by default so orchestration commands (`crow`, `gh`, `git`) run without per-call approval; opt out via Settings → General → Manager Terminal.
 - **Active Sessions** — One per work context. Shows repo, branch, issue/PR badges with pipeline and review status.
 - **Completed Sessions** — Sessions whose PRs have been merged or issues closed.
 

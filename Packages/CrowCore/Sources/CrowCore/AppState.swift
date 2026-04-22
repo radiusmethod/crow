@@ -17,6 +17,12 @@ public final class AppState {
     /// controlled from claude.ai / the Claude mobile app. Mirrors `AppConfig.remoteControlEnabled`.
     public var remoteControlEnabled: Bool = false
 
+    /// Whether the Manager terminal launches with `--permission-mode auto` so it
+    /// can run `crow`, `gh`, and `git` commands without per-call approval.
+    /// Mirrors `AppConfig.managerAutoPermissionMode`. Applies only to the Manager
+    /// launch; worker sessions and CLI-spawned terminals are unaffected.
+    public var managerAutoPermissionMode: Bool = true
+
     /// Terminal IDs whose Claude Code was launched with `--rc` — drives the
     /// per-session indicator badge. Survives toggle changes so existing sessions
     /// keep showing the badge until they're restarted.

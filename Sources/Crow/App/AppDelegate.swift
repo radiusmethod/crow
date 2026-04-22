@@ -113,6 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // set before hydrateState so the Manager terminal's stored command can
         // be rebuilt to include (or drop) `--rc` before its surface is pre-initialized.
         appState.remoteControlEnabled = config.remoteControlEnabled
+        appState.managerAutoPermissionMode = config.managerAutoPermissionMode
 
         // Create session service and hydrate state
         let service = SessionService(store: store, appState: appState, telemetryPort: config.telemetry.enabled ? config.telemetry.port : nil)
@@ -443,6 +444,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notificationManager?.updateSettings(config.notifications)
         appState.hideSessionDetails = config.sidebar.hideSessionDetails
         appState.remoteControlEnabled = config.remoteControlEnabled
+        appState.managerAutoPermissionMode = config.managerAutoPermissionMode
     }
 
     // MARK: - Socket Server

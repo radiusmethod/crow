@@ -45,6 +45,23 @@ import Testing
     let loaded = ConfigStore.loadConfig(from: configURL)
     #expect(loaded != nil)
     #expect(loaded?.remoteControlEnabled == false)
+    // Legacy configs should opt in to auto permission mode by default so the
+    // Manager benefits without requiring users to re-save settings.
+    #expect(loaded?.managerAutoPermissionMode == true)
+}
+
+@Test func configStoreManagerAutoPermissionModeRoundTrip() throws {
+    let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let claudeDir = tmpDir.appendingPathComponent(".claude", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+    var config = AppConfig()
+    config.managerAutoPermissionMode = false
+    try ConfigStore.saveConfig(config, to: claudeDir)
+
+    let configURL = claudeDir.appendingPathComponent("config.json")
+    let loaded = ConfigStore.loadConfig(from: configURL)
+    #expect(loaded?.managerAutoPermissionMode == false)
 }
 
 @Test func configStoreLoadMissingFileReturnsNil() {
