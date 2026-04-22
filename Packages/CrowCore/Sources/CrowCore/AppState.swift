@@ -265,8 +265,8 @@ public final class AppState {
     /// Called when user clicks "Start Review" for multiple selected PR review requests (batch mode).
     public var onBatchStartReview: (([String]) -> Void)?  // receives array of PR URLs
 
-    /// Called to launch Claude in a terminal that just became ready.
-    public var onLaunchClaude: ((UUID) -> Void)?  // receives terminal ID
+    /// Called to launch the coding agent in a terminal that just became ready.
+    public var onLaunchAgent: ((UUID) -> Void)?  // receives terminal ID
 
     /// Called to relaunch the Manager's `claude` process after it exited, while
     /// preserving the Manager session identity. Wired to `SessionService.restartManager`.
@@ -518,13 +518,13 @@ public struct GitHubRateLimit: Equatable, Sendable {
 
 // MARK: - Per-Session Hook State
 
-/// Observable wrapper for per-session hook/Claude state.
+/// Observable wrapper for per-session agent/hook state.
 /// Using a reference-type @Observable class ensures that mutations to one session's
 /// state only invalidate views observing THAT session's instance — not all sessions.
 @MainActor
 @Observable
 public final class SessionHookState {
-    public var claudeState: ClaudeState = .idle
+    public var activityState: AgentActivityState = .idle
     public var pendingNotification: HookNotification?
     public var lastToolActivity: ToolActivity?
     public var hookEvents: [HookEvent] = []
@@ -548,16 +548,16 @@ public final class SessionHookState {
 /// excluded: it changes on every `PostToolUse` (very high frequency), only
 /// feeds the badge text (not colors), and would be stale after relaunch anyway.
 public struct PersistedHookState: Codable, Sendable, Equatable {
-    public var claudeState: ClaudeState
+    public var activityState: AgentActivityState
     public var pendingNotification: HookNotification?
     public var lastTopLevelStopAt: Date?
 
     public init(
-        claudeState: ClaudeState = .idle,
+        activityState: AgentActivityState = .idle,
         pendingNotification: HookNotification? = nil,
         lastTopLevelStopAt: Date? = nil
     ) {
-        self.claudeState = claudeState
+        self.activityState = activityState
         self.pendingNotification = pendingNotification
         self.lastTopLevelStopAt = lastTopLevelStopAt
     }
@@ -568,7 +568,7 @@ extension SessionHookState {
     /// Capture the persistable, color-driving subset of this state.
     public var persistedSnapshot: PersistedHookState {
         PersistedHookState(
-            claudeState: claudeState,
+            activityState: activityState,
             pendingNotification: pendingNotification,
             lastTopLevelStopAt: lastTopLevelStopAt
         )
@@ -576,7 +576,7 @@ extension SessionHookState {
 
     /// Seed this state from a persisted snapshot (used on launch).
     public func apply(_ snapshot: PersistedHookState) {
-        claudeState = snapshot.claudeState
+        activityState = snapshot.activityState
         pendingNotification = snapshot.pendingNotification
         lastTopLevelStopAt = snapshot.lastTopLevelStopAt
     }

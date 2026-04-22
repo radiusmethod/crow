@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import CrowClaude
 import CrowCore
 import CrowGit
 import CrowPersistence
@@ -254,7 +255,7 @@ final class SessionService {
                 // launchClaude's `== .shellReady` guard can never fire.
                 appState.autoLaunchTerminals.remove(terminal.id)
                 if appState.terminalReadiness[terminal.id] != nil {
-                    appState.terminalReadiness[terminal.id] = .claudeLaunched
+                    appState.terminalReadiness[terminal.id] = .agentLaunched
                 }
                 // Adoption skips launchClaude, so re-apply its two UI-affecting
                 // side effects here (#367). Gate on trackReadiness — true only for
@@ -281,14 +282,14 @@ final class SessionService {
                     }
                     // Emulate the SessionStart(source: resume) hook that pre-#330
                     // relaunch fired (via re-running `claude --continue`), which set
-                    // claudeState to .done — so an adopted, idle-at-the-prompt Claude
+                    // activityState to .done — so an adopted, idle-at-the-prompt Claude
                     // shows the "done" green card like it used to (#367). A persisted
                     // in-progress state (working/waiting) was already restored in
                     // hydrateState and is more specific, so only fill in .done when
                     // nothing meaningful was restored (still the .idle default).
                     let hookState = appState.hookState(for: terminal.sessionID)
-                    if hookState.claudeState == .idle {
-                        hookState.claudeState = .done
+                    if hookState.activityState == .idle {
+                        hookState.activityState = .done
                     }
                 }
                 return terminal  // binding unchanged → no redundant persist
@@ -332,7 +333,7 @@ final class SessionService {
             NSLog("[SessionService] tmux readiness: terminal=\(terminalID), state=\(readiness), current=\(currentState)")
             if readiness == .shellReady, currentState < .shellReady {
                 self.appState.terminalReadiness[terminalID] = .shellReady
-                self.launchClaude(terminalID: terminalID)
+                self.launchAgent(terminalID: terminalID)
             } else if readiness == .timedOut, currentState < .shellReady {
                 // First-prompt watch expired. Do NOT advance to .shellReady or
                 // auto-paste — the shell may still be starting and a paste now
@@ -384,7 +385,7 @@ final class SessionService {
     ///
     /// Writes hook configuration to the session's worktree first so that
     /// Claude Code picks up the hooks on startup.
-    func launchClaude(terminalID: UUID) {
+    func launchAgent(terminalID: UUID) {
         guard appState.terminalReadiness[terminalID] == .shellReady else { return }
         // Only auto-launch for restored/recovered terminals, not brand-new ones
         guard appState.autoLaunchTerminals.remove(terminalID) != nil else { return }
@@ -397,9 +398,9 @@ final class SessionService {
         // Write/refresh hook config for the session's worktree
         if let sessionID,
            let worktree = appState.primaryWorktree(for: sessionID),
-           let crowPath = HookConfigGenerator.findCrowBinary() {
+           let crowPath = ClaudeHookConfigWriter.findCrowBinary() {
             do {
-                try HookConfigGenerator.writeHookConfig(
+                try ClaudeHookConfigWriter().writeHookConfig(
                     worktreePath: worktree.worktreePath,
                     sessionID: sessionID,
                     crowPath: crowPath
@@ -466,10 +467,10 @@ final class SessionService {
         if let routedTerminal {
             TerminalRouter.send(routedTerminal, text: claudeText)
         } else {
-            NSLog("[SessionService] launchClaude: no terminal record for \(terminalID); cannot send")
+            NSLog("[SessionService] launchAgent: no terminal record for \(terminalID); cannot send")
         }
 
-        appState.terminalReadiness[terminalID] = .claudeLaunched
+        appState.terminalReadiness[terminalID] = .agentLaunched
         if rcEnabled {
             appState.remoteControlActiveTerminals.insert(terminalID)
         }
@@ -771,7 +772,7 @@ final class SessionService {
             }
 
             // Remove our hook config from settings.local.json before deleting the worktree
-            HookConfigGenerator.removeHookConfig(worktreePath: item.worktreePath)
+            ClaudeHookConfigWriter().removeHookConfig(worktreePath: item.worktreePath)
 
             var gitRemoveFailed = false
             do {
