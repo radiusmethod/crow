@@ -38,7 +38,7 @@ let package = Package(
             path: "Sources/Crow",
             resources: [
                 .copy("Resources/AppIcon.png"),
-                .copy("Resources/CorveilBrandmark.png"),
+                .copy("Resources/CorveilBrandmark.svg"),
             ],
             linkerSettings: [
                 .linkedFramework("Carbon"),
