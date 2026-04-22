@@ -230,9 +230,16 @@ final class IssueTracker {
             // for every viewer (which routinely returned 100 PRs / ~86 KB).
             let openPRURLs = Set(ghResult.viewerPRs.map(\.url))
             let staleCandidateURLs = collectStalePRURLs(excluding: openPRURLs)
-            let stalePRs = staleCandidateURLs.isEmpty
+            // nil here means the follow-up fetch errored (rate limit, exit != 0,
+            // parse failure). We thread that through to auto-complete so
+            // "PR missing from payload" doesn't get treated as "PR is closed"
+            // on a degraded response. An empty list with no candidate URLs is
+            // a real empty success.
+            let staleFetchResult: [ViewerPR]? = staleCandidateURLs.isEmpty
                 ? []
                 : await fetchStalePRStates(urls: staleCandidateURLs)
+            let stalePRs = staleFetchResult ?? []
+            let prDataComplete = staleFetchResult != nil
             let allKnownPRs = Self.dedupedByURL(ghResult.viewerPRs + stalePRs)
 
             applyPRStatuses(viewerPRs: allKnownPRs)
@@ -261,9 +268,15 @@ final class IssueTracker {
             syncInReviewSessions(issues: allIssues)
             autoCompleteFinishedSessions(
                 openIssues: allIssues.filter { $0.state == "open" },
-                viewerPRs: allKnownPRs
+                closedIssueURLs: Set(ghResult.closedIssues.map(\.url)),
+                viewerPRs: allKnownPRs,
+                prDataComplete: prDataComplete
             )
-            autoCompleteFinishedReviews(openReviewPRURLs: Set(reviews.map(\.url)))
+            autoCompleteFinishedReviews(
+                openReviewPRURLs: Set(reviews.map(\.url)),
+                prsByURL: Dictionary(allKnownPRs.map { ($0.url, $0) }, uniquingKeysWith: Self.mergePRRecords),
+                prDataComplete: prDataComplete
+            )
 
             clearRateLimitWarning()
         }
@@ -529,7 +542,9 @@ final class IssueTracker {
     /// open viewer set (typically merged or closed). Returns minimal `ViewerPR`
     /// records — only `state`, `url`, repo, and branch refs are populated;
     /// checks/reviews are left empty since they're moot for closed PRs.
-    private func fetchStalePRStates(urls: [String]) async -> [ViewerPR] {
+    /// Returns `nil` if the shell call or response parse fails, so callers
+    /// can distinguish a partial fetch from a successful empty result.
+    private func fetchStalePRStates(urls: [String]) async -> [ViewerPR]? {
         // Parse each URL into (owner, repo, number); skip any we can't parse.
         var parsed: [(url: String, owner: String, repo: String, number: Int)] = []
         for url in urls {
@@ -569,17 +584,17 @@ final class IssueTracker {
 
         let result = await shellWithStatus(args: args)
         if result.exitCode != 0 {
-            if handleGraphQLRateLimit(stderr: result.stderr) { return [] }
+            if handleGraphQLRateLimit(stderr: result.stderr) { return nil }
             print("[IssueTracker] Stale-PR follow-up failed (exit \(result.exitCode)): \(result.stderr.prefix(200))")
-            return []
+            return nil
         }
         return parseStalePRResponse(result.stdout, count: parsed.count)
     }
 
-    private func parseStalePRResponse(_ output: String, count: Int) -> [ViewerPR] {
+    private func parseStalePRResponse(_ output: String, count: Int) -> [ViewerPR]? {
         guard let data = output.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let dataObj = json["data"] as? [String: Any] else { return [] }
+              let dataObj = json["data"] as? [String: Any] else { return nil }
 
         if let rl = parseRateLimit(dataObj["rateLimit"] as? [String: Any]) {
             appState.githubRateLimit = rl
@@ -1005,12 +1020,123 @@ final class IssueTracker {
         }
     }
 
-    /// Check active sessions whose linked ticket is no longer in the open issues
-    /// list. If the session has a PR link, use the merged/closed state from the
-    /// payload (open PRs come from the viewer query, merged/closed PRs from the
-    /// stale-PR follow-up). Open PRs hold off completion in case the issue was
-    /// closed accidentally.
-    private func autoCompleteFinishedSessions(openIssues: [AssignedIssue], viewerPRs: [ViewerPR]) {
+    /// Decision returned by `decideSessionCompletions` — carries both the
+    /// session to complete and a short reason used in the log line emitted
+    /// by the adapter.
+    struct CompletionDecision: Equatable {
+        let sessionID: UUID
+        let reason: String
+    }
+
+    /// Result of a completion-decision pass. `floorGuardTriggered` is `true`
+    /// when the decider refused to complete anything because the fetched
+    /// open-issue set was empty while candidate sessions had ticket URLs —
+    /// a strong indicator that the underlying GraphQL response was partial
+    /// or errored. Surfaced so the adapter can log a warning and tests can
+    /// assert the guard fired.
+    struct CompletionResult: Equatable {
+        let completions: [CompletionDecision]
+        let floorGuardTriggered: Bool
+    }
+
+    /// Decide which candidate sessions should be auto-completed based on
+    /// the current refresh payload. Requires positive evidence of closure:
+    /// a PR-linked session needs its PR in `prsByURL` with state `MERGED`
+    /// or `CLOSED`; an issue-only session needs its ticket URL in
+    /// `closedIssueURLs`. Missing-from-open is no longer sufficient.
+    ///
+    /// `prDataComplete` is `false` when the stale-PR follow-up errored
+    /// (rate-limited, non-zero exit, parse failure). In that case, PR-linked
+    /// completions are skipped entirely to avoid completing on stale data.
+    nonisolated static func decideSessionCompletions(
+        candidateSessions: [Session],
+        linksBySessionID: [UUID: [SessionLink]],
+        openIssueURLs: Set<String>,
+        closedIssueURLs: Set<String>,
+        prsByURL: [String: ViewerPR],
+        prDataComplete: Bool
+    ) -> CompletionResult {
+        let withTickets = candidateSessions.filter { $0.ticketURL != nil }
+
+        // Floor guard: if we have candidates but openIssueURLs is empty, the
+        // consolidated query likely returned partial data. Skip this cycle.
+        // This is belt-and-suspenders — the positive-evidence rules below
+        // already refuse to complete without a MERGED/CLOSED PR or a
+        // closedIssueURLs hit — but the guard catches future regressions
+        // that reintroduce an absence-based path.
+        if !withTickets.isEmpty && openIssueURLs.isEmpty {
+            return CompletionResult(completions: [], floorGuardTriggered: true)
+        }
+
+        var decisions: [CompletionDecision] = []
+        for session in withTickets {
+            guard let ticketURL = session.ticketURL else { continue }
+            if openIssueURLs.contains(ticketURL) { continue }
+
+            let sessionLinks = linksBySessionID[session.id] ?? []
+            if let prLink = sessionLinks.first(where: { $0.linkType == .pr }) {
+                guard prDataComplete else { continue }
+                guard let pr = prsByURL[prLink.url] else { continue }
+                switch pr.state {
+                case "MERGED":
+                    decisions.append(CompletionDecision(sessionID: session.id, reason: "PR merged"))
+                case "CLOSED":
+                    decisions.append(CompletionDecision(sessionID: session.id, reason: "PR closed"))
+                default:
+                    break
+                }
+                continue
+            }
+
+            if session.provider == .github || session.provider == nil {
+                if closedIssueURLs.contains(ticketURL) {
+                    decisions.append(CompletionDecision(sessionID: session.id, reason: "issue closed"))
+                }
+            }
+        }
+        return CompletionResult(completions: decisions, floorGuardTriggered: false)
+    }
+
+    /// Decide which review sessions should be auto-completed. Requires the
+    /// PR to be present in `prsByURL` with state `MERGED` or `CLOSED` — the
+    /// old "missing from open review queue == done" rule was unsafe under
+    /// partial fetches.
+    nonisolated static func decideReviewCompletions(
+        reviewSessions: [Session],
+        linksBySessionID: [UUID: [SessionLink]],
+        openReviewPRURLs: Set<String>,
+        prsByURL: [String: ViewerPR],
+        prDataComplete: Bool
+    ) -> [CompletionDecision] {
+        guard prDataComplete else { return [] }
+
+        var decisions: [CompletionDecision] = []
+        for session in reviewSessions {
+            let sessionLinks = linksBySessionID[session.id] ?? []
+            guard let prLink = sessionLinks.first(where: { $0.linkType == .pr }) else { continue }
+            if openReviewPRURLs.contains(prLink.url) { continue }
+            guard let pr = prsByURL[prLink.url] else { continue }
+            switch pr.state {
+            case "MERGED":
+                decisions.append(CompletionDecision(sessionID: session.id, reason: "PR merged"))
+            case "CLOSED":
+                decisions.append(CompletionDecision(sessionID: session.id, reason: "PR closed"))
+            default:
+                break
+            }
+        }
+        return decisions
+    }
+
+    /// Check active sessions whose linked ticket is no longer in the open
+    /// issues list. Delegates to `decideSessionCompletions` so the decision
+    /// logic is covered by unit tests without a shell/Process abstraction.
+    private func autoCompleteFinishedSessions(
+        openIssues: [AssignedIssue],
+        closedIssueURLs: Set<String>,
+        viewerPRs: [ViewerPR],
+        prDataComplete: Bool
+    ) {
         let openIssueURLs = Set(openIssues.map(\.url))
         let prsByURL = Dictionary(viewerPRs.map { ($0.url, $0) }, uniquingKeysWith: Self.mergePRRecords)
 
@@ -1018,51 +1144,60 @@ final class IssueTracker {
             $0.id != AppState.managerSessionID &&
             ($0.status == .active || $0.status == .paused || $0.status == .inReview)
         }
+        var linksBySessionID: [UUID: [SessionLink]] = [:]
         for session in candidateSessions {
-            guard let ticketURL = session.ticketURL else { continue }
-            if openIssueURLs.contains(ticketURL) { continue }
+            linksBySessionID[session.id] = appState.links(for: session.id)
+        }
 
-            let sessionLinks = appState.links(for: session.id)
-            if let prLink = sessionLinks.first(where: { $0.linkType == .pr }) {
-                if let pr = prsByURL[prLink.url] {
-                    switch pr.state {
-                    case "MERGED":
-                        print("[IssueTracker] Session '\(session.name)' — PR merged, marking completed")
-                        appState.onCompleteSession?(session.id)
-                    case "CLOSED":
-                        print("[IssueTracker] Session '\(session.name)' — PR closed, marking completed")
-                        appState.onCompleteSession?(session.id)
-                    default:
-                        // OPEN: hold off (issue may have been closed accidentally).
-                        break
-                    }
-                } else {
-                    // PR not in any payload (deleted, no access, or the
-                    // follow-up query failed) — fall back to absence == done.
-                    print("[IssueTracker] Session '\(session.name)' — PR no longer open, marking completed")
-                    appState.onCompleteSession?(session.id)
-                }
-                continue
-            }
+        let result = Self.decideSessionCompletions(
+            candidateSessions: candidateSessions,
+            linksBySessionID: linksBySessionID,
+            openIssueURLs: openIssueURLs,
+            closedIssueURLs: closedIssueURLs,
+            prsByURL: prsByURL,
+            prDataComplete: prDataComplete
+        )
 
-            // No PR link — issue isn't open, so it was closed directly.
-            if session.provider == .github || session.provider == nil {
-                print("[IssueTracker] Session '\(session.name)' — issue closed, marking completed")
-                appState.onCompleteSession?(session.id)
-            }
+        if result.floorGuardTriggered {
+            let count = candidateSessions.filter { $0.ticketURL != nil }.count
+            print("[IssueTracker] skipping auto-complete — openIssues empty with \(count) candidate sessions (likely partial fetch)")
+            return
+        }
+
+        let sessionsByID = Dictionary(uniqueKeysWithValues: candidateSessions.map { ($0.id, $0) })
+        for decision in result.completions {
+            let name = sessionsByID[decision.sessionID]?.name ?? decision.sessionID.uuidString
+            print("[IssueTracker] Session '\(name)' — \(decision.reason), marking completed")
+            appState.onCompleteSession?(decision.sessionID)
         }
     }
 
-    /// Auto-complete review sessions whose PR is no longer in the open review
-    /// search — which implies it was merged, closed, or review-dismissed.
-    private func autoCompleteFinishedReviews(openReviewPRURLs: Set<String>) {
+    /// Auto-complete review sessions whose PR has been merged or closed.
+    /// Delegates to `decideReviewCompletions` for testability.
+    private func autoCompleteFinishedReviews(
+        openReviewPRURLs: Set<String>,
+        prsByURL: [String: ViewerPR],
+        prDataComplete: Bool
+    ) {
         let activeReviews = appState.sessions.filter { $0.kind == .review && $0.status == .active }
+        var linksBySessionID: [UUID: [SessionLink]] = [:]
         for session in activeReviews {
-            let sessionLinks = appState.links(for: session.id)
-            guard let prLink = sessionLinks.first(where: { $0.linkType == .pr }) else { continue }
-            if openReviewPRURLs.contains(prLink.url) { continue }
-            print("[IssueTracker] Review session '\(session.name)' — PR no longer open for review, marking completed")
-            appState.onCompleteSession?(session.id)
+            linksBySessionID[session.id] = appState.links(for: session.id)
+        }
+
+        let decisions = Self.decideReviewCompletions(
+            reviewSessions: activeReviews,
+            linksBySessionID: linksBySessionID,
+            openReviewPRURLs: openReviewPRURLs,
+            prsByURL: prsByURL,
+            prDataComplete: prDataComplete
+        )
+
+        let sessionsByID = Dictionary(uniqueKeysWithValues: activeReviews.map { ($0.id, $0) })
+        for decision in decisions {
+            let name = sessionsByID[decision.sessionID]?.name ?? decision.sessionID.uuidString
+            print("[IssueTracker] Review session '\(name)' — \(decision.reason), marking completed")
+            appState.onCompleteSession?(decision.sessionID)
         }
     }
 
