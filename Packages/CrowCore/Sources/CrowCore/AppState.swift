@@ -54,6 +54,11 @@ public final class AppState {
     /// and enables the "Restart Manager" action. Reset when the Manager relaunches.
     public var managerProcessExited: Bool = false
 
+    /// The agent seeded into new sessions when the caller doesn't pick one.
+    /// Mirrors `AppConfig.defaultAgentKind` so creation flows can read the
+    /// current default without a config round-trip.
+    public var defaultAgentKind: AgentKind = .claudeCode
+
     /// Terminal IDs whose Claude Code was launched with `--rc` — drives the
     /// per-session indicator badge. Survives toggle changes so existing sessions
     /// keep showing the badge until they're restarted.

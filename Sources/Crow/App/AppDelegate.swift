@@ -394,6 +394,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.excludeReviewRepos = config.defaults.excludeReviewRepos
         appState.excludeTicketRepos = config.defaults.excludeTicketRepos
         appState.ignoreReviewLabels = config.defaults.ignoreReviewLabels
+        appState.defaultAgentKind = config.defaultAgentKind
 
         // Create session service and hydrate state
         let service = SessionService(store: store, appState: appState, telemetryPort: config.telemetry.enabled ? config.telemetry.port : nil)
@@ -1005,6 +1006,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.excludeReviewRepos = config.defaults.excludeReviewRepos
         appState.excludeTicketRepos = config.defaults.excludeTicketRepos
         appState.ignoreReviewLabels = config.defaults.ignoreReviewLabels
+        appState.defaultAgentKind = config.defaultAgentKind
     }
 
     /// Record a job's run time in the canonical `appConfig` and persist it, so
@@ -1059,18 +1061,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     throw RPCError.invalidParams("Invalid kind (expected work or manager)")
                 }
                 let isManagerKind = kindStr == "manager"
+                // Optional `agent_kind` param (e.g. "claude-code"). Falls
+                // back to the app-wide default when absent or empty.
+                let requestedAgentKind = params["agent_kind"]?.stringValue
+                    .flatMap { $0.isEmpty ? nil : AgentKind(rawValue: $0) }
                 return await MainActor.run {
                     // Manager sessions get their own Claude-Code terminal in the
-                    // devRoot, mirroring the primary Manager.
+                    // devRoot, mirroring the primary Manager. Manager is pinned to
+                    // Claude Code, so `agent_kind` is ignored for manager kind.
                     if isManagerKind {
                         let id = capturedService.createManagerSession(name: name, cwd: devRoot)
                         let createdName = capturedAppState.sessions.first(where: { $0.id == id })?.name ?? name
                         return ["session_id": .string(id.uuidString), "name": .string(createdName)]
                     }
-                    let session = Session(name: name, kind: .work)
+                    let agentKind = requestedAgentKind ?? capturedAppState.defaultAgentKind
+                    let session = Session(name: name, kind: .work, agentKind: agentKind)
                     capturedAppState.sessions.append(session)
                     capturedStore.mutate { $0.sessions.append(session) }
-                    return ["session_id": .string(session.id.uuidString), "name": .string(session.name)]
+                    return [
+                        "session_id": .string(session.id.uuidString),
+                        "name": .string(session.name),
+                        "agent_kind": .string(session.agentKind.rawValue),
+                    ]
                 }
             },
             "rename-session": { @Sendable params in
