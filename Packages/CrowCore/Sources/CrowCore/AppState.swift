@@ -178,8 +178,8 @@ public final class AppState {
     /// Called when user clicks "Start Review" for multiple selected PR review requests (batch mode).
     public var onBatchStartReview: (([String]) -> Void)?  // receives array of PR URLs
 
-    /// Called to launch Claude in a terminal that just became ready.
-    public var onLaunchClaude: ((UUID) -> Void)?  // receives terminal ID
+    /// Called to launch the coding agent in a terminal that just became ready.
+    public var onLaunchAgent: ((UUID) -> Void)?  // receives terminal ID
 
     /// Called to add a new plain-shell terminal tab to a session.
     public var onAddTerminal: ((UUID) -> Void)?  // receives session ID
@@ -356,13 +356,13 @@ public struct GitHubRateLimit: Equatable, Sendable {
 
 // MARK: - Per-Session Hook State
 
-/// Observable wrapper for per-session hook/Claude state.
+/// Observable wrapper for per-session agent/hook state.
 /// Using a reference-type @Observable class ensures that mutations to one session's
 /// state only invalidate views observing THAT session's instance — not all sessions.
 @MainActor
 @Observable
 public final class SessionHookState {
-    public var claudeState: ClaudeState = .idle
+    public var activityState: AgentActivityState = .idle
     public var pendingNotification: HookNotification?
     public var lastToolActivity: ToolActivity?
     public var hookEvents: [HookEvent] = []
