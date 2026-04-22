@@ -154,6 +154,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.onSetSessionInReview = { [weak service] id in
             service?.setSessionInReview(id: id)
         }
+        appState.onSetSessionActive = { [weak service] id in
+            service?.setSessionActive(id: id)
+        }
 
         appState.onLaunchClaude = { [weak service] terminalID in
             service?.launchClaude(terminalID: terminalID)
