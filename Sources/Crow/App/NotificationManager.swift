@@ -123,6 +123,23 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    // MARK: - Auto-Workspace Notifications
+
+    /// Notify the user that a workspace is being auto-created for a newly
+    /// assigned issue. Fires once per dispatch; the actual workspace setup
+    /// runs in the Manager terminal via the `/crow-workspace` skill.
+    func notifyAutoWorkspaceCreated(_ issue: AssignedIssue) {
+        guard !settings.globalMute else { return }
+        guard settings.systemNotificationsEnabled else { return }
+
+        postSystemNotification(
+            title: "Auto-creating workspace \u{2014} \(issue.repo)",
+            body: "#\(issue.number): \(issue.title)",
+            sessionID: UUID(),
+            eventName: "AutoWorkspaceCreated"
+        )
+    }
+
     // MARK: - Sound Playback
 
     private func playSound(named name: String) {
