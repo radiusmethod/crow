@@ -281,6 +281,14 @@ final class IssueTracker {
             clearRateLimitWarning()
         }
 
+        // Reconcile any session still missing a .pr link by querying the
+        // provider directly on (repoSlug, headBranch). Covers PRs that aren't
+        // in the viewer's open-PR payload (other author, merged/closed, etc).
+        // Runs after the reactive path so we only ask providers for the
+        // sessions that actually need it. Safe for GitLab-only or no-GitHub
+        // workspaces — the GitHub branch is gated by candidate count.
+        await reconcileMissingPRLinks()
+
         logRefreshSummary(elapsed: Date().timeIntervalSince(startedAt))
     }
 
@@ -890,18 +898,350 @@ final class IssueTracker {
         }
     }
 
+    // MARK: - Session PR Link Reconciliation
+
+    /// A session that the reconcile pass should query a provider for. Built from
+    /// non-archived, non-review sessions that have a primary worktree branch
+    /// but no `.pr` link yet.
+    struct ReconcileCandidate: Sendable, Equatable {
+        let sessionID: UUID
+        let provider: Provider
+        let repoSlug: String       // "radiusmethod/corveil"
+        let branch: String
+        let gitlabHost: String?    // nil for github.com
+    }
+
+    /// A branch match returned by the provider. `state` follows GitHub's
+    /// `PullRequestState` for GitHub and a normalized "OPEN"/"MERGED"/"CLOSED"
+    /// for GitLab (mapping `opened|merged|closed`). `updatedAt` drives
+    /// tie-breaking when a branch has multiple non-OPEN PRs.
+    struct ReconcileBranchMatch: Sendable, Equatable {
+        let sessionID: UUID
+        let number: Int
+        let url: String
+        let state: String
+        let updatedAt: Date?
+    }
+
+    /// Given a set of matches per session, decide which link to create for
+    /// each session. Prefers OPEN over non-OPEN; falls back to most-recent
+    /// `updatedAt`. Deterministic when timestamps are absent (highest `number`
+    /// wins as a stable tie-breaker). Pure — no appState, no I/O.
+    nonisolated static func decideReconcileLinks(
+        matches: [ReconcileBranchMatch]
+    ) -> [ReconcileBranchMatch] {
+        let bySession = Dictionary(grouping: matches, by: { $0.sessionID })
+        var picks: [ReconcileBranchMatch] = []
+        for (_, group) in bySession {
+            guard let pick = group.max(by: { lhs, rhs in
+                // Returns true when lhs should sort BEFORE rhs (i.e. rhs wins).
+                let lhsOpen = lhs.state == "OPEN"
+                let rhsOpen = rhs.state == "OPEN"
+                if lhsOpen != rhsOpen { return !lhsOpen }  // rhs open → rhs wins
+                switch (lhs.updatedAt, rhs.updatedAt) {
+                case let (l?, r?):
+                    if l != r { return l < r }  // newer wins
+                case (nil, _?):
+                    return true                  // rhs has date → rhs wins
+                case (_?, nil):
+                    return false                 // lhs has date → lhs wins
+                case (nil, nil):
+                    break
+                }
+                return lhs.number < rhs.number   // tie-break on number
+            }) else { continue }
+            picks.append(pick)
+        }
+        return picks
+    }
+
+    /// For each non-archived, non-review session missing a `.pr` link with a
+    /// resolvable (repoSlug, branch), query the provider directly and upsert
+    /// a link when a PR exists on that branch. Runs once per refresh cycle
+    /// after the reactive `applySessionPRLinks` pass.
+    private func reconcileMissingPRLinks() async {
+        let candidates = buildReconcileCandidates()
+        guard !candidates.isEmpty else { return }
+
+        var matches: [ReconcileBranchMatch] = []
+
+        let github = candidates.filter { $0.provider == .github }
+        if !github.isEmpty, let hits = await fetchPRsForReconcile(candidates: github) {
+            matches.append(contentsOf: hits)
+        }
+
+        let gitlab = candidates.filter { $0.provider == .gitlab }
+        let hostsSeen = Set(gitlab.compactMap { $0.gitlabHost })
+        for host in hostsSeen {
+            let forHost = gitlab.filter { $0.gitlabHost == host }
+            matches.append(contentsOf: await fetchGitLabMRsForReconcile(candidates: forHost, host: host))
+        }
+
+        applyReconciledPRLinks(Self.decideReconcileLinks(matches: matches))
+    }
+
+    /// Walk appState and build the set of sessions needing a reconcile pass.
+    /// Runs on MainActor; safe to read appState directly.
+    private func buildReconcileCandidates() -> [ReconcileCandidate] {
+        var out: [ReconcileCandidate] = []
+        for session in appState.sessions {
+            guard session.id != AppState.managerSessionID else { continue }
+            guard session.status != .archived else { continue }
+            guard session.kind == .work else { continue }  // review sessions get PR links at creation
+            let links = appState.links(for: session.id)
+            guard !links.contains(where: { $0.linkType == .pr }) else { continue }
+
+            let wts = appState.worktrees(for: session.id)
+            guard let primaryWt = wts.first(where: { $0.isPrimary }) ?? wts.first else { continue }
+            guard !primaryWt.branch.isEmpty else { continue }
+
+            let info = resolveRepoInfo(worktree: primaryWt)
+            guard !info.slug.isEmpty else { continue }
+
+            // Provider: prefer the session's recorded provider; fall back to
+            // host sniffing when the session was created before the field
+            // existed or when the host ≠ github.com.
+            let provider: Provider
+            let gitlabHost: String?
+            if let p = session.provider {
+                provider = p
+                gitlabHost = (p == .gitlab) ? (info.host.isEmpty ? nil : info.host) : nil
+            } else if info.host == "github.com" || info.host.isEmpty {
+                provider = .github
+                gitlabHost = nil
+            } else {
+                provider = .gitlab
+                gitlabHost = info.host
+            }
+
+            // GitLab candidates require a known host — GITLAB_HOST env var is
+            // how the glab wrapper picks an auth token. Skip silently rather
+            // than fall through to a wrong-host call.
+            if provider == .gitlab, gitlabHost == nil { continue }
+
+            out.append(ReconcileCandidate(
+                sessionID: session.id,
+                provider: provider,
+                repoSlug: info.slug,
+                branch: primaryWt.branch,
+                gitlabHost: gitlabHost
+            ))
+        }
+        return out
+    }
+
+    /// One aliased `gh api graphql` call: for each candidate, fetch up to 5 PRs
+    /// on that `headRefName`, most-recently-updated first. Returns `nil` on
+    /// shell / rate-limit / parse failure so the reconcile pass can skip the
+    /// cycle without treating a degraded response as "no PRs found".
+    private func fetchPRsForReconcile(candidates: [ReconcileCandidate]) async -> [ReconcileBranchMatch]? {
+        // Split each slug into (owner, repo). Skip any we can't parse.
+        var parsed: [(idx: Int, cand: ReconcileCandidate, owner: String, repo: String)] = []
+        for (i, c) in candidates.enumerated() {
+            let parts = c.repoSlug.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: true)
+            guard parts.count == 2 else { continue }
+            parsed.append((i, c, String(parts[0]), String(parts[1])))
+        }
+        guard !parsed.isEmpty else { return [] }
+
+        var queryParts: [String] = []
+        var args: [String] = ["gh", "api", "graphql"]
+        for p in parsed {
+            queryParts.append("""
+              pr\(p.idx): repository(owner: $owner\(p.idx), name: $repo\(p.idx)) {
+                pullRequests(headRefName: $branch\(p.idx), first: 5, orderBy: {field: UPDATED_AT, direction: DESC}) {
+                  nodes { number url state updatedAt headRefName }
+                }
+              }
+            """)
+            args.append(contentsOf: ["-F", "owner\(p.idx)=\(p.owner)"])
+            args.append(contentsOf: ["-F", "repo\(p.idx)=\(p.repo)"])
+            args.append(contentsOf: ["-F", "branch\(p.idx)=\(p.cand.branch)"])
+        }
+        var varDecls: [String] = []
+        for p in parsed {
+            varDecls.append("$owner\(p.idx): String!, $repo\(p.idx): String!, $branch\(p.idx): String!")
+        }
+        let query = """
+        query(\(varDecls.joined(separator: ", "))) {
+        \(queryParts.joined(separator: "\n"))
+          rateLimit { remaining limit resetAt cost }
+        }
+        """
+        args.insert(contentsOf: ["-f", "query=\(query)"], at: 3)
+
+        let result = await shellWithStatus(args: args)
+        if result.exitCode != 0 {
+            if handleGraphQLRateLimit(stderr: result.stderr) { return nil }
+            print("[IssueTracker] Reconcile PR fetch failed (exit \(result.exitCode)): \(result.stderr.prefix(200))")
+            return nil
+        }
+        return parseReconcilePRResponse(result.stdout, parsed: parsed)
+    }
+
+    private func parseReconcilePRResponse(
+        _ output: String,
+        parsed: [(idx: Int, cand: ReconcileCandidate, owner: String, repo: String)]
+    ) -> [ReconcileBranchMatch]? {
+        guard let data = output.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let dataObj = json["data"] as? [String: Any] else { return nil }
+
+        if let rl = parseRateLimit(dataObj["rateLimit"] as? [String: Any]) {
+            appState.githubRateLimit = rl
+        }
+
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        var matches: [ReconcileBranchMatch] = []
+        for p in parsed {
+            guard let repoObj = dataObj["pr\(p.idx)"] as? [String: Any],
+                  let prs = repoObj["pullRequests"] as? [String: Any],
+                  let nodes = prs["nodes"] as? [[String: Any]] else { continue }
+            for node in nodes {
+                guard let number = node["number"] as? Int,
+                      let url = node["url"] as? String,
+                      let state = node["state"] as? String else { continue }
+                let updatedAt = (node["updatedAt"] as? String).flatMap { dateFormatter.date(from: $0) }
+                matches.append(ReconcileBranchMatch(
+                    sessionID: p.cand.sessionID,
+                    number: number,
+                    url: url,
+                    state: state,
+                    updatedAt: updatedAt
+                ))
+            }
+        }
+        return matches
+    }
+
+    /// One `glab api` call per (host, candidate). Uses the REST endpoint
+    /// because `glab mr list` at v1.82 lacks `--state` and `--output-format`
+    /// (see repo CLAUDE.md). `glab api` with `GITLAB_HOST` set returns raw
+    /// JSON reliably and supports `source_branch` + `state=all`.
+    private func fetchGitLabMRsForReconcile(
+        candidates: [ReconcileCandidate],
+        host: String
+    ) async -> [ReconcileBranchMatch] {
+        let dateFormatter = ISO8601DateFormatter()
+        dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        var matches: [ReconcileBranchMatch] = []
+        for candidate in candidates {
+            let encodedSlug = candidate.repoSlug.addingPercentEncoding(
+                withAllowedCharacters: .alphanumerics
+            ) ?? candidate.repoSlug
+            let encodedBranch = candidate.branch.addingPercentEncoding(
+                withAllowedCharacters: .alphanumerics
+            ) ?? candidate.branch
+            let endpoint = "projects/\(encodedSlug)/merge_requests?source_branch=\(encodedBranch)&state=all&per_page=5&order_by=updated_at"
+
+            let output: String
+            do {
+                output = try await shell(env: ["GITLAB_HOST": host], "glab", "api", endpoint)
+            } catch {
+                print("[IssueTracker] Reconcile glab api failed for \(candidate.repoSlug)#\(candidate.branch) on \(host): \(error.localizedDescription.prefix(200))")
+                continue
+            }
+            guard let data = output.data(using: .utf8),
+                  let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+                continue
+            }
+            for item in items {
+                guard let number = item["iid"] as? Int,
+                      let url = item["web_url"] as? String else { continue }
+                let rawState = (item["state"] as? String) ?? ""
+                let normalized: String
+                switch rawState {
+                case "opened": normalized = "OPEN"
+                case "merged": normalized = "MERGED"
+                case "closed": normalized = "CLOSED"
+                default: normalized = rawState.uppercased()
+                }
+                let updatedAt = (item["updated_at"] as? String).flatMap { dateFormatter.date(from: $0) }
+                matches.append(ReconcileBranchMatch(
+                    sessionID: candidate.sessionID,
+                    number: number,
+                    url: url,
+                    state: normalized,
+                    updatedAt: updatedAt
+                ))
+            }
+        }
+        return matches
+    }
+
+    /// Persist the reconciliation decisions. Re-checks `appState.links` at
+    /// write time so a concurrent `applySessionPRLinks` or hand-added PR link
+    /// (identified by URL match) wins without leaving a duplicate row.
+    private func applyReconciledPRLinks(_ picks: [ReconcileBranchMatch]) {
+        guard !picks.isEmpty else { return }
+        let store = JSONStore()
+        for pick in picks {
+            let existing = appState.links(for: pick.sessionID)
+            if existing.contains(where: { $0.linkType == .pr || $0.url == pick.url }) { continue }
+            let link = SessionLink(
+                sessionID: pick.sessionID,
+                label: "PR #\(pick.number)",
+                url: pick.url,
+                linkType: .pr
+            )
+            appState.links[pick.sessionID, default: []].append(link)
+            store.mutate { data in
+                data.links.append(link)
+            }
+        }
+    }
+
     /// Resolve the org/repo slug (e.g. "radiusmethod/citadel") from a worktree's git remote.
     private func resolveRepoSlug(worktree: SessionWorktree) -> String {
+        return resolveRepoInfo(worktree: worktree).slug
+    }
+
+    /// Info derived from a worktree's git remote URL: org/repo slug and (for
+    /// GitLab) the host name. Host is empty for github.com remotes.
+    struct RepoInfo: Sendable, Equatable {
+        let slug: String
+        let host: String
+    }
+
+    private func resolveRepoInfo(worktree: SessionWorktree) -> RepoInfo {
         if let output = try? shellSync(
             "git", "-C", worktree.repoPath, "remote", "get-url", "origin"
         ) {
             var url = output.trimmingCharacters(in: .whitespacesAndNewlines)
             if url.hasSuffix(".git") { url = String(url.dropLast(4)) }
+            let host = Self.extractHost(fromRemote: url)
             if let match = url.range(of: #"[:/]([^/:]+/[^/:]+)$"#, options: .regularExpression) {
-                return String(url[match]).trimmingCharacters(in: CharacterSet(charactersIn: "/:"))
+                let slug = String(url[match]).trimmingCharacters(in: CharacterSet(charactersIn: "/:"))
+                return RepoInfo(slug: slug, host: host)
             }
         }
-        if worktree.repoName.contains("/") { return worktree.repoName }
+        if worktree.repoName.contains("/") {
+            return RepoInfo(slug: worktree.repoName, host: "")
+        }
+        return RepoInfo(slug: "", host: "")
+    }
+
+    /// Extract the host ("github.com", "gitlab.example.com") from a git remote URL.
+    /// Handles both SSH (`git@host:org/repo`) and HTTPS (`https://host/org/repo`).
+    /// Returns "" when the URL can't be parsed.
+    nonisolated static func extractHost(fromRemote url: String) -> String {
+        // SSH: git@host:org/repo
+        if let range = url.range(of: #"^[^@]+@([^:]+):"#, options: .regularExpression) {
+            let match = String(url[range])
+            if let at = match.firstIndex(of: "@"), let colon = match.lastIndex(of: ":") {
+                return String(match[match.index(after: at)..<colon])
+            }
+        }
+        // HTTPS: https://host/...
+        if let range = url.range(of: #"^https?://([^/]+)/"#, options: .regularExpression) {
+            let match = String(url[range])
+            let trimmed = match
+                .replacingOccurrences(of: #"^https?://"#, with: "", options: .regularExpression)
+            return trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        }
         return ""
     }
 
