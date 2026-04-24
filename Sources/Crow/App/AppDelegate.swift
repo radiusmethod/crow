@@ -170,6 +170,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.onCloseTerminal = { [weak service] sessionID, terminalID in
             service?.closeTerminal(sessionID: sessionID, terminalID: terminalID)
         }
+        appState.onRenameTerminal = { [weak service] sessionID, terminalID, name in
+            service?.renameTerminal(sessionID: sessionID, terminalID: terminalID, name: name)
+        }
         appState.onAddGlobalTerminal = { [weak service] in
             service?.addGlobalTerminal()
         }
@@ -712,6 +715,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     capturedStore.mutate { data in data.terminals.removeAll { $0.id == terminalID } }
                     return ["deleted": .bool(true)]
+                }
+            },
+            "rename-terminal": { @Sendable params in
+                guard let sessionIDStr = params["session_id"]?.stringValue,
+                      let sessionID = UUID(uuidString: sessionIDStr),
+                      let terminalIDStr = params["terminal_id"]?.stringValue,
+                      let terminalID = UUID(uuidString: terminalIDStr),
+                      let name = params["name"]?.stringValue else {
+                    throw RPCError.invalidParams("session_id, terminal_id, and name required")
+                }
+                guard AppDelegate.isValidSessionName(name) else {
+                    throw RPCError.invalidParams("Invalid terminal name (max \(AppDelegate.maxSessionNameLength) chars, no control characters)")
+                }
+                return try await MainActor.run {
+                    guard let idx = capturedAppState.terminals[sessionID]?.firstIndex(where: { $0.id == terminalID }) else {
+                        throw RPCError.applicationError("Terminal not found")
+                    }
+                    capturedAppState.terminals[sessionID]![idx].name = name
+                    capturedStore.mutate { data in
+                        if let i = data.terminals.firstIndex(where: { $0.id == terminalID }) {
+                            data.terminals[i].name = name
+                        }
+                    }
+                    return ["terminal_id": .string(terminalIDStr), "name": .string(name)]
                 }
             },
             "send": { @Sendable params in

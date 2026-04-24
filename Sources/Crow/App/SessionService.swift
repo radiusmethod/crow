@@ -717,6 +717,17 @@ final class SessionService {
         store.mutate { data in data.terminals.removeAll { $0.id == terminalID } }
     }
 
+    /// Rename a terminal tab.
+    func renameTerminal(sessionID: UUID, terminalID: UUID, name: String) {
+        guard let idx = appState.terminals[sessionID]?.firstIndex(where: { $0.id == terminalID }) else { return }
+        appState.terminals[sessionID]![idx].name = name
+        store.mutate { data in
+            if let i = data.terminals.firstIndex(where: { $0.id == terminalID }) {
+                data.terminals[i].name = name
+            }
+        }
+    }
+
     // MARK: - Global Terminal Management
 
     /// Add a new global terminal tab (not tied to any session).

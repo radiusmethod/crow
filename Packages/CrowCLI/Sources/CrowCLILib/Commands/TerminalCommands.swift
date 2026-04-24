@@ -71,6 +71,30 @@ public struct CloseTerminal: ParsableCommand {
     }
 }
 
+/// Rename a terminal tab.
+public struct RenameTerminal: ParsableCommand {
+    public static let configuration = CommandConfiguration(commandName: "rename-terminal", abstract: "Rename a terminal tab")
+    @Option(name: .long, help: "Session UUID") var session: String
+    @Option(name: .long, help: "Terminal UUID") var terminal: String
+    @Argument(help: "New name") var name: String
+
+    public init() {}
+
+    public func validate() throws {
+        try validateUUID(session, label: "session UUID")
+        try validateUUID(terminal, label: "terminal UUID")
+    }
+
+    public func run() throws {
+        let result = try rpc("rename-terminal", params: [
+            "session_id": .string(session),
+            "terminal_id": .string(terminal),
+            "name": .string(name),
+        ])
+        printJSON(result)
+    }
+}
+
 /// Send text to a terminal tab.
 public struct Send: ParsableCommand {
     public static let configuration = CommandConfiguration(commandName: "send", abstract: "Send text to a terminal")

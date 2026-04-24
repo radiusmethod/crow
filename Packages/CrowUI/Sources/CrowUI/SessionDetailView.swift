@@ -245,6 +245,7 @@ public struct SessionDetailView: View {
                     activeID: appState.activeTerminalID[session.id] ?? sessionTerminals[0].id,
                     onSelect: { id in appState.activeTerminalID[session.id] = id },
                     onClose: { id in appState.onCloseTerminal?(session.id, id) },
+                    onRename: { id, name in appState.onRenameTerminal?(session.id, id, name) },
                     onAdd: { appState.onAddTerminal?(session.id) }
                 )
                 Divider().overlay(CorveilTheme.borderSubtle)
@@ -301,7 +302,12 @@ public struct TerminalTabBar: View {
     let activeID: UUID
     let onSelect: (UUID) -> Void
     let onClose: (UUID) -> Void
+    let onRename: (UUID, String) -> Void
     let onAdd: () -> Void
+
+    @State private var editingTerminalID: UUID?
+    @State private var editingName: String = ""
+    @FocusState private var isEditing: Bool
 
     public var body: some View {
         HStack(spacing: 0) {
@@ -310,8 +316,25 @@ public struct TerminalTabBar: View {
                     HStack(spacing: 4) {
                         Image(systemName: terminal.isManaged ? "sparkles" : "terminal")
                             .font(.system(size: 9))
-                        Text(terminal.name)
-                            .font(.caption)
+                        if editingTerminalID == terminal.id {
+                            TextField("Name", text: $editingName)
+                                .textFieldStyle(.plain)
+                                .font(.caption)
+                                .frame(minWidth: 40, maxWidth: 120)
+                                .focused($isEditing)
+                                .onSubmit {
+                                    commitRename(terminal.id)
+                                }
+                                .onExitCommand {
+                                    editingTerminalID = nil
+                                }
+                        } else {
+                            Text(terminal.name)
+                                .font(.caption)
+                                .onTapGesture(count: 2) {
+                                    beginEditing(terminal)
+                                }
+                        }
                         if !terminal.isManaged {
                             Button {
                                 onClose(terminal.id)
@@ -331,6 +354,20 @@ public struct TerminalTabBar: View {
                     .background(terminal.id == activeID ? CorveilTheme.gold.opacity(0.12) : Color.clear)
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        beginEditing(terminal)
+                    } label: {
+                        Label("Rename", systemImage: "pencil")
+                    }
+                    if !terminal.isManaged {
+                        Button(role: .destructive) {
+                            onClose(terminal.id)
+                        } label: {
+                            Label("Close", systemImage: "xmark")
+                        }
+                    }
+                }
             }
 
             Button { onAdd() } label: {
@@ -346,6 +383,20 @@ public struct TerminalTabBar: View {
             Spacer()
         }
         .background(CorveilTheme.bgSurface)
+    }
+
+    private func beginEditing(_ terminal: SessionTerminal) {
+        editingTerminalID = terminal.id
+        editingName = terminal.name
+        isEditing = true
+    }
+
+    private func commitRename(_ terminalID: UUID) {
+        let trimmed = editingName.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty {
+            onRename(terminalID, trimmed)
+        }
+        editingTerminalID = nil
     }
 }
 
