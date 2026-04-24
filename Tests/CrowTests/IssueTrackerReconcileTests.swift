@@ -1,0 +1,110 @@
+import Foundation
+import Testing
+@testable import Crow
+
+@Suite("IssueTracker reconcile decision")
+struct IssueTrackerReconcileDecisionTests {
+
+    private let s1 = UUID()
+    private let s2 = UUID()
+
+    private func match(
+        _ sessionID: UUID,
+        number: Int,
+        state: String,
+        updatedAt: Date? = nil,
+        url: String? = nil
+    ) -> IssueTracker.ReconcileBranchMatch {
+        IssueTracker.ReconcileBranchMatch(
+            sessionID: sessionID,
+            number: number,
+            url: url ?? "https://example.test/pr/\(number)",
+            state: state,
+            updatedAt: updatedAt
+        )
+    }
+
+    @Test func picksOpenOverMergedAndClosed() {
+        let picks = IssueTracker.decideReconcileLinks(matches: [
+            match(s1, number: 10, state: "MERGED", updatedAt: Date(timeIntervalSince1970: 300)),
+            match(s1, number: 11, state: "OPEN",   updatedAt: Date(timeIntervalSince1970: 100)),
+            match(s1, number: 12, state: "CLOSED", updatedAt: Date(timeIntervalSince1970: 400)),
+        ])
+        #expect(picks.count == 1)
+        #expect(picks[0].number == 11)
+        #expect(picks[0].state == "OPEN")
+    }
+
+    @Test func picksMostRecentWhenNoneOpen() {
+        let picks = IssueTracker.decideReconcileLinks(matches: [
+            match(s1, number: 20, state: "CLOSED", updatedAt: Date(timeIntervalSince1970: 100)),
+            match(s1, number: 21, state: "MERGED", updatedAt: Date(timeIntervalSince1970: 500)),
+            match(s1, number: 22, state: "CLOSED", updatedAt: Date(timeIntervalSince1970: 300)),
+        ])
+        #expect(picks.count == 1)
+        #expect(picks[0].number == 21)
+        #expect(picks[0].state == "MERGED")
+    }
+
+    @Test func returnsOneMatchPerSession() {
+        let picks = IssueTracker.decideReconcileLinks(matches: [
+            match(s1, number: 30, state: "OPEN"),
+            match(s2, number: 31, state: "MERGED", updatedAt: Date(timeIntervalSince1970: 200)),
+        ])
+        #expect(picks.count == 2)
+        let bySession = Dictionary(uniqueKeysWithValues: picks.map { ($0.sessionID, $0) })
+        #expect(bySession[s1]?.number == 30)
+        #expect(bySession[s2]?.number == 31)
+    }
+
+    @Test func emptyMatchesProducesNoPicks() {
+        let picks = IssueTracker.decideReconcileLinks(matches: [])
+        #expect(picks.isEmpty)
+    }
+
+    @Test func fallsBackToHighestNumberWhenTimestampsMissing() {
+        // Deterministic tie-break: when all states are non-OPEN and none have
+        // a timestamp, the higher PR number wins (most-recently created).
+        let picks = IssueTracker.decideReconcileLinks(matches: [
+            match(s1, number: 40, state: "MERGED"),
+            match(s1, number: 42, state: "MERGED"),
+            match(s1, number: 41, state: "MERGED"),
+        ])
+        #expect(picks.count == 1)
+        #expect(picks[0].number == 42)
+    }
+
+    @Test func openWinsEvenIfNonOpenIsNewer() {
+        let picks = IssueTracker.decideReconcileLinks(matches: [
+            match(s1, number: 50, state: "OPEN",   updatedAt: Date(timeIntervalSince1970: 100)),
+            match(s1, number: 51, state: "MERGED", updatedAt: Date(timeIntervalSince1970: 9_999_999)),
+        ])
+        #expect(picks.count == 1)
+        #expect(picks[0].state == "OPEN")
+        #expect(picks[0].number == 50)
+    }
+}
+
+@Suite("IssueTracker remote host extraction")
+struct IssueTrackerRemoteHostTests {
+    @Test func parsesGitHubSSH() {
+        #expect(IssueTracker.extractHost(fromRemote: "git@github.com:radiusmethod/corveil") == "github.com")
+    }
+
+    @Test func parsesGitHubHTTPS() {
+        #expect(IssueTracker.extractHost(fromRemote: "https://github.com/radiusmethod/corveil") == "github.com")
+    }
+
+    @Test func parsesGitLabHTTPSCustomHost() {
+        #expect(IssueTracker.extractHost(fromRemote: "https://gitlab.internal.example/acme/api") == "gitlab.internal.example")
+    }
+
+    @Test func parsesGitLabSSHCustomHost() {
+        #expect(IssueTracker.extractHost(fromRemote: "git@gitlab.corp.example:acme/api") == "gitlab.corp.example")
+    }
+
+    @Test func returnsEmptyForUnrecognized() {
+        #expect(IssueTracker.extractHost(fromRemote: "/tmp/local/repo") == "")
+        #expect(IssueTracker.extractHost(fromRemote: "") == "")
+    }
+}
