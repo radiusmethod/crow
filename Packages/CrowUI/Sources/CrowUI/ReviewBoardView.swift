@@ -6,6 +6,8 @@ import CrowCore
 /// Full-pane review board shown when the Review Board tab is selected.
 public struct ReviewBoardView: View {
     @Bindable var appState: AppState
+    @State private var isSelectionMode = false
+    @State private var selectedRequestIDs: Set<String> = []
 
     public init(appState: AppState) {
         self.appState = appState
@@ -20,6 +22,10 @@ public struct ReviewBoardView: View {
             )
             Divider()
             reviewList
+
+            if isSelectionMode && !selectedRequestIDs.isEmpty {
+                batchActionBar
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
@@ -47,10 +53,90 @@ public struct ReviewBoardView: View {
             Text("\(appState.filteredReviewRequests.count) pending")
                 .font(.caption)
                 .foregroundStyle(CorveilTheme.textSecondary)
+
+            selectToggleButton
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
         .background(CorveilTheme.bgSurface)
+    }
+
+    private var selectToggleButton: some View {
+        Button {
+            isSelectionMode.toggle()
+            if !isSelectionMode {
+                selectedRequestIDs.removeAll()
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: isSelectionMode ? "xmark" : "checkmark.circle")
+                    .font(.system(size: 10))
+                Text(isSelectionMode ? "Cancel" : "Select")
+                    .font(.caption)
+            }
+            .foregroundStyle(isSelectionMode ? .red : CorveilTheme.textSecondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelectionMode ? Color.red.opacity(0.1) : CorveilTheme.bgCard)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(isSelectionMode ? Color.red.opacity(0.3) : CorveilTheme.borderSubtle, lineWidth: 1)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var batchActionBar: some View {
+        HStack(spacing: 12) {
+            Text("\(selectedRequestIDs.count) review\(selectedRequestIDs.count == 1 ? "" : "s") selected")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(CorveilTheme.textSecondary)
+
+            Spacer()
+
+            Button {
+                isSelectionMode = false
+                selectedRequestIDs.removeAll()
+            } label: {
+                Text("Cancel")
+                    .font(.system(size: 13))
+                    .foregroundStyle(CorveilTheme.textSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                let urls = appState.filteredReviewRequests
+                    .filter { selectedRequestIDs.contains($0.id) }
+                    .map(\.url)
+                appState.onBatchStartReview?(urls)
+                selectedRequestIDs.removeAll()
+                isSelectionMode = false
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "eye.circle")
+                        .font(.system(size: 10))
+                    Text("Start Review (\(selectedRequestIDs.count))")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(CorveilTheme.gold)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(CorveilTheme.bgSurface)
+        .overlay(alignment: .top) {
+            Divider().overlay(CorveilTheme.borderSubtle)
+        }
     }
 
     @ViewBuilder
@@ -75,7 +161,19 @@ public struct ReviewBoardView: View {
             .frame(maxWidth: .infinity)
         } else {
             List(appState.filteredReviewRequests) { request in
-                ReviewRow(request: request, appState: appState)
+                ReviewRow(
+                    request: request,
+                    appState: appState,
+                    isSelectionMode: isSelectionMode,
+                    isSelected: selectedRequestIDs.contains(request.id),
+                    onToggleSelection: {
+                        if selectedRequestIDs.contains(request.id) {
+                            selectedRequestIDs.remove(request.id)
+                        } else {
+                            selectedRequestIDs.insert(request.id)
+                        }
+                    }
+                )
             }
             .listStyle(.inset)
         }
@@ -87,9 +185,25 @@ public struct ReviewBoardView: View {
 struct ReviewRow: View {
     let request: ReviewRequest
     @Bindable var appState: AppState
+    var isSelectionMode: Bool = false
+    var isSelected: Bool = false
+    var onToggleSelection: (() -> Void)?
+
+    private var linkedSession: Session? {
+        guard let sessionID = request.reviewSessionID else { return nil }
+        return appState.sessions.first { $0.id == sessionID }
+    }
+
+    private var isSelectable: Bool {
+        linkedSession == nil
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
+            if isSelectionMode {
+                selectionIndicator
+            }
+
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text(request.repo)
@@ -132,6 +246,19 @@ struct ReviewRow: View {
             reviewAction
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if isSelectionMode && isSelectable {
+                onToggleSelection?()
+            }
+        }
+    }
+
+    private var selectionIndicator: some View {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.system(size: 18))
+            .foregroundStyle(isSelected ? CorveilTheme.gold : CorveilTheme.textMuted.opacity(0.4))
+            .opacity(isSelectable ? 1.0 : 0.3)
     }
 
     private var draftBadge: some View {
@@ -147,7 +274,9 @@ struct ReviewRow: View {
 
     @ViewBuilder
     private var reviewAction: some View {
-        if let sessionID = request.reviewSessionID,
+        if isSelectionMode {
+            EmptyView()
+        } else if let sessionID = request.reviewSessionID,
            appState.sessions.contains(where: { $0.id == sessionID }) {
             Button {
                 appState.selectedSessionID = sessionID

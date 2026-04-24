@@ -175,6 +175,9 @@ public final class AppState {
     /// Called when user clicks "Start Review" for a PR review request.
     public var onStartReview: ((String) -> Void)?  // receives PR URL
 
+    /// Called when user clicks "Start Review" for multiple selected PR review requests (batch mode).
+    public var onBatchStartReview: (([String]) -> Void)?  // receives array of PR URLs
+
     /// Called to launch Claude in a terminal that just became ready.
     public var onLaunchClaude: ((UUID) -> Void)?  // receives terminal ID
 

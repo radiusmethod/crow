@@ -223,6 +223,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await self.sessionService?.createReviewSession(prURL: prURL) }
         }
 
+        // Wire batch "Start Review" action — creates review sessions for multiple PRs in parallel
+        appState.onBatchStartReview = { [weak self] prURLs in
+            guard let self else { return }
+            for url in prURLs {
+                Task { await self.sessionService?.createReviewSession(prURL: url) }
+            }
+        }
+
         // Start issue tracker
         let tracker = IssueTracker(appState: appState)
         tracker.onNewReviewRequests = { [weak self] newRequests in
