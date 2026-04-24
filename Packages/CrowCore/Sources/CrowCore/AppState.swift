@@ -103,10 +103,8 @@ public final class AppState {
     public var reviewRequests: [ReviewRequest] = []
     public var isLoadingReviews: Bool = false
 
-    /// Repositories to hide from the review board. Mirrors `ConfigDefaults.excludeReviewRepos`.
     public var excludeReviewRepos: [String] = []
 
-    /// Review requests after applying the exclude list.
     public var filteredReviewRequests: [ReviewRequest] {
         guard !excludeReviewRepos.isEmpty else { return reviewRequests }
         let excludeSet = Set(excludeReviewRepos.map { $0.lowercased() })

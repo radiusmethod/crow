@@ -114,7 +114,6 @@ public struct ConfigDefaults: Codable, Sendable, Equatable {
     public var cli: String
     public var branchPrefix: String
     public var excludeDirs: [String]
-    /// Repositories to hide from the review board (e.g., `["zarf-dev/zarf"]`).
     public var excludeReviewRepos: [String]
 
     /// Characters that are invalid in git ref names (see `git check-ref-format`).

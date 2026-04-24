@@ -161,7 +161,7 @@ public struct SettingsView: View {
             Section("Reviews") {
                 TextField("Excluded Repos", text: $excludeReviewReposText)
                     .textFieldStyle(.roundedBorder)
-                    .onSubmit {
+                    .onChange(of: excludeReviewReposText) { _, _ in
                         config.defaults.excludeReviewRepos = excludeReviewReposText
                             .split(separator: ",")
                             .map { $0.trimmingCharacters(in: .whitespaces) }
