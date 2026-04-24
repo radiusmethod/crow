@@ -114,6 +114,7 @@ public struct ConfigDefaults: Codable, Sendable, Equatable {
     public var cli: String
     public var branchPrefix: String
     public var excludeDirs: [String]
+    public var excludeReviewRepos: [String]
 
     /// Characters that are invalid in git ref names (see `git check-ref-format`).
     private static let invalidBranchChars = CharacterSet(charactersIn: " ~^:?*[\\")
@@ -137,12 +138,27 @@ public struct ConfigDefaults: Codable, Sendable, Equatable {
         provider: String = "github",
         cli: String = "gh",
         branchPrefix: String = "feature/",
-        excludeDirs: [String] = ["node_modules", ".git", "vendor", "dist", "build", "target"]
+        excludeDirs: [String] = ["node_modules", ".git", "vendor", "dist", "build", "target"],
+        excludeReviewRepos: [String] = []
     ) {
         self.provider = provider
         self.cli = cli
         self.branchPrefix = branchPrefix
         self.excludeDirs = excludeDirs
+        self.excludeReviewRepos = excludeReviewRepos
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? "github"
+        cli = try container.decodeIfPresent(String.self, forKey: .cli) ?? "gh"
+        branchPrefix = try container.decodeIfPresent(String.self, forKey: .branchPrefix) ?? "feature/"
+        excludeDirs = try container.decodeIfPresent([String].self, forKey: .excludeDirs) ?? ["node_modules", ".git", "vendor", "dist", "build", "target"]
+        excludeReviewRepos = try container.decodeIfPresent([String].self, forKey: .excludeReviewRepos) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case provider, cli, branchPrefix, excludeDirs, excludeReviewRepos
     }
 }
 

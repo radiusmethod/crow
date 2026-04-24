@@ -103,12 +103,20 @@ public final class AppState {
     public var reviewRequests: [ReviewRequest] = []
     public var isLoadingReviews: Bool = false
 
+    public var excludeReviewRepos: [String] = []
+
+    public var filteredReviewRequests: [ReviewRequest] {
+        guard !excludeReviewRepos.isEmpty else { return reviewRequests }
+        let excludeSet = Set(excludeReviewRepos.map { $0.lowercased() })
+        return reviewRequests.filter { !excludeSet.contains($0.repo.lowercased()) }
+    }
+
     /// IDs of review requests the user has already seen (for badge count).
     public var seenReviewRequestIDs: Set<String> = []
 
     /// Number of unseen review requests (for sidebar badge).
     public var unseenReviewCount: Int {
-        reviewRequests.filter { !seenReviewRequestIDs.contains($0.id) }.count
+        filteredReviewRequests.filter { !seenReviewRequestIDs.contains($0.id) }.count
     }
 
     /// Whether the VS Code `code` CLI is available on this system.

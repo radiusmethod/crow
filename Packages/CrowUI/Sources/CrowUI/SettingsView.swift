@@ -12,6 +12,7 @@ public struct SettingsView: View {
     @State var config: AppConfig
     @State private var isAddingWorkspace = false
     @State private var editingWorkspace: WorkspaceInfo?
+    @State private var excludeReviewReposText: String
 
     public var onSave: ((String, AppConfig) -> Void)?
     public var onRescaffold: ((String) -> Void)?
@@ -22,6 +23,7 @@ public struct SettingsView: View {
         self.appState = appState
         self._devRoot = State(initialValue: devRoot)
         self._config = State(initialValue: config)
+        self._excludeReviewReposText = State(initialValue: config.defaults.excludeReviewRepos.joined(separator: ", "))
         self.onSave = onSave
         self.onRescaffold = onRescaffold
     }
@@ -152,6 +154,21 @@ public struct SettingsView: View {
                 Toggle("Hide session details", isOn: $config.sidebar.hideSessionDetails)
                     .onChange(of: config.sidebar.hideSessionDetails) { _, _ in save() }
                 Text("Hides ticket title and repo/branch lines in sidebar rows.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Reviews") {
+                TextField("Excluded Repos", text: $excludeReviewReposText)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: excludeReviewReposText) { _, _ in
+                        config.defaults.excludeReviewRepos = excludeReviewReposText
+                            .split(separator: ",")
+                            .map { $0.trimmingCharacters(in: .whitespaces) }
+                            .filter { !$0.isEmpty }
+                        save()
+                    }
+                Text("Comma-separated list of repos to hide from the review board (e.g., zarf-dev/zarf, bmlt-enabled/yap).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

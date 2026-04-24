@@ -8,7 +8,7 @@ import Testing
             WorkspaceInfo(name: "TestOrg", provider: "github", cli: "gh", alwaysInclude: ["repo1"]),
             WorkspaceInfo(name: "GitLabOrg", provider: "gitlab", cli: "glab", host: "gitlab.example.com"),
         ],
-        defaults: ConfigDefaults(provider: "gitlab", cli: "glab", branchPrefix: "fix/", excludeDirs: ["vendor"]),
+        defaults: ConfigDefaults(provider: "gitlab", cli: "glab", branchPrefix: "fix/", excludeDirs: ["vendor"], excludeReviewRepos: ["zarf-dev/zarf", "bmlt-enabled/yap"]),
         notifications: NotificationSettings(globalMute: true),
         sidebar: SidebarSettings(hideSessionDetails: true)
     )
@@ -25,6 +25,7 @@ import Testing
     #expect(decoded.defaults.provider == "gitlab")
     #expect(decoded.defaults.branchPrefix == "fix/")
     #expect(decoded.defaults.excludeDirs == ["vendor"])
+    #expect(decoded.defaults.excludeReviewRepos == ["zarf-dev/zarf", "bmlt-enabled/yap"])
     #expect(decoded.notifications.globalMute == true)
     #expect(decoded.sidebar.hideSessionDetails == true)
 }
@@ -36,6 +37,7 @@ import Testing
     #expect(config.workspaces.isEmpty)
     #expect(config.defaults.provider == "github")
     #expect(config.defaults.branchPrefix == "feature/")
+    #expect(config.defaults.excludeReviewRepos.isEmpty)
     #expect(config.notifications.globalMute == false)
     #expect(config.sidebar.hideSessionDetails == false)
     #expect(config.remoteControlEnabled == false)
@@ -103,6 +105,15 @@ import Testing
     var c = AppConfig()
     c.defaults.branchPrefix = "fix/"
     #expect(a != c)
+}
+
+@Test func configDefaultsDecodeWithoutExcludeReviewRepos() throws {
+    let json = """
+    {"defaults": {"provider": "github", "cli": "gh", "branchPrefix": "feature/", "excludeDirs": ["node_modules"]}}
+    """.data(using: .utf8)!
+    let config = try JSONDecoder().decode(AppConfig.self, from: json)
+    #expect(config.defaults.excludeReviewRepos.isEmpty)
+    #expect(config.defaults.excludeDirs == ["node_modules"])
 }
 
 // MARK: - WorkspaceInfo
