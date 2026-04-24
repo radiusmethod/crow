@@ -471,6 +471,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let capturedNotifManager = notificationManager
         let capturedService = sessionService
         let capturedTelemetryPort = sessionService.telemetryPort
+        let hookDebug = ProcessInfo.processInfo.environment["CROW_HOOK_DEBUG"] == "1"
 
         let router = CommandRouter(handlers: [
             "new-session": { @Sendable params in
@@ -827,6 +828,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 let payload = params["payload"]?.objectValue ?? [:]
 
+                if hookDebug {
+                    let shortID = String(sessionIDStr.prefix(8))
+                    let keys = payload.keys.sorted().joined(separator: ",")
+                    NSLog("[hook-event] session=\(shortID) event=\(eventName) payload-keys=[\(keys)]")
+                }
+
                 // Build a human-readable summary from the event
                 let summary: String = {
                     switch eventName {
@@ -876,6 +883,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 return await MainActor.run {
                     let state = capturedAppState.hookState(for: sessionID)
+                    let stateBefore = state.claudeState
 
                     // Append to ring buffer (keep last 50 events per session)
                     state.hookEvents.append(event)
@@ -949,13 +957,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                     case "UserPromptSubmit":
                         state.claudeState = .working
+                        // A new real turn has begun — clear the post-Stop guard so
+                        // legitimate subagents in this turn can elevate state again.
+                        state.lastTopLevelStopAt = nil
 
                     case "Stop":
                         state.claudeState = .done
                         state.lastToolActivity = nil
+                        state.lastTopLevelStopAt = Date()
 
                     case "StopFailure":
                         state.claudeState = .waiting
+                        state.lastTopLevelStopAt = Date()
 
                     case "SessionStart":
                         let source = payload["source"]?.stringValue ?? "startup"
@@ -964,17 +977,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         } else {
                             state.claudeState = .idle
                         }
+                        state.lastTopLevelStopAt = nil
 
                     case "SessionEnd":
                         state.claudeState = .idle
                         state.lastToolActivity = nil
+                        state.lastTopLevelStopAt = nil
 
                     case "SubagentStart":
-                        state.claudeState = .working
+                        // If a top-level Stop has already fired for this turn, the
+                        // subagent is background work (e.g. the recap generator from
+                        // Claude Code ≥ 2.1.108's awaySummaryEnabled feature). Don't
+                        // elevate state — the user is genuinely done.
+                        if state.lastTopLevelStopAt == nil {
+                            state.claudeState = .working
+                        }
 
                     case "TaskCreated", "TaskCompleted", "SubagentStop":
-                        // Stay in working state
-                        if state.claudeState != .waiting {
+                        // Stay in working state, but only while the turn is still live.
+                        // After a top-level Stop, treat these as background activity
+                        // and leave claudeState alone.
+                        if state.claudeState != .waiting && state.lastTopLevelStopAt == nil {
                             state.claudeState = .working
                         }
 
@@ -994,6 +1017,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         payload: payload,
                         summary: summary
                     )
+
+                    if hookDebug && state.claudeState != stateBefore {
+                        let shortID = String(sessionIDStr.prefix(8))
+                        NSLog("[hook-event] session=\(shortID) event=\(eventName) state=\(stateBefore.rawValue)→\(state.claudeState.rawValue)")
+                    }
 
                     return [
                         "received": .bool(true),

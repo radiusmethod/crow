@@ -356,6 +356,12 @@ public final class SessionHookState {
     public var lastToolActivity: ToolActivity?
     public var hookEvents: [HookEvent] = []
     public var analytics: SessionAnalytics?
+    /// Timestamp of the most recent top-level Stop / StopFailure for this session.
+    /// Used to suppress state elevation from background activity (e.g. the
+    /// `awaySummaryEnabled` recap subagent in Claude Code ≥ 2.1.108) that
+    /// fires after the user's turn has ended. Cleared on the next
+    /// UserPromptSubmit, which marks the start of a new real turn.
+    public var lastTopLevelStopAt: Date?
 
     public init() {}
 }
