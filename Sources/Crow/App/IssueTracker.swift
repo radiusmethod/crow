@@ -254,6 +254,11 @@ final class IssueTracker {
                     reviews[i].reviewSessionID = session.id
                 }
             }
+            // Filter out repos the user has excluded from the review board
+            let excludeSet = Set(config.defaults.excludeReviewRepos.map { $0.lowercased() })
+            if !excludeSet.isEmpty {
+                reviews = reviews.filter { !excludeSet.contains($0.repo.lowercased()) }
+            }
             let currentIDs = Set(reviews.map(\.id))
             let newIDs = currentIDs.subtracting(previousReviewRequestIDs)
             previousReviewRequestIDs = currentIDs

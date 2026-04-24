@@ -114,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // be rebuilt to include (or drop) `--rc` before its surface is pre-initialized.
         appState.remoteControlEnabled = config.remoteControlEnabled
         appState.managerAutoPermissionMode = config.managerAutoPermissionMode
+        appState.excludeReviewRepos = config.defaults.excludeReviewRepos
 
         // Create session service and hydrate state
         let service = SessionService(store: store, appState: appState, telemetryPort: config.telemetry.enabled ? config.telemetry.port : nil)
@@ -445,6 +446,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.hideSessionDetails = config.sidebar.hideSessionDetails
         appState.remoteControlEnabled = config.remoteControlEnabled
         appState.managerAutoPermissionMode = config.managerAutoPermissionMode
+        appState.excludeReviewRepos = config.defaults.excludeReviewRepos
     }
 
     // MARK: - Socket Server

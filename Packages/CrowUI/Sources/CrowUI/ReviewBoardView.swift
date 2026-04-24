@@ -25,7 +25,7 @@ public struct ReviewBoardView: View {
         .background(.background)
         .onAppear {
             // Mark all current review requests as seen
-            for request in appState.reviewRequests {
+            for request in appState.filteredReviewRequests {
                 appState.seenReviewRequestIDs.insert(request.id)
             }
         }
@@ -44,7 +44,7 @@ public struct ReviewBoardView: View {
 
             Spacer()
 
-            Text("\(appState.reviewRequests.count) pending")
+            Text("\(appState.filteredReviewRequests.count) pending")
                 .font(.caption)
                 .foregroundStyle(CorveilTheme.textSecondary)
         }
@@ -55,7 +55,7 @@ public struct ReviewBoardView: View {
 
     @ViewBuilder
     private var reviewList: some View {
-        if appState.reviewRequests.isEmpty {
+        if appState.filteredReviewRequests.isEmpty {
             VStack {
                 Spacer().frame(height: 40)
                 Image(systemName: "eye.circle")
@@ -74,7 +74,7 @@ public struct ReviewBoardView: View {
             }
             .frame(maxWidth: .infinity)
         } else {
-            List(appState.reviewRequests) { request in
+            List(appState.filteredReviewRequests) { request in
                 ReviewRow(request: request, appState: appState)
             }
             .listStyle(.inset)
@@ -207,8 +207,8 @@ public struct ReviewTerminalsSidebarRow: View {
                     ProgressView()
                         .controlSize(.mini)
                 }
-                if appState.reviewRequests.count > 0 {
-                    Text("\(appState.reviewRequests.count)")
+                if appState.filteredReviewRequests.count > 0 {
+                    Text("\(appState.filteredReviewRequests.count)")
                         .font(.system(size: 10, weight: .semibold))
                         .monospacedDigit()
                         .padding(.horizontal, 4)
