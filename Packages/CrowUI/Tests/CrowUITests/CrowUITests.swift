@@ -145,3 +145,89 @@ private func makeWorktree(
     #expect(DeleteSessionMessageBuilder.buttonLabel(hasRealWorktrees: true) == "Delete Everything")
     #expect(DeleteSessionMessageBuilder.buttonLabel(hasRealWorktrees: false) == "Remove Session")
 }
+
+// MARK: - Bulk Delete Message Logic
+
+@Test func bulkMessageForSessionsWithoutWorktrees() {
+    let sessions = [
+        Session(name: "alpha"),
+        Session(name: "bravo"),
+        Session(name: "charlie")
+    ]
+    let text = DeleteSessionMessageBuilder.buildBulkMessage(
+        sessions: sessions,
+        worktreesBySession: [:]
+    )
+    #expect(text == "This will remove 3 sessions.")
+}
+
+@Test func bulkMessageForSingleSessionUsesSingularNoun() {
+    let session = Session(name: "solo")
+    let text = DeleteSessionMessageBuilder.buildBulkMessage(
+        sessions: [session],
+        worktreesBySession: [:]
+    )
+    #expect(text == "This will remove 1 session.")
+}
+
+@Test func bulkMessageWithRealWorktreesMentionsCounts() {
+    let session = Session(name: "feat")
+    let wt = SessionWorktree(
+        sessionID: session.id,
+        repoName: "repo",
+        repoPath: "/repo",
+        worktreePath: "/worktrees/feat",
+        branch: "feature/test"
+    )
+    let text = DeleteSessionMessageBuilder.buildBulkMessage(
+        sessions: [session],
+        worktreesBySession: [session.id: [wt]]
+    )
+    #expect(text.contains("This will delete 1 session."))
+    #expect(text.contains("1 worktree"))
+    #expect(text.contains("removed from disk"))
+}
+
+@Test func bulkMessageWithMixedWorktreesMentionsBoth() {
+    let s1 = Session(name: "feat-a")
+    let s2 = Session(name: "feat-b")
+    let realWt = SessionWorktree(
+        sessionID: s1.id,
+        repoName: "repo",
+        repoPath: "/repo",
+        worktreePath: "/worktrees/feat-a",
+        branch: "feature/a"
+    )
+    let mainWt = SessionWorktree(
+        sessionID: s2.id,
+        repoName: "repo",
+        repoPath: "/repo",
+        worktreePath: "/repo",
+        branch: "main"
+    )
+    let text = DeleteSessionMessageBuilder.buildBulkMessage(
+        sessions: [s1, s2],
+        worktreesBySession: [s1.id: [realWt], s2.id: [mainWt]]
+    )
+    #expect(text.contains("This will delete 2 sessions."))
+    #expect(text.contains("1 worktree"))
+    #expect(text.contains("1 main repo checkout will not be affected"))
+}
+
+@Test func bulkMessageWithOnlyMainCheckoutsSkipsRealWorktreeLine() {
+    let session = Session(name: "main-only")
+    let mainWt = SessionWorktree(
+        sessionID: session.id,
+        repoName: "repo",
+        repoPath: "/repo",
+        worktreePath: "/repo",
+        branch: "main"
+    )
+    let text = DeleteSessionMessageBuilder.buildBulkMessage(
+        sessions: [session],
+        worktreesBySession: [session.id: [mainWt]]
+    )
+    #expect(text.contains("This will delete 1 session."))
+    #expect(text.contains("will not be affected"))
+    #expect(!text.contains("removed from disk"))
+}
