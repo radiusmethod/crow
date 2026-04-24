@@ -24,6 +24,7 @@
 | GitLab tickets missing                                   | Run `glab auth status --hostname <your-host>`; ensure `GITLAB_HOST` matches what's in `{devRoot}/.claude/config.json` |
 | Sidebar status dot stuck gray                            | Terminal never initialized — click the session tab to trigger `createSurface()` |
 | Sidebar status dot stuck yellow                          | Shell is spawning but the probe file never appeared. Check `[TerminalManager]` logs for shell-startup errors |
+| Sidebar shows "working" forever after a `※ recap:` line  | The Claude Code session recap (`awaySummaryEnabled`, on by default in v2.1.108+) fires hook events after a turn's `Stop`. Crow now ignores those — if you're on an older build, disable the recap by setting `"awaySummaryEnabled": false` in `~/.claude/settings.json`, toggling "Session recap" off via `/config` inside Claude Code, or exporting `CLAUDE_CODE_ENABLE_AWAY_SUMMARY=0`. |
 
 ## Debugging
 
@@ -36,6 +37,7 @@ The app logs diagnostic information to stderr with component tags:
 - `[Ghostty]` — Surface creation success/failure
 - `[AppSupportDirectory]` — One-time `rm-ai-ide` → `crow` migration events
 - `[Scaffolder]` — Template file loading (development builds)
+- `[hook-event]` — Claude Code hook event arrivals and `ClaudeState` transitions. Off by default. Set `CROW_HOOK_DEBUG=1` before launching to enable; useful when diagnosing why the sidebar status dot is in the wrong state.
 
 Run with log filtering to focus on a subsystem:
 
