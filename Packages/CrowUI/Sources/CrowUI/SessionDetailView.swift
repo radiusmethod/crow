@@ -328,6 +328,11 @@ public struct TerminalTabBar: View {
                                 .onExitCommand {
                                     editingTerminalID = nil
                                 }
+                                .onChange(of: isEditing) { _, nowEditing in
+                                    if !nowEditing, editingTerminalID == terminal.id {
+                                        commitRename(terminal.id)
+                                    }
+                                }
                         } else {
                             Text(terminal.name)
                                 .font(.caption)

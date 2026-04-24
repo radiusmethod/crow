@@ -725,18 +725,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                       let name = params["name"]?.stringValue else {
                     throw RPCError.invalidParams("session_id, terminal_id, and name required")
                 }
-                guard AppDelegate.isValidSessionName(name) else {
-                    throw RPCError.invalidParams("Invalid terminal name (max \(AppDelegate.maxSessionNameLength) chars, no control characters)")
-                }
                 return try await MainActor.run {
-                    guard let idx = capturedAppState.terminals[sessionID]?.firstIndex(where: { $0.id == terminalID }) else {
-                        throw RPCError.applicationError("Terminal not found")
-                    }
-                    capturedAppState.terminals[sessionID]![idx].name = name
-                    capturedStore.mutate { data in
-                        if let i = data.terminals.firstIndex(where: { $0.id == terminalID }) {
-                            data.terminals[i].name = name
-                        }
+                    guard capturedService.renameTerminal(sessionID: sessionID, terminalID: terminalID, name: name) else {
+                        throw RPCError.applicationError("Terminal not found or invalid name")
                     }
                     return ["terminal_id": .string(terminalIDStr), "name": .string(name)]
                 }
