@@ -58,6 +58,9 @@ public struct GlobalTerminalView: View {
                     onClose: { id in
                         appState.onCloseGlobalTerminal?(id)
                     },
+                    onRename: { id, name in
+                        appState.onRenameTerminal?(AppState.globalTerminalSessionID, id, name)
+                    },
                     onAdd: {
                         appState.onAddGlobalTerminal?()
                     }

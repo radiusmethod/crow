@@ -186,6 +186,9 @@ public final class AppState {
     /// Called to close a non-managed terminal tab.
     public var onCloseTerminal: ((UUID, UUID) -> Void)?  // receives (sessionID, terminalID)
 
+    /// Called to rename a terminal tab.
+    public var onRenameTerminal: ((UUID, UUID, String) -> Void)?  // receives (sessionID, terminalID, newName)
+
     /// Called to add a new global terminal tab.
     public var onAddGlobalTerminal: (() -> Void)?
 

@@ -24,6 +24,7 @@ public struct CrowCommand: ParsableCommand {
             NewTerminal.self,
             ListTerminals.self,
             CloseTerminal.self,
+            RenameTerminal.self,
             Send.self,
             AddLink.self,
             ListLinks.self,
