@@ -140,6 +140,57 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         )
     }
 
+    // MARK: - PR Status Transition Notifications
+
+    /// Notify the user about a detected PR status transition (changes
+    /// requested or CI failing). Honors the same gating as `handleEvent`:
+    /// `globalMute` → category toggles → per-event toggles. Always posts a
+    /// system notification when allowed (no foreground/visible suppression
+    /// — the user typically wants to know about these even when looking at
+    /// the session).
+    func notifyPRTransition(_ transition: PRStatusTransition, session: Session) {
+        guard !settings.globalMute else { return }
+
+        let event: NotificationEvent
+        let title: String
+        let body: String
+        let prRef = transition.prNumber.map { "PR #\($0)" } ?? "PR"
+        let suffix = session.ticketTitle.map { ": \($0)" } ?? ""
+
+        switch transition.kind {
+        case .changesRequested:
+            event = .changesRequested
+            title = "Changes Requested \u{2014} \(session.name)"
+            body = "\(prRef)\(suffix) received a 'changes requested' review."
+        case .checksFailing:
+            event = .checksFailing
+            title = "CI Failing \u{2014} \(session.name)"
+            if transition.failedCheckNames.isEmpty {
+                body = "\(prRef)\(suffix) has failing CI checks."
+            } else {
+                let names = transition.failedCheckNames.prefix(3).joined(separator: ", ")
+                let extra = transition.failedCheckNames.count > 3 ? " (+\(transition.failedCheckNames.count - 3) more)" : ""
+                body = "\(prRef)\(suffix) failing: \(names)\(extra)"
+            }
+        }
+
+        let config = settings.config(for: event)
+        guard config.enabled else { return }
+
+        if settings.soundEnabled && config.soundEnabled {
+            playSound(named: config.soundName)
+        }
+
+        if settings.systemNotificationsEnabled && config.systemNotificationEnabled {
+            postSystemNotification(
+                title: title,
+                body: body,
+                sessionID: transition.sessionID,
+                eventName: "PRTransition.\(transition.kind.rawValue)"
+            )
+        }
+    }
+
     // MARK: - Sound Playback
 
     private func playSound(named name: String) {

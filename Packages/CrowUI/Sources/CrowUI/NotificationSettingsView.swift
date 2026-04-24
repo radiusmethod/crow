@@ -5,13 +5,19 @@ import CrowCore
 /// Settings view for configuring notification sounds and macOS system notifications.
 public struct NotificationSettingsView: View {
     @Binding var settings: NotificationSettings
+    @Binding var autoRespond: AutoRespondSettings
     var onSave: (() -> Void)?
 
     /// Built-in macOS system sounds available for selection.
     private static let builtInSounds = NotificationSettings.builtInSounds
 
-    public init(settings: Binding<NotificationSettings>, onSave: (() -> Void)? = nil) {
+    public init(
+        settings: Binding<NotificationSettings>,
+        autoRespond: Binding<AutoRespondSettings>,
+        onSave: (() -> Void)? = nil
+    ) {
         self._settings = settings
+        self._autoRespond = autoRespond
         self.onSave = onSave
     }
 
@@ -33,8 +39,30 @@ public struct NotificationSettingsView: View {
             ForEach(NotificationEvent.allCases) { event in
                 eventSection(for: event)
             }
+
+            autoRespondSection
         }
         .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private var autoRespondSection: some View {
+        Section {
+            Toggle("Respond to 'changes requested' reviews", isOn: $autoRespond.respondToChangesRequested)
+                .onChange(of: autoRespond.respondToChangesRequested) { _, _ in onSave?() }
+            Toggle("Respond to failed CI checks", isOn: $autoRespond.respondToFailedChecks)
+                .onChange(of: autoRespond.respondToFailedChecks) { _, _ in onSave?() }
+            Text("When enabled, Crow types an instruction into the session's Claude Code terminal asking Claude to read the review or CI logs and address the issue. Off by default — typing into a terminal unprompted is intrusive.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } header: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Auto-respond")
+                Text("Automatically prompt Claude to fix PR feedback")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     @ViewBuilder

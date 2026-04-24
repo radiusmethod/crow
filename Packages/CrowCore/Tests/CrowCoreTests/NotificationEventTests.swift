@@ -3,7 +3,7 @@ import Testing
 @testable import CrowCore
 
 @Test func notificationEventAllCasesCount() {
-    #expect(NotificationEvent.allCases.count == 3)
+    #expect(NotificationEvent.allCases.count == 5)
 }
 
 @Test func notificationEventDefaultSoundsNonEmpty() {
@@ -61,4 +61,16 @@ import Testing
         let decoded = try JSONDecoder().decode(NotificationEvent.self, from: data)
         #expect(decoded == event)
     }
+}
+
+// MARK: - PR transition events
+
+@Test func changesRequestedAndChecksFailingArePresent() {
+    #expect(NotificationEvent.allCases.contains(.changesRequested))
+    #expect(NotificationEvent.allCases.contains(.checksFailing))
+}
+
+@Test func prTransitionEventsHaveDistinctDefaultSounds() {
+    // Different default sounds so the two events are audibly distinct.
+    #expect(NotificationEvent.changesRequested.defaultSound != NotificationEvent.checksFailing.defaultSound)
 }
