@@ -50,8 +50,62 @@ public actor ClaudeLauncher {
         lines.append("## Instructions")
         lines.append("1. Study the ticket thoroughly — use dangerouslyDisableSandbox: true for ALL gh/glab commands")
         lines.append("2. Create an implementation plan")
+        lines.append("3. Implement the plan")
+        lines.append("4. Commit the changes with a descriptive message")
+        lines.append("5. Push the branch to origin")
+
+        let ticketIsPR = ticketURL.map(Self.isPullRequestURL) ?? false
+        if ticketIsPR {
+            lines.append("6. The ticket is itself a pull/merge request — pushing the branch updates it; do not open a new one")
+        } else {
+            appendOpenPRStep(
+                to: &lines,
+                provider: provider,
+                ticketNumber: session.ticketNumber,
+                hasTicket: ticketURL != nil
+            )
+        }
 
         return lines.joined(separator: "\n")
+    }
+
+    /// Append the final "open a PR/MR" instruction, branching on provider.
+    private func appendOpenPRStep(
+        to lines: inout [String],
+        provider: Provider?,
+        ticketNumber: Int?,
+        hasTicket: Bool
+    ) {
+        let suffix = hasTicket ? " linked to the ticket" : ""
+        switch provider {
+        case .github:
+            lines.append("6. Open a pull request\(suffix):")
+            lines.append("")
+            lines.append("```bash")
+            if let n = ticketNumber {
+                lines.append("gh pr create --title \"<summary>\" --body \"Closes #\(n)\" --base main")
+            } else {
+                lines.append("gh pr create --fill --base main")
+            }
+            lines.append("```")
+        case .gitlab:
+            lines.append("6. Open a merge request\(suffix):")
+            lines.append("")
+            lines.append("```bash")
+            if let n = ticketNumber {
+                lines.append("glab mr create --title \"<summary>\" --description \"Closes #\(n)\" --target-branch main")
+            } else {
+                lines.append("glab mr create --fill --target-branch main")
+            }
+            lines.append("```")
+        case nil:
+            lines.append("6. Open a pull request\(suffix)")
+        }
+    }
+
+    /// True when the URL points at a pull/merge request rather than an issue.
+    private static func isPullRequestURL(_ url: String) -> Bool {
+        url.contains("/pull/") || url.contains("/merge_requests/")
     }
 
     /// Write prompt to temp file and return the launch command.

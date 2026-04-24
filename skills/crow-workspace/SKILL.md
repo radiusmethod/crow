@@ -323,7 +323,17 @@ gh issue view https://github.com/org/repo/issues/123 --comments
 ## Instructions
 1. Study the ticket thoroughly — use dangerouslyDisableSandbox: true for ALL gh/glab commands
 2. Create an implementation plan
+3. Implement the plan
+4. Commit the changes with a descriptive message
+5. Push the branch to origin
+6. Open a pull request linked to the ticket:
+
+```bash
+gh pr create --title "<summary>" --body "Closes #123" --base main
+```
 ~~~
+
+For GitLab tickets, substitute `glab mr create --title "<summary>" --description "Closes #{number}" --target-branch main` on step 6 (use "merge request" instead of "pull request"). When no ticket number is available, drop the body/description and fall back to `gh pr create --fill` / `glab mr create --fill`.
 
 **When an existing PR was detected**, add this section to the prompt between `## Ticket` and `## Instructions`:
 
@@ -346,9 +356,12 @@ And update the Instructions section to:
 1. Review the existing PR and its changes — use dangerouslyDisableSandbox: true for ALL gh/glab commands
 2. Study the ticket thoroughly
 3. Create an implementation plan that builds on the existing work
+4. Implement the plan
+5. Commit the changes with a descriptive message
+6. Push the branch — this updates the existing PR automatically; do NOT open a new one
 ~~~
 
-For MyGitLab, add: `4. If any changes to my-project are required, create a new worktree with a feature branch before making modifications`
+For MyGitLab, add: `7. If any changes to my-project are required, create a new worktree with a feature branch before making modifications`
 
 ### CLI Commands for Fetching Issues
 
