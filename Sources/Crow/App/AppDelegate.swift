@@ -170,6 +170,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.onCloseTerminal = { [weak service] sessionID, terminalID in
             service?.closeTerminal(sessionID: sessionID, terminalID: terminalID)
         }
+        appState.onRenameTerminal = { [weak service] sessionID, terminalID, name in
+            service?.renameTerminal(sessionID: sessionID, terminalID: terminalID, name: name)
+        }
         appState.onAddGlobalTerminal = { [weak service] in
             service?.addGlobalTerminal()
         }
@@ -712,6 +715,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     capturedStore.mutate { data in data.terminals.removeAll { $0.id == terminalID } }
                     return ["deleted": .bool(true)]
+                }
+            },
+            "rename-terminal": { @Sendable params in
+                guard let sessionIDStr = params["session_id"]?.stringValue,
+                      let sessionID = UUID(uuidString: sessionIDStr),
+                      let terminalIDStr = params["terminal_id"]?.stringValue,
+                      let terminalID = UUID(uuidString: terminalIDStr),
+                      let name = params["name"]?.stringValue else {
+                    throw RPCError.invalidParams("session_id, terminal_id, and name required")
+                }
+                return try await MainActor.run {
+                    guard capturedService.renameTerminal(sessionID: sessionID, terminalID: terminalID, name: name) else {
+                        throw RPCError.applicationError("Terminal not found or invalid name")
+                    }
+                    return ["terminal_id": .string(terminalIDStr), "name": .string(name)]
                 }
             },
             "send": { @Sendable params in
