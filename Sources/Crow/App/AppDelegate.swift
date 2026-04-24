@@ -226,8 +226,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start issue tracker
         let tracker = IssueTracker(appState: appState)
         tracker.onNewReviewRequests = { [weak self] newRequests in
+            guard let self else { return }
             for request in newRequests {
-                self?.notificationManager?.notifyReviewRequest(request)
+                self.notificationManager?.notifyReviewRequest(request)
+
+                // Auto-start a review session if any configured workspace opts this repo in,
+                // and we don't already have a review session for this PR.
+                guard request.reviewSessionID == nil else { continue }
+                let enabledRepos = (self.appConfig?.workspaces ?? [])
+                    .flatMap(\.autoReviewRepos)
+                    .map { $0.lowercased() }
+                if enabledRepos.contains(request.repo.lowercased()) {
+                    Task { await self.sessionService?.createReviewSession(prURL: request.url) }
+                }
             }
         }
         tracker.onAutoCreateRequest = { [weak self] issue in
