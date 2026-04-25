@@ -91,9 +91,9 @@ public actor ProviderManager {
             }
             let repoSlug = "\(parsed.org)/\(parsed.repo)"
             if parsed.isMR {
-                output = try await shell(env: env, "glab", "mr", "view", "\(parsed.number)", "--repo", repoSlug)
+                output = try await shell(env: env, cwd: NSHomeDirectory(), "glab", "mr", "view", "\(parsed.number)", "--repo", repoSlug)
             } else {
-                output = try await shell(env: env, "glab", "issue", "view", "\(parsed.number)", "--repo", repoSlug)
+                output = try await shell(env: env, cwd: NSHomeDirectory(), "glab", "issue", "view", "\(parsed.number)", "--repo", repoSlug)
             }
         }
 
@@ -122,7 +122,7 @@ public actor ProviderManager {
         return output.components(separatedBy: .newlines).first
     }
 
-    private func shell(env: [String: String] = [:], _ args: String...) async throws -> String {
+    private func shell(env: [String: String] = [:], cwd: String? = nil, _ args: String...) async throws -> String {
         let process = Process()
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -130,6 +130,7 @@ public actor ProviderManager {
         process.environment = env.isEmpty
             ? ShellEnvironment.shared.env
             : ShellEnvironment.shared.merging(env)
+        if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
         process.standardOutput = pipe
         process.standardError = pipe
         try process.run()
