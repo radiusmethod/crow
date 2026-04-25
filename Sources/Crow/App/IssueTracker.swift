@@ -20,9 +20,24 @@ final class IssueTracker {
     /// Callback for new review request notifications (set by AppDelegate).
     var onNewReviewRequests: (([ReviewRequest]) -> Void)?
 
+    /// Fires when a newly assigned issue carries the auto-create label and
+    /// has no existing session. Wired in AppDelegate to dispatch the
+    /// `onWorkOnIssue` flow and post a notification.
+    var onAutoCreateRequest: ((AssignedIssue) -> Void)?
+
     /// Previously seen review request IDs for delta detection.
     private var previousReviewRequestIDs: Set<String> = []
     private var isFirstFetch = true
+
+    /// Issue URLs we've already dispatched for auto-create but whose session
+    /// hasn't yet landed in `appState`. Prevents repeat dispatches during the
+    /// window between trigger and session registration.
+    private var autoCreateInFlight: Set<String> = []
+
+    /// Label that triggers the auto-create flow when present on an open
+    /// assigned issue. Removed after a successful dispatch (best-effort) so
+    /// the trigger is one-shot and visible across machines.
+    static let autoCreateLabel = "crow:auto"
 
     /// Guards the GitHub-scope console warning so it fires once per session.
     private var didLogGitHubScopeWarning = false
@@ -219,6 +234,8 @@ final class IssueTracker {
 
         appState.assignedIssues = allIssues
 
+        detectAutoCreateCandidates(issues: allIssues, config: config)
+
         if let ghResult {
             // Session PR link detection runs against open PRs only — we only
             // ever want to attach a fresh link when there's an open PR.
@@ -295,6 +312,73 @@ final class IssueTracker {
         await reconcileMissingPRLinks()
 
         logRefreshSummary(elapsed: Date().timeIntervalSince(startedAt))
+    }
+
+    // MARK: - Auto-create on assign
+
+    /// Dispatches `onAutoCreateRequest` for open assigned issues carrying the
+    /// `crow:auto` label, then asynchronously strips the label so the trigger
+    /// is one-shot and visible across machines. Issues that already have an
+    /// active session are treated as "work picked up elsewhere" — we still
+    /// strip the stale label but don't re-dispatch.
+    private func detectAutoCreateCandidates(issues: [AssignedIssue], config: AppConfig) {
+        // Purge in-flight URLs that now have an active session — the dispatch
+        // succeeded and the set can shrink.
+        if !autoCreateInFlight.isEmpty {
+            let active = Set(appState.activeSessions.compactMap(\.ticketURL))
+            autoCreateInFlight.subtract(active)
+        }
+
+        for issue in issues where issue.state == "open" {
+            let labeled = issue.labels.contains { $0.caseInsensitiveCompare(Self.autoCreateLabel) == .orderedSame }
+            guard labeled else { continue }
+            guard !autoCreateInFlight.contains(issue.url) else { continue }
+
+            if appState.activeSession(for: issue) != nil {
+                // Stale label — work already picked up elsewhere. Best-effort cleanup.
+                Task { [weak self] in await self?.removeAutoCreateLabel(from: issue) }
+                continue
+            }
+
+            autoCreateInFlight.insert(issue.url)
+            onAutoCreateRequest?(issue)
+            Task { [weak self] in await self?.removeAutoCreateLabel(from: issue) }
+        }
+    }
+
+    /// Best-effort removal of the auto-create label. Failure is logged and
+    /// otherwise ignored — the in-memory `autoCreateInFlight` + active-session
+    /// dedup keeps duplicate spawns at bay until the label is gone.
+    private func removeAutoCreateLabel(from issue: AssignedIssue) async {
+        let result: ShellResult
+        switch issue.provider {
+        case .github:
+            result = await shellWithStatus(
+                "gh", "issue", "edit", issue.url,
+                "--remove-label", Self.autoCreateLabel
+            )
+        case .gitlab:
+            // issue.id format: "gitlab:host:org/repo#number"
+            let parts = issue.id.split(separator: ":", maxSplits: 2).map(String.init)
+            guard parts.count == 3 else {
+                print("[IssueTracker] cannot strip label, malformed gitlab id: \(issue.id)")
+                return
+            }
+            let host = parts[1]
+            let repo = issue.repo
+            result = await shellWithStatus(
+                env: ["GITLAB_HOST": host],
+                args: [
+                    "glab", "issue", "update", String(issue.number),
+                    "--repo", repo,
+                    "--unlabel", Self.autoCreateLabel
+                ]
+            )
+        }
+        if result.exitCode != 0 {
+            let stderr = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            print("[IssueTracker] failed to remove \(Self.autoCreateLabel) from \(issue.url): \(stderr)")
+        }
     }
 
     private func logRefreshSummary(elapsed: TimeInterval) {
@@ -1789,15 +1873,22 @@ final class IssueTracker {
     }
 
     private func shellWithStatus(args: [String]) async -> ShellResult {
+        return await shellWithStatus(env: [:], args: args)
+    }
+
+    private func shellWithStatus(env: [String: String], args: [String]) async -> ShellResult {
         currentRefreshGhCalls += 1
         let args = args
+        let env = env
         return await Task.detached {
             let process = Process()
             let outPipe = Pipe()
             let errPipe = Pipe()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = args
-            process.environment = ShellEnvironment.shared.env
+            process.environment = env.isEmpty
+                ? ShellEnvironment.shared.env
+                : ShellEnvironment.shared.merging(env)
             process.standardOutput = outPipe
             process.standardError = errPipe
             do { try process.run() } catch { return ShellResult(stdout: "", stderr: error.localizedDescription, exitCode: -1) }

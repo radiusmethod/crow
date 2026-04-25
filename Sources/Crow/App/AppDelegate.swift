@@ -230,6 +230,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.notificationManager?.notifyReviewRequest(request)
             }
         }
+        tracker.onAutoCreateRequest = { [weak self] issue in
+            guard let self else { return }
+            self.appState.onWorkOnIssue?(issue.url)
+            self.notificationManager?.notifyAutoWorkspaceCreated(issue)
+        }
         tracker.start()
         self.issueTracker = tracker
 
