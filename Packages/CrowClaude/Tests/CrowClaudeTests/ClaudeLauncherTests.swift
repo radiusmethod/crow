@@ -7,7 +7,7 @@ import Testing
 
 @Test func generatePromptWithGitHubProvider() async {
     let launcher = ClaudeLauncher()
-    let session = Session(name: "test-session")
+    let session = Session(name: "test-session", ticketNumber: 42)
     let worktree = SessionWorktree(
         sessionID: session.id,
         repoName: "my-repo",
@@ -28,11 +28,17 @@ import Testing
     #expect(prompt.contains("feature/42-cool"))
     #expect(prompt.contains("gh issue view"))
     #expect(prompt.contains("dangerouslyDisableSandbox"))
+    // Completion instructions: commit / push / open PR with ticket linkage
+    #expect(prompt.contains("Commit the changes"))
+    #expect(prompt.contains("Push the branch"))
+    #expect(prompt.contains("gh pr create"))
+    #expect(prompt.contains("Closes #42"))
+    #expect(!prompt.contains("glab mr create"))
 }
 
 @Test func generatePromptWithGitLabProvider() async {
     let launcher = ClaudeLauncher()
-    let session = Session(name: "test-session")
+    let session = Session(name: "test-session", ticketNumber: 10)
 
     let prompt = await launcher.generatePrompt(
         session: session,
@@ -43,6 +49,10 @@ import Testing
 
     #expect(prompt.contains("glab issue view"))
     #expect(prompt.contains("dangerouslyDisableSandbox"))
+    #expect(prompt.contains("glab mr create"))
+    #expect(prompt.contains("Closes #10"))
+    #expect(prompt.contains("merge request"))
+    #expect(!prompt.contains("gh pr create"))
 }
 
 @Test func generatePromptWithNilProvider() async {
@@ -59,6 +69,10 @@ import Testing
     #expect(prompt.contains("URL: https://example.com/ticket/1"))
     #expect(!prompt.contains("gh issue"))
     #expect(!prompt.contains("glab issue"))
+    // With an unknown provider, we must not emit a provider-specific CLI command
+    #expect(!prompt.contains("gh pr create"))
+    #expect(!prompt.contains("glab mr create"))
+    #expect(prompt.contains("Open a pull request"))
 }
 
 @Test func generatePromptWithNoTicket() async {
@@ -82,6 +96,10 @@ import Testing
     #expect(prompt.hasPrefix("/plan"))
     #expect(prompt.contains("| repo |"))
     #expect(!prompt.contains("## Ticket"))
+    // Without a ticket, the PR step is still present (generic form)
+    #expect(prompt.contains("Push the branch"))
+    #expect(prompt.contains("Open a pull request"))
+    #expect(!prompt.contains("Closes #"))
 }
 
 @Test func generatePromptWithEmptyWorktrees() async {
@@ -97,6 +115,40 @@ import Testing
 
     #expect(prompt.contains("| Repository | Path | Branch | Description |"))
     #expect(prompt.contains("## Instructions"))
+}
+
+@Test func generatePromptWhenTicketIsPullRequestGitHub() async {
+    let launcher = ClaudeLauncher()
+    let session = Session(name: "test-session", ticketNumber: 77)
+
+    let prompt = await launcher.generatePrompt(
+        session: session,
+        worktrees: [],
+        ticketURL: "https://github.com/org/repo/pull/77",
+        provider: .github
+    )
+
+    // When the ticket is already a PR, we must not instruct the agent to open a new one
+    #expect(!prompt.contains("gh pr create"))
+    #expect(!prompt.contains("Closes #"))
+    #expect(prompt.contains("Push the branch"))
+    #expect(prompt.contains("pushing the branch updates it"))
+}
+
+@Test func generatePromptWhenTicketIsMergeRequestGitLab() async {
+    let launcher = ClaudeLauncher()
+    let session = Session(name: "test-session", ticketNumber: 77)
+
+    let prompt = await launcher.generatePrompt(
+        session: session,
+        worktrees: [],
+        ticketURL: "https://gitlab.com/org/repo/-/merge_requests/77",
+        provider: .gitlab
+    )
+
+    #expect(!prompt.contains("glab mr create"))
+    #expect(!prompt.contains("Closes #"))
+    #expect(prompt.contains("pushing the branch updates it"))
 }
 
 // MARK: - launchCommand()
