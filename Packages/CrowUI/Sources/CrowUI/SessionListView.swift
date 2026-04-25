@@ -6,12 +6,50 @@ public struct SessionListView: View {
     @Bindable var appState: AppState
     @State private var searchText = ""
     @State private var sessionToDelete: Session?
+    @State private var isSelectionMode = false
+    @State private var selectedSessionIDs: Set<UUID> = []
+    @State private var showBulkDeleteConfirm = false
 
     public init(appState: AppState) {
         self.appState = appState
     }
 
     public var body: some View {
+        VStack(spacing: 0) {
+            sessionList
+
+            if isSelectionMode && !selectedSessionIDs.isEmpty {
+                bulkActionBar
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                selectToggleButton
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    appState.soundMuted.toggle()
+                    appState.onSoundMutedChanged?(appState.soundMuted)
+                } label: {
+                    Image(systemName: appState.soundMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .foregroundStyle(appState.soundMuted ? CorveilTheme.textMuted : CorveilTheme.gold)
+                }
+                .help(appState.soundMuted ? "Unmute notifications" : "Mute notifications")
+                .accessibilityLabel(appState.soundMuted ? "Unmute notifications" : "Mute notifications")
+            }
+        }
+        .deleteSessionAlert(session: $sessionToDelete, appState: appState)
+        .bulkDeleteSessionsAlert(
+            isPresented: $showBulkDeleteConfirm,
+            selectedIDs: selectedSessionIDs,
+            appState: appState
+        ) {
+            selectedSessionIDs.removeAll()
+            isSelectionMode = false
+        }
+    }
+
+    private var sessionList: some View {
         List(selection: $appState.selectedSessionID) {
             // Brandmark header
             SidebarBrandmark()
@@ -40,13 +78,18 @@ public struct SessionListView: View {
             if !appState.activeSessions.isEmpty {
                 SectionDivider(title: "Active")
                 ForEach(filteredSessions(appState.activeSessions)) { session in
-                    SessionRow(session: session, appState: appState)
-                        .tag(session.id)
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .contextMenu {
-                            sessionContextMenu(session)
-                        }
+                    SessionRow(
+                        session: session,
+                        appState: appState,
+                        isSelectionMode: isSelectionMode,
+                        selectedSessionIDs: $selectedSessionIDs
+                    )
+                    .tag(session.id)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .contextMenu {
+                        sessionContextMenu(session)
+                    }
                 }
             }
 
@@ -54,17 +97,22 @@ public struct SessionListView: View {
             if !appState.reviewSessions.isEmpty {
                 SectionDivider(title: "Reviews")
                 ForEach(filteredSessions(appState.reviewSessions)) { session in
-                    SessionRow(session: session, appState: appState)
-                        .tag(session.id)
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                sessionToDelete = session
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
+                    SessionRow(
+                        session: session,
+                        appState: appState,
+                        isSelectionMode: isSelectionMode,
+                        selectedSessionIDs: $selectedSessionIDs
+                    )
+                    .tag(session.id)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            sessionToDelete = session
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
+                    }
                 }
             }
 
@@ -72,13 +120,18 @@ public struct SessionListView: View {
             if !appState.inReviewSessions.isEmpty {
                 SectionDivider(title: "In Review")
                 ForEach(filteredSessions(appState.inReviewSessions)) { session in
-                    SessionRow(session: session, appState: appState)
-                        .tag(session.id)
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .contextMenu {
-                            sessionContextMenu(session)
-                        }
+                    SessionRow(
+                        session: session,
+                        appState: appState,
+                        isSelectionMode: isSelectionMode,
+                        selectedSessionIDs: $selectedSessionIDs
+                    )
+                    .tag(session.id)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .contextMenu {
+                        sessionContextMenu(session)
+                    }
                 }
             }
 
@@ -86,13 +139,18 @@ public struct SessionListView: View {
             if !appState.completedSessions.isEmpty {
                 SectionDivider(title: "Completed")
                 ForEach(filteredSessions(appState.completedSessions)) { session in
-                    SessionRow(session: session, appState: appState)
-                        .tag(session.id)
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .contextMenu {
-                            sessionContextMenu(session)
-                        }
+                    SessionRow(
+                        session: session,
+                        appState: appState,
+                        isSelectionMode: isSelectionMode,
+                        selectedSessionIDs: $selectedSessionIDs
+                    )
+                    .tag(session.id)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .contextMenu {
+                        sessionContextMenu(session)
+                    }
                 }
             }
         }
@@ -100,20 +158,65 @@ public struct SessionListView: View {
         .scrollContentBackground(.hidden)
         .background(CorveilTheme.bgDeep)
         .searchable(text: $searchText, prompt: "Search sessions")
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    appState.soundMuted.toggle()
-                    appState.onSoundMutedChanged?(appState.soundMuted)
-                } label: {
-                    Image(systemName: appState.soundMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .foregroundStyle(appState.soundMuted ? CorveilTheme.textMuted : CorveilTheme.gold)
-                }
-                .help(appState.soundMuted ? "Unmute notifications" : "Mute notifications")
-                .accessibilityLabel(appState.soundMuted ? "Unmute notifications" : "Mute notifications")
+    }
+
+    private var selectToggleButton: some View {
+        Button {
+            isSelectionMode.toggle()
+            if !isSelectionMode {
+                selectedSessionIDs.removeAll()
             }
+        } label: {
+            Image(systemName: isSelectionMode ? "xmark.circle" : "checkmark.circle")
+                .foregroundStyle(isSelectionMode ? .red : CorveilTheme.gold)
         }
-        .deleteSessionAlert(session: $sessionToDelete, appState: appState)
+        .help(isSelectionMode ? "Cancel selection" : "Select sessions")
+        .accessibilityLabel(isSelectionMode ? "Cancel selection" : "Select sessions")
+    }
+
+    private var bulkActionBar: some View {
+        HStack(spacing: 10) {
+            Text("\(selectedSessionIDs.count) selected")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(CorveilTheme.textSecondary)
+
+            Spacer()
+
+            Button {
+                isSelectionMode = false
+                selectedSessionIDs.removeAll()
+            } label: {
+                Text("Cancel")
+                    .font(.system(size: 12))
+                    .foregroundStyle(CorveilTheme.textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                showBulkDeleteConfirm = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10))
+                    Text("Delete (\(selectedSessionIDs.count))")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(Color.red)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(CorveilTheme.bgSurface)
+        .overlay(alignment: .top) {
+            Divider().overlay(CorveilTheme.borderSubtle)
+        }
     }
 
     @ViewBuilder
@@ -243,9 +346,24 @@ struct ManagerAllowListRow: View {
 struct SessionRow: View {
     let session: Session
     let appState: AppState
+    var isSelectionMode: Bool = false
+    var selectedSessionIDs: Binding<Set<UUID>>? = nil
 
     private var primaryWorktree: SessionWorktree? {
         appState.primaryWorktree(for: session.id)
+    }
+
+    private var isChecked: Bool {
+        selectedSessionIDs?.wrappedValue.contains(session.id) ?? false
+    }
+
+    private func toggleSelection() {
+        guard let binding = selectedSessionIDs else { return }
+        if binding.wrappedValue.contains(session.id) {
+            binding.wrappedValue.remove(session.id)
+        } else {
+            binding.wrappedValue.insert(session.id)
+        }
     }
 
     private var prLink: SessionLink? {
@@ -268,6 +386,35 @@ struct SessionRow: View {
     }
 
     var body: some View {
+        HStack(spacing: 8) {
+            if isSelectionMode {
+                Button(action: toggleSelection) {
+                    Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 16))
+                        .foregroundStyle(isChecked ? CorveilTheme.gold : CorveilTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isChecked ? "Deselect \(session.name)" : "Select \(session.name)")
+            }
+
+            rowContent
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(rowBackgroundColor)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(rowBorderColor, lineWidth: 1)
+                )
+        )
+        .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: needsAttention)
+        .animation(.easeInOut(duration: 0.2), value: appState.hideSessionDetails)
+        .padding(.vertical, 1)
+    }
+
+    private var rowContent: some View {
         VStack(alignment: .leading, spacing: 3) {
             // Row 1: Name + status indicator
             HStack(spacing: 4) {
@@ -315,19 +462,6 @@ struct SessionRow: View {
                 }
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(rowBackgroundColor)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(rowBorderColor, lineWidth: 1)
-                )
-        )
-        .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: needsAttention)
-        .animation(.easeInOut(duration: 0.2), value: appState.hideSessionDetails)
-        .padding(.vertical, 1)
     }
 
     @ViewBuilder

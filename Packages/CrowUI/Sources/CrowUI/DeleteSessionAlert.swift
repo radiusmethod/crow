@@ -89,5 +89,126 @@ enum DeleteSessionMessageBuilder {
                 "\n\nThe worktree folders and branches above will be removed.\n\nThe main repo (\(mainCheckouts.map(\.branch).joined(separator: ", "))) will not be affected."
         }
     }
+
+    /// Build a confirmation message summarising a bulk delete of several sessions.
+    /// `worktreesBySession` maps each session ID to its full worktree list.
+    static func buildBulkMessage(
+        sessions: [Session],
+        worktreesBySession: [UUID: [SessionWorktree]]
+    ) -> String {
+        let count = sessions.count
+        let sessionNoun = count == 1 ? "session" : "sessions"
+
+        var realCount = 0
+        var mainCount = 0
+        for session in sessions {
+            let wts = worktreesBySession[session.id] ?? []
+            for wt in wts {
+                if wt.isMainRepoCheckout {
+                    mainCount += 1
+                } else {
+                    realCount += 1
+                }
+            }
+        }
+
+        if realCount == 0 && mainCount == 0 {
+            return "This will remove \(count) \(sessionNoun)."
+        }
+
+        var parts: [String] = []
+        parts.append("This will delete \(count) \(sessionNoun).")
+
+        if realCount > 0 {
+            let worktreeNoun = realCount == 1 ? "worktree" : "worktrees"
+            parts.append("\(realCount) \(worktreeNoun) and matching git branches will be removed from disk.")
+        }
+        if mainCount > 0 {
+            let checkoutNoun = mainCount == 1 ? "main repo checkout" : "main repo checkouts"
+            parts.append("\(mainCount) \(checkoutNoun) will not be affected.")
+        }
+        return parts.joined(separator: "\n\n")
+    }
+}
+
+// MARK: - Bulk Delete Sessions Alert
+
+/// View modifier that attaches a bulk delete-sessions confirmation alert.
+/// Iterates `selectedIDs` serially through `appState.onDeleteSession`.
+struct BulkDeleteSessionsAlert: ViewModifier {
+    @Binding var isPresented: Bool
+    let selectedIDs: Set<UUID>
+    let appState: AppState
+    let onCompletion: () -> Void
+
+    func body(content: Content) -> some View {
+        content.alert("Delete Sessions?", isPresented: $isPresented) {
+            Button("Cancel", role: .cancel) {}
+            Button(buttonLabel, role: .destructive) {
+                let snapshot = sortedSnapshot
+                Task {
+                    for id in snapshot {
+                        do {
+                            try await appState.onDeleteSession?(id)
+                        } catch {
+                            NSLog("Failed to delete session \(id): \(error)")
+                        }
+                    }
+                    await MainActor.run { onCompletion() }
+                }
+            }
+        } message: {
+            Text(messageText)
+        }
+    }
+
+    private var sortedSnapshot: [UUID] {
+        // Stable order: sessions first in the order they currently appear in AppState.
+        let order = Dictionary(uniqueKeysWithValues: appState.sessions.enumerated().map { ($1.id, $0) })
+        return selectedIDs.sorted { (order[$0] ?? .max) < (order[$1] ?? .max) }
+    }
+
+    private var selectedSessions: [Session] {
+        appState.sessions.filter { selectedIDs.contains($0.id) }
+    }
+
+    private var hasRealWorktrees: Bool {
+        selectedSessions.contains { session in
+            appState.worktrees(for: session.id).contains { !$0.isMainRepoCheckout }
+        }
+    }
+
+    private var buttonLabel: String {
+        let base = DeleteSessionMessageBuilder.buttonLabel(hasRealWorktrees: hasRealWorktrees)
+        return "\(base) (\(selectedIDs.count))"
+    }
+
+    private var messageText: String {
+        let sessions = selectedSessions
+        var map: [UUID: [SessionWorktree]] = [:]
+        for session in sessions {
+            map[session.id] = appState.worktrees(for: session.id)
+        }
+        return DeleteSessionMessageBuilder.buildBulkMessage(
+            sessions: sessions,
+            worktreesBySession: map
+        )
+    }
+}
+
+extension View {
+    func bulkDeleteSessionsAlert(
+        isPresented: Binding<Bool>,
+        selectedIDs: Set<UUID>,
+        appState: AppState,
+        onCompletion: @escaping () -> Void
+    ) -> some View {
+        modifier(BulkDeleteSessionsAlert(
+            isPresented: isPresented,
+            selectedIDs: selectedIDs,
+            appState: appState,
+            onCompletion: onCompletion
+        ))
+    }
 }
 
