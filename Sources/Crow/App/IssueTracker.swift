@@ -1228,7 +1228,7 @@ final class IssueTracker {
 
             let output: String
             do {
-                output = try await shell(env: ["GITLAB_HOST": host], "glab", "api", endpoint)
+                output = try await shell(env: ["GITLAB_HOST": host], cwd: NSHomeDirectory(), "glab", "api", endpoint)
             } catch {
                 print("[IssueTracker] Reconcile glab api failed for \(candidate.repoSlug)#\(candidate.branch) on \(host): \(error.localizedDescription.prefix(200))")
                 continue
@@ -1637,6 +1637,7 @@ final class IssueTracker {
         do {
             output = try await shell(
                 env: ["GITLAB_HOST": host],
+                cwd: NSHomeDirectory(),
                 "glab", "issue", "list", "-a", "@me", "--output-format", "json"
             )
         } catch {
@@ -1820,14 +1821,15 @@ final class IssueTracker {
 
     // MARK: - Shell
 
-    private func shell(env: [String: String] = [:], _ args: String...) async throws -> String {
-        return try await shell(env: env, args: args)
+    private func shell(env: [String: String] = [:], cwd: String? = nil, _ args: String...) async throws -> String {
+        return try await shell(env: env, cwd: cwd, args: args)
     }
 
-    private func shell(env: [String: String] = [:], args: [String]) async throws -> String {
+    private func shell(env: [String: String] = [:], cwd: String? = nil, args: [String]) async throws -> String {
         currentRefreshGhCalls += 1
         let args = args
         let env = env
+        let cwd = cwd
         return try await Task.detached {
             let process = Process()
             let outPipe = Pipe()
@@ -1837,6 +1839,7 @@ final class IssueTracker {
             process.environment = env.isEmpty
                 ? ShellEnvironment.shared.env
                 : ShellEnvironment.shared.merging(env)
+            if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
             process.standardOutput = outPipe
             process.standardError = errPipe
             try process.run()
