@@ -230,6 +230,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.notificationManager?.notifyReviewRequest(request)
             }
         }
+
+        // Auto-review: fire on every refresh (including the first) so review
+        // requests already pending at app launch are picked up. Idempotent
+        // via an in-flight Set + the persistent `reviewSessionID` cross-ref.
+        var autoReviewedIDs: Set<String> = []
+        tracker.onReviewRequestsRefreshed = { [weak self] requests in
+            guard let self else { return }
+            let enabledRepos = Set((self.appConfig?.workspaces ?? [])
+                .flatMap(\.autoReviewRepos)
+                .map { $0.lowercased() })
+            guard !enabledRepos.isEmpty else { return }
+
+            for request in requests {
+                guard request.reviewSessionID == nil,
+                      !autoReviewedIDs.contains(request.id),
+                      enabledRepos.contains(request.repo.lowercased()) else { continue }
+                autoReviewedIDs.insert(request.id)
+                Task { await self.sessionService?.createReviewSession(prURL: request.url) }
+            }
+        }
         tracker.onAutoCreateRequest = { [weak self] issue in
             guard let self else { return }
             self.appState.onWorkOnIssue?(issue.url)

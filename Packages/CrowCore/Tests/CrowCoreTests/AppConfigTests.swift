@@ -130,6 +130,25 @@ import Testing
     #expect(stale.derivedCLI == "glab")
 }
 
+@Test func workspaceAutoReviewReposRoundTrip() throws {
+    let config = AppConfig(workspaces: [
+        WorkspaceInfo(name: "Org", autoReviewRepos: ["org/repo1", "org/repo2"])
+    ])
+    let data = try JSONEncoder().encode(config)
+    let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
+    #expect(decoded.workspaces[0].autoReviewRepos == ["org/repo1", "org/repo2"])
+}
+
+@Test func workspaceAutoReviewReposDefaultsEmptyWhenKeyMissing() throws {
+    // Legacy configs without the key should default to empty (feature off).
+    let json = """
+    {"workspaces": [{"id": "00000000-0000-0000-0000-000000000001", "name": "Org", "provider": "github", "cli": "gh"}]}
+    """.data(using: .utf8)!
+    let config = try JSONDecoder().decode(AppConfig.self, from: json)
+    #expect(config.workspaces[0].autoReviewRepos.isEmpty)
+    #expect(config.workspaces[0].alwaysInclude.isEmpty)
+}
+
 @Test func workspaceNameValidation() {
     // Valid name
     #expect(WorkspaceInfo.validateName("MyOrg", existingNames: []) == nil)

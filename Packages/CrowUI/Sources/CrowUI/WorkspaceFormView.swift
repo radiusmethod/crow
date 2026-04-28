@@ -12,6 +12,7 @@ public struct WorkspaceFormView: View {
     @State private var provider: String
     @State private var host: String
     @State private var alwaysIncludeText: String
+    @State private var autoReviewReposText: String
 
     private let existingID: UUID?
     private let existingNames: [String]
@@ -31,6 +32,7 @@ public struct WorkspaceFormView: View {
         self._provider = State(initialValue: workspace?.provider ?? "github")
         self._host = State(initialValue: workspace?.host ?? "")
         self._alwaysIncludeText = State(initialValue: workspace?.alwaysInclude.joined(separator: ", ") ?? "")
+        self._autoReviewReposText = State(initialValue: workspace?.autoReviewRepos.joined(separator: ", ") ?? "")
         self.existingNames = existingNames
         self.onSave = onSave
     }
@@ -70,6 +72,12 @@ public struct WorkspaceFormView: View {
                 Text("Comma-separated list of repos to always show in the workspace prompt.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                TextField("Auto-Review Repos", text: $autoReviewReposText)
+                    .textFieldStyle(.roundedBorder)
+                Text("Comma-separated repos (e.g. org/repo). New review requests from these repos will automatically create a review session.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -83,13 +91,19 @@ public struct WorkspaceFormView: View {
                         .map { $0.trimmingCharacters(in: .whitespaces) }
                         .filter { !$0.isEmpty }
 
+                    let autoReviewRepos = autoReviewReposText
+                        .split(separator: ",")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+
                     let ws = WorkspaceInfo(
                         id: existingID ?? UUID(),
                         name: trimmedName,
                         provider: provider,
                         cli: provider == "github" ? "gh" : "glab",
                         host: provider == "gitlab" && !host.isEmpty ? host : nil,
-                        alwaysInclude: alwaysInclude
+                        alwaysInclude: alwaysInclude,
+                        autoReviewRepos: autoReviewRepos
                     )
                     onSave(ws)
                     dismiss()
@@ -99,6 +113,6 @@ public struct WorkspaceFormView: View {
             }
             .padding()
         }
-        .frame(width: 400, height: 300)
+        .frame(width: 440, height: 400)
     }
 }
