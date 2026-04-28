@@ -10,11 +10,17 @@ import Foundation
 public struct NewSession: ParsableCommand {
     public static let configuration = CommandConfiguration(commandName: "new-session", abstract: "Create a new session")
     @Option(name: .long, help: "Session name") var name: String
+    @Option(name: .long, help: "Agent kind (e.g. claude-code). Defaults to the configured default agent.")
+    var agent: String?
 
     public init() {}
 
     public func run() throws {
-        let result = try rpc("new-session", params: ["name": .string(name)])
+        var params: [String: JSONValue] = ["name": .string(name)]
+        if let agent, !agent.isEmpty {
+            params["agent_kind"] = .string(agent)
+        }
+        let result = try rpc("new-session", params: params)
         printJSON(result)
     }
 }

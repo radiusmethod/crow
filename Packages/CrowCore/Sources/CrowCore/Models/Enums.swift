@@ -29,8 +29,8 @@ public enum LinkType: String, Codable, Sendable {
     case custom
 }
 
-/// Claude Code process state as inferred from PTY output.
-public enum ClaudeState: String, Codable, Sendable {
+/// Coding-agent activity state as inferred from hook events.
+public enum AgentActivityState: String, Codable, Sendable {
     case idle
     case working
     case waiting
@@ -42,14 +42,14 @@ public enum TerminalReadiness: String, Codable, Sendable, Comparable {
     case uninitialized    // GhosttySurfaceView exists but createSurface() not called
     case surfaceCreated   // ghostty_surface_t exists, shell process spawning
     case shellReady       // Shell prompt detected (probe file appeared)
-    case claudeLaunched   // claude --continue has been sent
+    case agentLaunched    // Agent launch command has been sent
 
     private var sortOrder: Int {
         switch self {
         case .uninitialized: 0
         case .surfaceCreated: 1
         case .shellReady: 2
-        case .claudeLaunched: 3
+        case .agentLaunched: 3
         }
     }
 

@@ -23,6 +23,11 @@ public final class AppState {
     /// launch; worker sessions and CLI-spawned terminals are unaffected.
     public var managerAutoPermissionMode: Bool = true
 
+    /// The agent seeded into new sessions when the caller doesn't pick one.
+    /// Mirrors `AppConfig.defaultAgentKind` so creation flows can read the
+    /// current default without a config round-trip.
+    public var defaultAgentKind: AgentKind = .claudeCode
+
     /// Terminal IDs whose Claude Code was launched with `--rc` — drives the
     /// per-session indicator badge. Survives toggle changes so existing sessions
     /// keep showing the badge until they're restarted.
@@ -178,8 +183,8 @@ public final class AppState {
     /// Called when user clicks "Start Review" for multiple selected PR review requests (batch mode).
     public var onBatchStartReview: (([String]) -> Void)?  // receives array of PR URLs
 
-    /// Called to launch Claude in a terminal that just became ready.
-    public var onLaunchClaude: ((UUID) -> Void)?  // receives terminal ID
+    /// Called to launch the coding agent in a terminal that just became ready.
+    public var onLaunchAgent: ((UUID) -> Void)?  // receives terminal ID
 
     /// Called to add a new plain-shell terminal tab to a session.
     public var onAddTerminal: ((UUID) -> Void)?  // receives session ID
@@ -254,6 +259,21 @@ public final class AppState {
 
     public func worktrees(for sessionID: UUID) -> [SessionWorktree] {
         worktrees[sessionID] ?? []
+    }
+
+    /// Resolve a session UUID by matching against the worktree path of every
+    /// known session. Returns the first match, or `nil` if no session has a
+    /// worktree at the given path. Used by the hook-event RPC handler when
+    /// the agent (e.g. Codex) doesn't carry the session UUID in its hook
+    /// invocation — the `cwd` field of the payload is matched against
+    /// worktree paths to recover the session.
+    public func sessionID(forWorktreePath path: String) -> UUID? {
+        for (sessionID, wts) in worktrees {
+            if wts.contains(where: { $0.worktreePath == path }) {
+                return sessionID
+            }
+        }
+        return nil
     }
 
     public func links(for sessionID: UUID) -> [SessionLink] {
@@ -356,13 +376,13 @@ public struct GitHubRateLimit: Equatable, Sendable {
 
 // MARK: - Per-Session Hook State
 
-/// Observable wrapper for per-session hook/Claude state.
+/// Observable wrapper for per-session agent/hook state.
 /// Using a reference-type @Observable class ensures that mutations to one session's
 /// state only invalidate views observing THAT session's instance — not all sessions.
 @MainActor
 @Observable
 public final class SessionHookState {
-    public var claudeState: ClaudeState = .idle
+    public var activityState: AgentActivityState = .idle
     public var pendingNotification: HookNotification?
     public var lastToolActivity: ToolActivity?
     public var hookEvents: [HookEvent] = []

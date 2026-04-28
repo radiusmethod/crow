@@ -10,19 +10,19 @@ struct TerminalReadinessTests {
     @Test func statesAreOrdered() {
         #expect(TerminalReadiness.uninitialized < .surfaceCreated)
         #expect(TerminalReadiness.surfaceCreated < .shellReady)
-        #expect(TerminalReadiness.shellReady < .claudeLaunched)
+        #expect(TerminalReadiness.shellReady < .agentLaunched)
     }
 
     @Test func transitiveOrdering() {
-        #expect(TerminalReadiness.uninitialized < .claudeLaunched)
+        #expect(TerminalReadiness.uninitialized < .agentLaunched)
         #expect(TerminalReadiness.uninitialized < .shellReady)
-        #expect(TerminalReadiness.surfaceCreated < .claudeLaunched)
+        #expect(TerminalReadiness.surfaceCreated < .agentLaunched)
     }
 
     @Test func equalStatesAreNotLessThan() {
         #expect(!(TerminalReadiness.uninitialized < .uninitialized))
         #expect(!(TerminalReadiness.shellReady < .shellReady))
-        #expect(!(TerminalReadiness.claudeLaunched < .claudeLaunched))
+        #expect(!(TerminalReadiness.agentLaunched < .agentLaunched))
     }
 
     // MARK: - Equality
@@ -31,12 +31,12 @@ struct TerminalReadinessTests {
         #expect(TerminalReadiness.uninitialized == .uninitialized)
         #expect(TerminalReadiness.surfaceCreated == .surfaceCreated)
         #expect(TerminalReadiness.shellReady == .shellReady)
-        #expect(TerminalReadiness.claudeLaunched == .claudeLaunched)
+        #expect(TerminalReadiness.agentLaunched == .agentLaunched)
     }
 
     @Test func differentStatesAreNotEqual() {
         #expect(TerminalReadiness.uninitialized != .surfaceCreated)
-        #expect(TerminalReadiness.shellReady != .claudeLaunched)
+        #expect(TerminalReadiness.shellReady != .agentLaunched)
     }
 
     // MARK: - Raw Values
@@ -45,13 +45,13 @@ struct TerminalReadinessTests {
         #expect(TerminalReadiness.uninitialized.rawValue == "uninitialized")
         #expect(TerminalReadiness.surfaceCreated.rawValue == "surfaceCreated")
         #expect(TerminalReadiness.shellReady.rawValue == "shellReady")
-        #expect(TerminalReadiness.claudeLaunched.rawValue == "claudeLaunched")
+        #expect(TerminalReadiness.agentLaunched.rawValue == "agentLaunched")
     }
 
     // MARK: - Codable
 
     @Test func codableRoundTrip() throws {
-        let cases: [TerminalReadiness] = [.uninitialized, .surfaceCreated, .shellReady, .claudeLaunched]
+        let cases: [TerminalReadiness] = [.uninitialized, .surfaceCreated, .shellReady, .agentLaunched]
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
 
