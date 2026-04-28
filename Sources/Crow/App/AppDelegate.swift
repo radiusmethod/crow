@@ -226,19 +226,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Start issue tracker
         let tracker = IssueTracker(appState: appState)
         tracker.onNewReviewRequests = { [weak self] newRequests in
-            guard let self else { return }
             for request in newRequests {
-                self.notificationManager?.notifyReviewRequest(request)
+                self?.notificationManager?.notifyReviewRequest(request)
+            }
+        }
 
-                // Auto-start a review session if any configured workspace opts this repo in,
-                // and we don't already have a review session for this PR.
-                guard request.reviewSessionID == nil else { continue }
-                let enabledRepos = (self.appConfig?.workspaces ?? [])
-                    .flatMap(\.autoReviewRepos)
-                    .map { $0.lowercased() }
-                if enabledRepos.contains(request.repo.lowercased()) {
-                    Task { await self.sessionService?.createReviewSession(prURL: request.url) }
-                }
+        // Auto-review: fire on every refresh (including the first) so review
+        // requests already pending at app launch are picked up. Idempotent
+        // via an in-flight Set + the persistent `reviewSessionID` cross-ref.
+        var autoReviewedIDs: Set<String> = []
+        tracker.onReviewRequestsRefreshed = { [weak self] requests in
+            guard let self else { return }
+            let enabledRepos = Set((self.appConfig?.workspaces ?? [])
+                .flatMap(\.autoReviewRepos)
+                .map { $0.lowercased() })
+            guard !enabledRepos.isEmpty else { return }
+
+            for request in requests {
+                guard request.reviewSessionID == nil,
+                      !autoReviewedIDs.contains(request.id),
+                      enabledRepos.contains(request.repo.lowercased()) else { continue }
+                autoReviewedIDs.insert(request.id)
+                Task { await self.sessionService?.createReviewSession(prURL: request.url) }
             }
         }
         tracker.onAutoCreateRequest = { [weak self] issue in

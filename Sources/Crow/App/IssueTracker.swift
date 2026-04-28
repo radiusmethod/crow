@@ -25,6 +25,12 @@ final class IssueTracker {
     /// `onWorkOnIssue` flow and post a notification.
     var onAutoCreateRequest: ((AssignedIssue) -> Void)?
 
+    /// Callback fired on every successful review-request refresh with the full
+    /// post-cross-reference snapshot (including the first fetch). Used by the
+    /// auto-review opt-in path so requests already pending at app launch
+    /// trigger a session, not just newly-arrived ones.
+    var onReviewRequestsRefreshed: (([ReviewRequest]) -> Void)?
+
     /// Previously seen review request IDs for delta detection.
     private var previousReviewRequestIDs: Set<String> = []
     private var isFirstFetch = true
@@ -286,6 +292,8 @@ final class IssueTracker {
             isFirstFetch = false
             appState.reviewRequests = reviews
             appState.isLoadingReviews = false
+
+            onReviewRequestsRefreshed?(reviews)
 
             syncInReviewSessions(issues: allIssues)
             autoCompleteFinishedSessions(
