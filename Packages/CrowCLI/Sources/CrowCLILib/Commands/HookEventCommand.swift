@@ -4,32 +4,49 @@ import Foundation
 
 // MARK: - Hook Event Command
 
-/// Forward a Claude Code hook event to the running Crow app.
+/// Forward an agent hook event to the running Crow app.
 ///
-/// Reads a JSON payload from stdin (piped by Claude Code) and forwards it
+/// Reads a JSON payload from stdin (piped by the agent) and forwards it
 /// as an RPC call. Silent on success to avoid polluting hook output.
+///
+/// `--session` is optional: agents whose hook config carries the Crow
+/// session UUID (Claude Code) include it; agents whose hook config is
+/// global (Codex) omit it, and the server resolves the session by matching
+/// the payload's `cwd` against registered worktree paths.
 public struct HookEventCmd: ParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "hook-event",
-        abstract: "Forward a Claude Code hook event to the app (reads JSON from stdin)"
+        abstract: "Forward an agent hook event to the app (reads JSON from stdin)"
     )
-    @Option(name: .long, help: "Session UUID") var session: String
+    @Option(name: .long, help: "Session UUID (omit to resolve from payload cwd)")
+    var session: String?
     @Option(name: .long, help: "Event name (e.g., Stop, Notification, PreToolUse)") var event: String
+    @Option(name: .long, help: "Agent kind (e.g., claude-code, codex). Defaults to the session's stored agent.")
+    var agent: String?
 
     public init() {}
 
     public func validate() throws {
-        try validateUUID(session, label: "session UUID")
+        if let session, !session.isEmpty {
+            try validateUUID(session, label: "session UUID")
+        }
     }
 
     public func run() throws {
         let payload = parseHookPayload(from: FileHandle.standardInput.readDataToEndOfFile())
 
-        let result = try rpc("hook-event", params: [
-            "session_id": .string(session),
+        var params: [String: JSONValue] = [
             "event_name": .string(event),
             "payload": .object(payload),
-        ])
+        ]
+        if let session, !session.isEmpty {
+            params["session_id"] = .string(session)
+        }
+        if let agent, !agent.isEmpty {
+            params["agent_kind"] = .string(agent)
+        }
+
+        let result = try rpc("hook-event", params: params)
 
         // Silent on success — only print on error
         if result["error"] != nil {
