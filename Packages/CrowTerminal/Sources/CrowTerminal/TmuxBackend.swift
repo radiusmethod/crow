@@ -86,6 +86,9 @@ public final class TmuxBackend {
     /// Tear down the tmux server (used by the crash-watchdog in PROD #5,
     /// and by app quit). Resets internal state.
     public func shutdown() {
+        if controller != nil {
+            NSLog("[CrowTelemetry tmux:server_shutdown bindings=\(bindings.count)]")
+        }
         controller?.killServer()
         sharedSurface?.destroy()
         sharedSurface = nil
@@ -186,7 +189,13 @@ public final class TmuxBackend {
         guard let windowIndex = bindings[id] else {
             throw TmuxBackendError.unknownTerminal(id)
         }
+        let start = Date()
         try ensureRunningServer().selectWindow(index: windowIndex)
+        let elapsedMS = Int((Date().timeIntervalSince(start)) * 1000)
+        // Operator-greppable: `[CrowTelemetry tmux:tab_switch_ms=…]`. Easy
+        // to graph from logs today; trivially re-routed to a real metrics
+        // pipeline once one exists.
+        NSLog("[CrowTelemetry tmux:tab_switch_ms=\(elapsedMS) terminal=\(id)]")
     }
 
     /// Send text to `id`'s window via the buffer-paste path. Works for
@@ -279,8 +288,12 @@ public final class TmuxBackend {
             )
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                if elapsed != nil {
+                if let elapsed {
+                    let ms = Int(elapsed * 1000)
+                    NSLog("[CrowTelemetry tmux:first_prompt_ms=\(ms) terminal=\(id)]")
                     self.onReadinessChanged?(id, .shellReady)
+                } else {
+                    NSLog("[CrowTelemetry tmux:first_prompt_timeout terminal=\(id) budget_ms=5000]")
                 }
                 // Timeout case: caller can decide via their own watchdog;
                 // we don't downgrade to a "failed" state here because the
