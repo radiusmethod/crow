@@ -104,6 +104,7 @@ public final class AppState {
     public var isLoadingReviews: Bool = false
 
     public var excludeReviewRepos: [String] = []
+    public var excludeTicketRepos: [String] = []
 
     public var filteredReviewRequests: [ReviewRequest] {
         guard !excludeReviewRepos.isEmpty else { return reviewRequests }
@@ -273,19 +274,26 @@ public final class AppState {
 
     // MARK: - Ticket Board Helpers
 
+    /// Issues after applying repo exclusion filter.
+    public var filteredAssignedIssues: [AssignedIssue] {
+        guard !excludeTicketRepos.isEmpty else { return assignedIssues }
+        let excludeSet = Set(excludeTicketRepos.map { $0.lowercased() })
+        return assignedIssues.filter { !excludeSet.contains($0.repo.lowercased()) }
+    }
+
     /// Count of issues in a given pipeline status. Treats `.unknown` as `.backlog`.
     public func issueCount(for status: TicketStatus) -> Int {
-        assignedIssues.filter { effectiveStatus($0) == status }.count
+        filteredAssignedIssues.filter { effectiveStatus($0) == status }.count
     }
 
     /// Issues filtered by the given pipeline status. Treats `.unknown` as `.backlog`.
     public func issues(for status: TicketStatus) -> [AssignedIssue] {
-        assignedIssues.filter { effectiveStatus($0) == status }
+        filteredAssignedIssues.filter { effectiveStatus($0) == status }
     }
 
     /// Filtered and sorted issues for the ticket board, applying status filter, search, and sort.
     public var filteredSortedIssues: [AssignedIssue] {
-        var result = assignedIssues
+        var result = filteredAssignedIssues
 
         // Status filter
         if let status = selectedTicketStatus {

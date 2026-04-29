@@ -240,7 +240,11 @@ final class IssueTracker {
 
         appState.assignedIssues = allIssues
 
-        detectAutoCreateCandidates(issues: allIssues, config: config)
+        let ticketExcludeSet = Set(config.defaults.excludeTicketRepos.map { $0.lowercased() })
+        let autoCreateCandidates = ticketExcludeSet.isEmpty
+            ? allIssues
+            : allIssues.filter { !ticketExcludeSet.contains($0.repo.lowercased()) }
+        detectAutoCreateCandidates(issues: autoCreateCandidates, config: config)
 
         if let ghResult {
             // Session PR link detection runs against open PRs only — we only

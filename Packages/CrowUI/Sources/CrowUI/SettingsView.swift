@@ -13,6 +13,7 @@ public struct SettingsView: View {
     @State private var isAddingWorkspace = false
     @State private var editingWorkspace: WorkspaceInfo?
     @State private var excludeReviewReposText: String
+    @State private var excludeTicketReposText: String
 
     public var onSave: ((String, AppConfig) -> Void)?
     public var onRescaffold: ((String) -> Void)?
@@ -24,6 +25,7 @@ public struct SettingsView: View {
         self._devRoot = State(initialValue: devRoot)
         self._config = State(initialValue: config)
         self._excludeReviewReposText = State(initialValue: config.defaults.excludeReviewRepos.joined(separator: ", "))
+        self._excludeTicketReposText = State(initialValue: config.defaults.excludeTicketRepos.joined(separator: ", "))
         self.onSave = onSave
         self.onRescaffold = onRescaffold
     }
@@ -169,6 +171,21 @@ public struct SettingsView: View {
                         save()
                     }
                 Text("Comma-separated list of repos to hide from the review board (e.g., zarf-dev/zarf, bmlt-enabled/yap).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Tickets") {
+                TextField("Excluded Repos", text: $excludeTicketReposText)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: excludeTicketReposText) { _, _ in
+                        config.defaults.excludeTicketRepos = excludeTicketReposText
+                            .split(separator: ",")
+                            .map { $0.trimmingCharacters(in: .whitespaces) }
+                            .filter { !$0.isEmpty }
+                        save()
+                    }
+                Text("Comma-separated list of repos to hide from the ticket board (e.g., zarf-dev/zarf, bmlt-enabled/yap).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
