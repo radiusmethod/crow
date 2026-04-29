@@ -11,6 +11,10 @@ let package = Package(
         .target(
             name: "CrowTerminal",
             dependencies: ["GhosttyKit"],
+            resources: [
+                .copy("Resources/crow-shell-wrapper.sh"),
+                .copy("Resources/crow-tmux.conf"),
+            ],
             swiftSettings: [
                 .unsafeFlags(["-I../../Frameworks/GhosttyKit.xcframework/macos-arm64/Headers"]),
             ],
@@ -26,6 +30,10 @@ let package = Package(
         .binaryTarget(
             name: "GhosttyKit",
             path: "../../Frameworks/GhosttyKit.xcframework"
+        ),
+        .testTarget(
+            name: "CrowTerminalTests",
+            dependencies: ["CrowTerminal"]
         ),
     ]
 )
