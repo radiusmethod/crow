@@ -33,6 +33,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - tmux first-run onboarding
+
+    /// Surface a native alert when CROW_TMUX_BACKEND=1 is set but no usable
+    /// tmux is on the host. Spec §11 / PROD #4. The user can:
+    ///   - Copy the brew-install command to their clipboard.
+    ///   - Open the upstream tmux installation guide.
+    ///   - Continue without the tmux backend (we fall through to Ghostty).
+    private func showTmuxNotFoundOnboardingSheet() {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "tmux ≥ 3.3 not found"
+        alert.informativeText = """
+            Crow's tmux backend was requested via CROW_TMUX_BACKEND=1, but no \
+            tmux binary ≥ 3.3 was found in /opt/homebrew/bin, /usr/local/bin, \
+            or /usr/bin.
+
+            On Macs with Homebrew, install with:
+
+                brew install tmux
+
+            Crow won't change your dotfiles — it runs your usual shell config \
+            inside the tmux session.
+
+            Continuing for now with the standard backend (one Ghostty terminal \
+            per session).
+            """
+        alert.addButton(withTitle: "Copy `brew install tmux`")
+        alert.addButton(withTitle: "Open tmux install guide")
+        alert.addButton(withTitle: "Continue")
+        let response = alert.runModal()
+        switch response {
+        case .alertFirstButtonReturn:
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString("brew install tmux", forType: .string)
+            // Pasteboard set is silent; alert dismisses on click which is the
+            // visible feedback.
+        case .alertSecondButtonReturn:
+            if let url = URL(string: "https://github.com/tmux/tmux/wiki/Installing") {
+                NSWorkspace.shared.open(url)
+            }
+        default:
+            break // Continue with Ghostty
+        }
+    }
+
     // MARK: - Setup Wizard
 
     private func showSetupWizard() {
@@ -109,6 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("[Crow] tmux backend configured: binary=\(tmuxBinary) socket=\(socketPath)")
             } else {
                 NSLog("[Crow] CROW_TMUX_BACKEND=1 set but no tmux ≥ 3.3 found — staying on Ghostty backend")
+                showTmuxNotFoundOnboardingSheet()
             }
         }
 
