@@ -28,6 +28,14 @@ public final class TmuxBackend {
     /// don't have to special-case backends.
     public var onReadinessChanged: ((UUID, TerminalReadiness) -> Void)?
 
+    /// Fired when a tmux subcommand exceeds the watchdog timeout in
+    /// `TmuxController.run`. The host app surfaces this to the user (spec
+    /// §10.1) — typically via an alert offering "Restart tmux server" — so
+    /// the app stays responsive even when the tmux server hangs. Errors
+    /// other than `.timedOut` are not forwarded here; they propagate to
+    /// the caller for normal handling.
+    public var onUnresponsive: ((TmuxError) -> Void)?
+
     // MARK: - Internal state
 
     /// Created on first use of the backend. Survives until app exit (or a
@@ -114,7 +122,13 @@ public final class TmuxBackend {
         trackReadiness: Bool
     ) throws -> TmuxBinding {
         precondition(!tmuxBinary.isEmpty, "TmuxBackend.configure(...) must be called first")
-        let ctrl = try ensureRunningServer()
+        let ctrl: TmuxController
+        do {
+            ctrl = try ensureRunningServer()
+        } catch {
+            reportIfTimeout(error)
+            throw error
+        }
 
         // Each window gets its own sentinel path so concurrent terminals
         // don't race on the same file.
@@ -190,7 +204,12 @@ public final class TmuxBackend {
             throw TmuxBackendError.unknownTerminal(id)
         }
         let start = Date()
-        try ensureRunningServer().selectWindow(index: windowIndex)
+        do {
+            try ensureRunningServer().selectWindow(index: windowIndex)
+        } catch {
+            reportIfTimeout(error)
+            throw error
+        }
         let elapsedMS = Int((Date().timeIntervalSince(start)) * 1000)
         // Operator-greppable: `[CrowTelemetry tmux:tab_switch_ms=…]`. Easy
         // to graph from logs today; trivially re-routed to a real metrics
@@ -205,11 +224,16 @@ public final class TmuxBackend {
         guard let windowIndex = bindings[id] else {
             throw TmuxBackendError.unknownTerminal(id)
         }
-        let ctrl = try ensureRunningServer()
-        let bufferName = "crow-\(id.uuidString.prefix(8))"
-        try ctrl.loadBufferFromStdin(name: bufferName, data: Data(text.utf8))
-        defer { ctrl.deleteBuffer(name: bufferName) }
-        try ctrl.pasteBuffer(name: bufferName, target: "\(ctrl.sessionName):\(windowIndex)")
+        do {
+            let ctrl = try ensureRunningServer()
+            let bufferName = "crow-\(id.uuidString.prefix(8))"
+            try ctrl.loadBufferFromStdin(name: bufferName, data: Data(text.utf8))
+            defer { ctrl.deleteBuffer(name: bufferName) }
+            try ctrl.pasteBuffer(name: bufferName, target: "\(ctrl.sessionName):\(windowIndex)")
+        } catch {
+            reportIfTimeout(error)
+            throw error
+        }
     }
 
     /// Destroy the tmux window backing `id` and forget the binding.
@@ -304,6 +328,16 @@ public final class TmuxBackend {
 
     private func shellQuote(_ s: String) -> String {
         "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Forward .timedOut errors to the unresponsive callback. Other errors
+    /// pass through silently — they're regular CLI failures the caller
+    /// already handles.
+    private func reportIfTimeout(_ error: Error) {
+        if let tmuxError = error as? TmuxError, case .timedOut = tmuxError {
+            NSLog("[CrowTelemetry tmux:server_unresponsive error=\"\(tmuxError)\"]")
+            onUnresponsive?(tmuxError)
+        }
     }
 
     /// Fixed session name for the cockpit. Per-app, not per-user-session.

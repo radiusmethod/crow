@@ -33,6 +33,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: - tmux watchdog alert
+
+    /// Suppress repeated alerts while one is already on screen. Each alert
+    /// is modal, so concurrent presentations would stack and feel like a
+    /// nag-loop.
+    private var tmuxUnresponsiveAlertShowing = false
+
+    /// Called when `TmuxBackend` reports a watchdog timeout. Surface a
+    /// modal alert (spec §10.1) offering "Restart tmux server" — confirm
+    /// triggers a clean `shutdown()` so the next backend call respawns the
+    /// server fresh.
+    @MainActor
+    private func handleTmuxUnresponsive(error: TmuxError) {
+        guard !tmuxUnresponsiveAlertShowing else { return }
+        tmuxUnresponsiveAlertShowing = true
+        defer { tmuxUnresponsiveAlertShowing = false }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "tmux server is not responding"
+        alert.informativeText = """
+            A tmux command exceeded the 2-second watchdog and was killed to \
+            keep Crow responsive. Your terminals may behave incorrectly until \
+            the server is restarted.
+
+            Details: \(error)
+            """
+        alert.addButton(withTitle: "Restart tmux server")
+        alert.addButton(withTitle: "Continue without restart")
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            TmuxBackend.shared.shutdown()
+            NSLog("[CrowTelemetry tmux:server_restart_by_user]")
+        }
+    }
+
     // MARK: - tmux first-run onboarding
 
     /// Surface a native alert when CROW_TMUX_BACKEND=1 is set but no usable
@@ -151,6 +187,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let socketPath = (tmpdir as NSString)
                     .appendingPathComponent("crow-tmux-\(ProcessInfo.processInfo.processIdentifier).sock")
                 TmuxBackend.shared.configure(tmuxBinary: tmuxBinary, socketPath: socketPath)
+                TmuxBackend.shared.onUnresponsive = { [weak self] error in
+                    Task { @MainActor in self?.handleTmuxUnresponsive(error: error) }
+                }
                 NSLog("[Crow] tmux backend configured: binary=\(tmuxBinary) socket=\(socketPath)")
             } else {
                 NSLog("[Crow] CROW_TMUX_BACKEND=1 set but no tmux ≥ 3.3 found — staying on Ghostty backend")
