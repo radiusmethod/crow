@@ -108,11 +108,17 @@ for libname in libglslang.a libspirv_cross.a libdcimgui.a libfreetype.a \
     if [ -n "$found" ]; then
         mkdir -p "$TMPEXTRACT"
         cd "$TMPEXTRACT"
-        ar x "$found" 2>/dev/null
+        ar x "$found"
+        # IMPORTANT: chmod must succeed before `ar r` — Zig's cache may extract
+        # objects as read-only, which silently fails the subsequent `ar r`
+        # and produces an under-linked fat library. Errors that previously
+        # disappeared into 2>/dev/null surfaced as missing symbols (sentry
+        # uuid, hwy::Warn, ImGui constructors) at consumer link time.
+        # Drop the silent-failure redirects on this leg.
         # shellcheck disable=SC2035  # Glob *.o is intentional — we want all extracted objects
-        chmod 644 *.o 2>/dev/null
+        chmod 644 *.o
         # shellcheck disable=SC2035
-        ar r "$OUTPUT" *.o 2>/dev/null
+        ar r "$OUTPUT" *.o
         cd "$ROOT_DIR"
         rm -rf "$TMPEXTRACT"
     fi
