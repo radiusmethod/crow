@@ -171,6 +171,21 @@ final class SessionService {
                 self.launchClaude(terminalID: terminalID)
             }
         }
+        // tmux-backed terminals report readiness via SentinelWaiter rather
+        // than the 5s sleep. We funnel that into the same TerminalReadiness
+        // state machine so downstream consumers (launchClaude) work without
+        // backend-specific branches. Tmux backend skips the .surfaceCreated
+        // intermediate state — its window is created synchronously by
+        // registerTerminal — so we go straight to .shellReady.
+        TmuxBackend.shared.onReadinessChanged = { [weak self] terminalID, readiness in
+            guard let self else { return }
+            guard let currentState = self.appState.terminalReadiness[terminalID] else { return }
+            NSLog("[SessionService] tmux readiness: terminal=\(terminalID), state=\(readiness), current=\(currentState)")
+            if readiness == .shellReady, currentState < .shellReady {
+                self.appState.terminalReadiness[terminalID] = .shellReady
+                self.launchClaude(terminalID: terminalID)
+            }
+        }
     }
 
     /// Send `claude --continue` (or a review prompt for review sessions) to a terminal and mark it as launched.

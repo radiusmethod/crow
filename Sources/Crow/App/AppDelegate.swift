@@ -91,6 +91,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("[Crow] Initializing Ghostty")
         GhosttyApp.shared.initialize()
 
+        // Optionally configure the tmux backend (#198 rollout). Off by
+        // default; flip via `CROW_TMUX_BACKEND=1` in the environment. If
+        // the flag is on but tmux isn't found at minimum 3.3, we log a
+        // warning and stay on the Ghostty path — first-run onboarding
+        // (PROD #4) will surface this to the user.
+        if FeatureFlags.tmuxBackend {
+            if let tmuxBinary = TmuxDiscovery.discover() {
+                // Per-app socket in $TMPDIR. v1 of the rollout kills the
+                // tmux server on app quit, so restart-survival isn't a
+                // requirement; ~/Library/Application Support is reserved
+                // for that future work (spec §12).
+                let tmpdir = ProcessInfo.processInfo.environment["TMPDIR"] ?? "/tmp"
+                let socketPath = (tmpdir as NSString)
+                    .appendingPathComponent("crow-tmux-\(ProcessInfo.processInfo.processIdentifier).sock")
+                TmuxBackend.shared.configure(tmuxBinary: tmuxBinary, socketPath: socketPath)
+                NSLog("[Crow] tmux backend configured: binary=\(tmuxBinary) socket=\(socketPath)")
+            } else {
+                NSLog("[Crow] CROW_TMUX_BACKEND=1 set but no tmux ≥ 3.3 found — staying on Ghostty backend")
+            }
+        }
+
         // Load config
         let config = appConfig ?? ConfigStore.loadConfig(devRoot: devRoot) ?? AppConfig()
         self.appConfig = config
@@ -696,20 +717,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             && !cmd.contains("--rc")
                             && !cmd.contains("--remote-control")
                     }
-                    let terminal = SessionTerminal(sessionID: sessionID, name: terminalName,
-                                                   cwd: cwd, command: command, isManaged: isManaged)
+                    let trackReadiness = isManaged && sessionID != AppState.managerSessionID
+                    // Decide backend at terminal-create time. Manager terminal
+                    // stays on Ghostty for now (special case; migrating it is
+                    // its own follow-up). Everything else honors the flag.
+                    let useTmux = FeatureFlags.tmuxBackend
+                        && !TmuxBackend.shared.tmuxBinary.isEmpty
+                        && sessionID != AppState.managerSessionID
+                    var terminal = SessionTerminal(
+                        sessionID: sessionID,
+                        name: terminalName,
+                        cwd: cwd,
+                        command: command,
+                        isManaged: isManaged,
+                        backend: useTmux ? .tmux : .ghostty
+                    )
+                    if useTmux {
+                        do {
+                            let binding = try TmuxBackend.shared.registerTerminal(
+                                id: terminal.id,
+                                name: terminalName,
+                                cwd: cwd,
+                                command: command,
+                                trackReadiness: trackReadiness
+                            )
+                            terminal.tmuxBinding = binding
+                        } catch {
+                            NSLog("[Crow] tmux registerTerminal failed (\(error)); falling back to Ghostty")
+                            terminal.backend = .ghostty
+                            terminal.tmuxBinding = nil
+                        }
+                    }
                     capturedAppState.terminals[sessionID, default: []].append(terminal)
                     capturedStore.mutate { $0.terminals.append(terminal) }
-                    // Track readiness only for managed work session terminals
-                    if isManaged && sessionID != AppState.managerSessionID {
+                    if trackReadiness {
                         capturedAppState.terminalReadiness[terminal.id] = .uninitialized
-                        TerminalManager.shared.trackReadiness(for: terminal.id)
+                        TerminalRouter.trackReadiness(for: terminal)
                     }
                     if rcInjected {
                         capturedAppState.remoteControlActiveTerminals.insert(terminal.id)
                     }
-                    // Pre-initialize in offscreen window so shell starts immediately
-                    TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: cwd, command: command)
+                    // For Ghostty terminals, pre-initialize the offscreen
+                    // surface so the shell starts in the background. For
+                    // tmux, the window already exists from registerTerminal.
+                    if terminal.backend == .ghostty {
+                        TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: cwd, command: command)
+                    }
                     return ["terminal_id": .string(terminal.id.uuidString), "session_id": .string(idStr)]
                 }
             },
@@ -742,7 +795,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     guard !terminal.isManaged else {
                         throw RPCError.applicationError("Cannot close managed terminal")
                     }
-                    TerminalManager.shared.destroy(id: terminalID)
+                    TerminalRouter.destroy(terminal)
                     capturedAppState.terminals[sessionID]?.removeAll { $0.id == terminalID }
                     capturedAppState.terminalReadiness.removeValue(forKey: terminalID)
                     capturedAppState.autoLaunchTerminals.remove(terminalID)
@@ -781,16 +834,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 text = text.replacingOccurrences(of: "\\t", with: "\t")
                 NSLog("crow send: text length=\(text.count), ends_with_newline=\(text.hasSuffix("\n")), ends_with_cr=\(text.hasSuffix("\r"))")
                 await MainActor.run {
-                    // If the surface doesn't exist yet, pre-initialize it so the shell starts
-                    if TerminalManager.shared.existingSurface(for: terminalID) == nil {
-                        if let terminals = capturedAppState.terminals[sessionID],
-                           let terminal = terminals.first(where: { $0.id == terminalID }) {
-                            TerminalManager.shared.preInitialize(
-                                id: terminalID,
-                                workingDirectory: terminal.cwd,
-                                command: terminal.command
-                            )
-                        }
+                    let routedTerminal = capturedAppState.terminals[sessionID]?.first(where: { $0.id == terminalID })
+                    // If a Ghostty surface doesn't exist yet, pre-initialize it
+                    // so the shell starts. tmux-backed terminals already have
+                    // their window from registerTerminal — no recovery needed.
+                    if let routedTerminal,
+                       routedTerminal.backend == .ghostty,
+                       TerminalManager.shared.existingSurface(for: terminalID) == nil {
+                        TerminalManager.shared.preInitialize(
+                            id: terminalID,
+                            workingDirectory: routedTerminal.cwd,
+                            command: routedTerminal.command
+                        )
                     }
 
                     // For managed terminals receiving a claude command, write hook config
@@ -827,7 +882,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         capturedAppState.terminalReadiness[terminalID] = .claudeLaunched
                     }
 
-                    TerminalManager.shared.send(id: terminalID, text: text)
+                    if let routedTerminal {
+                        TerminalRouter.send(routedTerminal, text: text)
+                    } else {
+                        // No SessionTerminal row known — fall back to legacy
+                        // path for backward-compat with anything that calls
+                        // `crow send` for an id we haven't seen.
+                        TerminalManager.shared.send(id: terminalID, text: text)
+                    }
                 }
                 return ["sent": .bool(true)]
             },
