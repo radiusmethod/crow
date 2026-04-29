@@ -7,10 +7,16 @@ let package = Package(
     products: [
         .library(name: "CrowTerminal", targets: ["CrowTerminal"]),
     ],
+    dependencies: [
+        .package(path: "../CrowCore"),
+    ],
     targets: [
         .target(
             name: "CrowTerminal",
-            dependencies: ["GhosttyKit"],
+            dependencies: [
+                "GhosttyKit",
+                .product(name: "CrowCore", package: "CrowCore"),
+            ],
             resources: [
                 .copy("Resources/crow-shell-wrapper.sh"),
                 .copy("Resources/crow-tmux.conf"),

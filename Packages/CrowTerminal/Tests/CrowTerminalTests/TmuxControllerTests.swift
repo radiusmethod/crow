@@ -2,18 +2,6 @@ import Foundation
 import Testing
 @testable import CrowTerminal
 
-/// Locate a tmux binary on the host, in priority order. Top-level so the
-/// `.enabled(if:)` trait below can reference it without the macro hitting
-/// a circular-reference resolution.
-private let discoveredTmuxBinary: String? = {
-    let candidates = [
-        "/opt/homebrew/bin/tmux",
-        "/usr/local/bin/tmux",
-        "/usr/bin/tmux",
-    ]
-    return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
-}()
-
 /// Integration tests for `TmuxController`. Skipped automatically when
 /// `tmux` is not installed (e.g. CI without the brew formula); the unit
 /// behavior is exercised via the bundled-resources tests above.
