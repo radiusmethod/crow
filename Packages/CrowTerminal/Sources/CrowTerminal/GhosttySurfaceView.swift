@@ -8,11 +8,19 @@ public final class GhosttySurfaceView: NSView {
     private var markedTextStorage = NSMutableAttributedString()
     private var trackingArea: NSTrackingArea?
 
+    /// Backoff schedule for retrying createSurface() when ghostty_surface_new returns nil.
+    /// 4 retries totalling ~7.5s before declaring permanent failure.
+    private static let retryDelays: [TimeInterval] = [0.5, 1.0, 2.0, 4.0]
+    private var createAttempts: Int = 0
+
     /// Whether the Ghostty surface has been created (needs window attachment first).
     public var hasSurface: Bool { surface != nil }
 
     /// Called after createSurface() succeeds.
     public var onSurfaceCreated: (() -> Void)?
+
+    /// Called after createSurface() exhausts its retry budget without producing a surface.
+    public var onSurfaceCreationFailed: (() -> Void)?
 
     /// The working directory for the shell spawned in this surface.
     public var workingDirectory: String?
@@ -82,6 +90,7 @@ public final class GhosttySurfaceView: NSView {
         updateTrackingAreaInternal()
 
         if surface != nil {
+            createAttempts = 0
             NSLog("[Ghostty] createSurface() succeeded, hasCallback=\(onSurfaceCreated != nil)")
             // Flush any text that arrived before the surface was ready
             if !pendingText.isEmpty {
@@ -95,6 +104,20 @@ public final class GhosttySurfaceView: NSView {
             onSurfaceCreated?()
         } else {
             NSLog("[Ghostty] createSurface() FAILED — surface is nil")
+            if createAttempts < Self.retryDelays.count {
+                let delay = Self.retryDelays[createAttempts]
+                createAttempts += 1
+                NSLog("[Ghostty] retrying createSurface in %.1fs (attempt %d/%d)",
+                      delay, createAttempts, Self.retryDelays.count)
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self, self.surface == nil else { return }
+                    self.createSurface()
+                }
+            } else {
+                NSLog("[Ghostty] createSurface() exhausted retries — giving up")
+                createAttempts = 0
+                onSurfaceCreationFailed?()
+            }
         }
     }
 
@@ -469,6 +492,7 @@ public final class GhosttySurfaceView: NSView {
 
     public func destroy() {
         onSurfaceCreated = nil
+        onSurfaceCreationFailed = nil
         if let surface {
             ghostty_surface_free(surface)
             self.surface = nil

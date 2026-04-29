@@ -164,6 +164,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             service?.launchClaude(terminalID: terminalID)
         }
 
+        appState.onRetryTerminal = { [weak service] terminalID in
+            service?.retryTerminal(terminalID: terminalID)
+        }
+
         // Wire terminal tab management
         appState.onAddTerminal = { [weak service] sessionID in
             service?.addTerminal(sessionID: sessionID)
