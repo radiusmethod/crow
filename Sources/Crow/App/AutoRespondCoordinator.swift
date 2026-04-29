@@ -67,7 +67,12 @@ final class AutoRespondCoordinator {
 ///   2. Tells Claude how to fetch the relevant context via `gh`/`glab`.
 ///   3. Asks Claude to make local changes and push to update the PR.
 ///
-/// Always ends with a trailing newline so the terminal submits it as Enter.
+/// Every prompt is a **single line** ending with `\n`. `GhosttySurfaceView.writeText`
+/// splits on `\n` and sends one Return key event per boundary, so a single-line
+/// payload produces exactly one text-write + one Return — matching the pattern
+/// used by `crow send "/crow-workspace ...\n"` (AppDelegate.swift:203). Multi-line
+/// payloads were observed to land in Claude Code's input box without submitting,
+/// likely because fast multi-segment writes get treated as a paste.
 enum AutoRespondPrompts {
     static func build(for transition: PRStatusTransition, provider: Provider) -> String {
         let prRef = transition.prNumber.map { "PR #\($0)" } ?? "the PR"
@@ -79,13 +84,10 @@ enum AutoRespondPrompts {
             if provider == .gitlab {
                 fetchHint = "Run `glab mr view \(transition.prURL) --comments` to read the review feedback."
             } else {
-                fetchHint = "Run `gh pr view \(transition.prURL) --json reviews,comments` (and `gh api repos/{owner}/{repo}/pulls/\(transition.prNumber.map(String.init) ?? "<number>")/comments` for inline comments) to read the full review feedback."
+                let prNumStr = transition.prNumber.map(String.init) ?? "<number>"
+                fetchHint = "Run `gh pr view \(transition.prURL) --json reviews,comments` (and `gh api repos/{owner}/{repo}/pulls/\(prNumStr)/comments` for inline comments) to read the full review feedback."
             }
-            return """
-            Crow detected a 'changes requested' review on \(prRef) (\(transition.prURL)).
-            \(fetchHint) Address every reviewer comment in code, commit the fix, and push so the PR updates. If a comment is unclear or you disagree, leave a reply explaining your reasoning instead of changing the code.
-
-            """
+            return "Crow detected a 'changes requested' review on \(prRef) (\(transition.prURL)). \(fetchHint) Address every reviewer comment in code, commit the fix, and push so the PR updates. If a comment is unclear or you disagree, leave a reply explaining your reasoning instead of changing the code.\n"
 
         case .checksFailing:
             let failedSummary: String
@@ -102,11 +104,7 @@ enum AutoRespondPrompts {
             } else {
                 logHint = "Run `\(cli) pr checks \(transition.prURL)` to list the failing checks, then `\(cli) run view --log-failed <run-id>` to read the failure output."
             }
-            return """
-            Crow detected failing CI checks on \(prRef) (\(transition.prURL)).\(failedSummary)
-            \(logHint) Identify the root cause, fix it locally, run the relevant tests, then commit and push so CI re-runs.
-
-            """
+            return "Crow detected failing CI checks on \(prRef) (\(transition.prURL)).\(failedSummary) \(logHint) Identify the root cause, fix it locally, run the relevant tests, then commit and push so CI re-runs.\n"
         }
     }
 }
