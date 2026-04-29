@@ -9,11 +9,21 @@ import Foundation
 /// payload bytes through a pipe to avoid ARG_MAX-derived `command too long`
 /// errors that bite `send-keys -l` for >10KB strings (Phase 3 §3 finding).
 ///
+/// Each `run(...)` invocation has a configurable timeout. The default is
+/// 2 seconds — enough for any normal tmux command (typical CLI overhead is
+/// ~70ms p95, see spike Phase 2a §2). Exceeding the timeout SIGTERMs the
+/// child and throws `.timedOut`; callers wire that into a watchdog flow
+/// that offers the user "Restart tmux server" (spec §10.1).
+///
 /// All methods are blocking until the spawned tmux process exits.
 public struct TmuxController: Sendable {
     public let tmuxBinary: String
     public let socketPath: String
     public let sessionName: String
+
+    /// Default per-call timeout. 2s is well above the p95 (~74ms in the
+    /// spike) and matches the watchdog threshold in spec §10.1.
+    public static let defaultTimeout: TimeInterval = 2.0
 
     public init(tmuxBinary: String, socketPath: String, sessionName: String) {
         self.tmuxBinary = tmuxBinary
@@ -24,9 +34,10 @@ public struct TmuxController: Sendable {
     // MARK: - Generic invocation
 
     /// Run `tmux -S <socket> <args...>`. Returns stdout on exit-0,
-    /// throws on non-zero exit with stdout/stderr captured.
+    /// throws on non-zero exit with stdout/stderr captured. Throws
+    /// `TmuxError.timedOut` if the child doesn't exit within `timeout`.
     @discardableResult
-    public func run(_ args: [String]) throws -> String {
+    public func run(_ args: [String], timeout: TimeInterval = TmuxController.defaultTimeout) throws -> String {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: tmuxBinary)
         p.arguments = ["-S", socketPath] + args
@@ -35,11 +46,31 @@ public struct TmuxController: Sendable {
         p.standardOutput = stdout
         p.standardError = stderr
         try p.run()
+
+        // Watchdog: schedule a one-shot terminator. If the process exits
+        // first, we cancel the timer; otherwise the timer fires
+        // p.terminate() and we surface .timedOut.
+        let timedOut = TimeoutFlag()
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.schedule(deadline: .now() + timeout)
+        timer.setEventHandler { [weak p] in
+            guard let p, p.isRunning else { return }
+            timedOut.fire()
+            p.terminate()
+        }
+        timer.resume()
+
         p.waitUntilExit()
+        timer.cancel()
+
         let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
         let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
         let outString = String(data: stdoutData, encoding: .utf8) ?? ""
         let errString = String(data: stderrData, encoding: .utf8) ?? ""
+
+        if timedOut.didFire {
+            throw TmuxError.timedOut(args: args, after: timeout)
+        }
         guard p.terminationStatus == 0 else {
             throw TmuxError.cliFailed(
                 args: args,
@@ -174,6 +205,7 @@ public struct TmuxController: Sendable {
 
 public enum TmuxError: Error, CustomStringConvertible {
     case cliFailed(args: [String], status: Int32, stdout: String, stderr: String)
+    case timedOut(args: [String], after: TimeInterval)
 
     public var description: String {
         switch self {
@@ -182,6 +214,17 @@ public enum TmuxError: Error, CustomStringConvertible {
             let trimmedErr = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             let trimmedOut = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
             return "tmux \(argString) → exit \(status); stderr=\(trimmedErr); stdout=\(trimmedOut)"
+        case let .timedOut(args, after):
+            return "tmux \(args.joined(separator: " ")) timed out after \(String(format: "%.1f", after))s"
         }
     }
+}
+
+/// Tiny boxed flag for the timeout-fired signal. The closure
+/// `setEventHandler` captures this; the result is read after waitUntilExit.
+private final class TimeoutFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fired = false
+    func fire() { lock.lock(); fired = true; lock.unlock() }
+    var didFire: Bool { lock.lock(); defer { lock.unlock() }; return fired }
 }
