@@ -48,7 +48,8 @@ All persistent state lives under `~/Library/Application Support/crow/` (see `Pac
     "cli": "gh",
     "branchPrefix": "feature/",
     "excludeDirs": ["node_modules", ".git", "vendor", "dist", "build", "target"],
-    "excludeReviewRepos": ["zarf-dev/zarf", "bmlt-enabled/yap"]
+    "excludeReviewRepos": ["zarf-dev/zarf", "bmlt-enabled/yap"],
+    "excludeTicketRepos": []
   }
 }
 ```
@@ -58,7 +59,8 @@ All persistent state lives under `~/Library/Application Support/crow/` (see `Pac
 - **`host`** — set for self-hosted GitLab; exported as `GITLAB_HOST` when invoking `glab`.
 - **`branchPrefix`** — used by the `/crow-workspace` skill when creating new branches.
 - **`excludeDirs`** — ignored when scanning repos for git worktrees.
-- **`excludeReviewRepos`** — repos to hide from the review board (e.g., `["zarf-dev/zarf"]`). Matching reviews are filtered out from the board, sidebar badge count, and notifications.
+- **`excludeReviewRepos`** — repos to hide from the review board (e.g., `["zarf-dev/zarf"]`). Supports `*` wildcards (e.g., `"zarf-dev/*"`). Matching reviews are filtered out from the board, sidebar badge count, and notifications.
+- **`excludeTicketRepos`** — repos to hide from the ticket board (e.g., `["zarf-dev/zarf"]`). Supports `*` wildcards (e.g., `"zarf-dev/*"`). Matching issues are filtered out from the board, pipeline counts, and auto-create candidates.
 
 ## Manager Terminal
 

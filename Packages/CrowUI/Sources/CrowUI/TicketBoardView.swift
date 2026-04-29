@@ -48,7 +48,7 @@ public struct TicketBoardView: View {
 
                 Spacer()
 
-                Text("\(appState.assignedIssues.count) issues")
+                Text("\(appState.filteredAssignedIssues.count) issues")
                     .font(.caption)
                     .foregroundStyle(CorveilTheme.textSecondary)
 
@@ -114,7 +114,7 @@ public struct TicketBoardView: View {
             .buttonStyle(.plain)
 
             Button {
-                let urls = appState.assignedIssues
+                let urls = appState.filteredAssignedIssues
                     .filter { selectedIssueIDs.contains($0.id) }
                     .map(\.url)
                 appState.onBatchWorkOnIssues?(urls)
@@ -197,7 +197,7 @@ struct PipelineView: View {
             HStack(spacing: 0) {
                 // "All" segment
                 AllPipelineSegment(
-                    count: appState.assignedIssues.count,
+                    count: appState.filteredAssignedIssues.count,
                     isSelected: appState.selectedTicketStatus == nil
                 ) {
                     appState.selectedTicketStatus = nil

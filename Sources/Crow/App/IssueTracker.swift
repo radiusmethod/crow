@@ -240,7 +240,11 @@ final class IssueTracker {
 
         appState.assignedIssues = allIssues
 
-        detectAutoCreateCandidates(issues: allIssues, config: config)
+        let ticketExcludePatterns = config.defaults.excludeTicketRepos
+        let autoCreateCandidates = ticketExcludePatterns.isEmpty
+            ? allIssues
+            : allIssues.filter { !repoMatchesExcludePatterns($0.repo, patterns: ticketExcludePatterns) }
+        detectAutoCreateCandidates(issues: autoCreateCandidates, config: config)
 
         if let ghResult {
             // Session PR link detection runs against open PRs only — we only
@@ -278,9 +282,9 @@ final class IssueTracker {
                 }
             }
             let allCurrentIDs = Set(reviews.map(\.id))
-            let excludeSet = Set(config.defaults.excludeReviewRepos.map { $0.lowercased() })
-            if !excludeSet.isEmpty {
-                reviews = reviews.filter { !excludeSet.contains($0.repo.lowercased()) }
+            let reviewExcludePatterns = config.defaults.excludeReviewRepos
+            if !reviewExcludePatterns.isEmpty {
+                reviews = reviews.filter { !repoMatchesExcludePatterns($0.repo, patterns: reviewExcludePatterns) }
             }
             let currentIDs = Set(reviews.map(\.id))
             let newIDs = currentIDs.subtracting(previousReviewRequestIDs)

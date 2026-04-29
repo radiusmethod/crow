@@ -1,5 +1,25 @@
 import Foundation
 
+/// Check whether a repo name matches any of the exclude patterns.
+/// Supports exact matches and simple glob patterns with `*` (e.g., `org/*`, `*/repo`).
+public func repoMatchesExcludePatterns(_ repo: String, patterns: [String]) -> Bool {
+    let lowerRepo = repo.lowercased()
+    for pattern in patterns {
+        let lowerPattern = pattern.lowercased()
+        if lowerPattern.contains("*") {
+            let parts = lowerPattern.split(separator: "*", maxSplits: 1, omittingEmptySubsequences: false)
+            let prefix = String(parts[0])
+            let suffix = parts.count > 1 ? String(parts[1]) : ""
+            if lowerRepo.hasPrefix(prefix) && lowerRepo.hasSuffix(suffix) {
+                return true
+            }
+        } else if lowerRepo == lowerPattern {
+            return true
+        }
+    }
+    return false
+}
+
 /// Observable application state shared across the app.
 @MainActor
 @Observable
@@ -104,11 +124,11 @@ public final class AppState {
     public var isLoadingReviews: Bool = false
 
     public var excludeReviewRepos: [String] = []
+    public var excludeTicketRepos: [String] = []
 
     public var filteredReviewRequests: [ReviewRequest] {
         guard !excludeReviewRepos.isEmpty else { return reviewRequests }
-        let excludeSet = Set(excludeReviewRepos.map { $0.lowercased() })
-        return reviewRequests.filter { !excludeSet.contains($0.repo.lowercased()) }
+        return reviewRequests.filter { !repoMatchesExcludePatterns($0.repo, patterns: excludeReviewRepos) }
     }
 
     /// IDs of review requests the user has already seen (for badge count).
@@ -273,19 +293,25 @@ public final class AppState {
 
     // MARK: - Ticket Board Helpers
 
+    /// Issues after applying repo exclusion filter.
+    public var filteredAssignedIssues: [AssignedIssue] {
+        guard !excludeTicketRepos.isEmpty else { return assignedIssues }
+        return assignedIssues.filter { !repoMatchesExcludePatterns($0.repo, patterns: excludeTicketRepos) }
+    }
+
     /// Count of issues in a given pipeline status. Treats `.unknown` as `.backlog`.
     public func issueCount(for status: TicketStatus) -> Int {
-        assignedIssues.filter { effectiveStatus($0) == status }.count
+        filteredAssignedIssues.filter { effectiveStatus($0) == status }.count
     }
 
     /// Issues filtered by the given pipeline status. Treats `.unknown` as `.backlog`.
     public func issues(for status: TicketStatus) -> [AssignedIssue] {
-        assignedIssues.filter { effectiveStatus($0) == status }
+        filteredAssignedIssues.filter { effectiveStatus($0) == status }
     }
 
     /// Filtered and sorted issues for the ticket board, applying status filter, search, and sort.
     public var filteredSortedIssues: [AssignedIssue] {
-        var result = assignedIssues
+        var result = filteredAssignedIssues
 
         // Status filter
         if let status = selectedTicketStatus {
