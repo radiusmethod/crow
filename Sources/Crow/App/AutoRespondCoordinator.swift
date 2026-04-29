@@ -67,12 +67,18 @@ final class AutoRespondCoordinator {
 ///   2. Tells Claude how to fetch the relevant context via `gh`/`glab`.
 ///   3. Asks Claude to make local changes and push to update the PR.
 ///
-/// Every prompt is a **single line** ending with `\n`. `GhosttySurfaceView.writeText`
-/// splits on `\n` and sends one Return key event per boundary, so a single-line
-/// payload produces exactly one text-write + one Return — matching the pattern
-/// used by `crow send "/crow-workspace ...\n"` (AppDelegate.swift:203). Multi-line
-/// payloads were observed to land in Claude Code's input box without submitting,
-/// likely because fast multi-segment writes get treated as a paste.
+/// Every prompt is a **single line** ending with `\r` (carriage return —
+/// what the keyboard actually sends for Enter). `GhosttySurfaceView.writeText`
+/// splits on `\n` (not `\r`), so a `\r`-terminated payload is one atomic
+/// `ghostty_surface_text` call. We deliberately avoid the synthetic-Return
+/// key-event path that `\n` triggers: that path goes through `ghostty_surface_key`,
+/// which is focus-dependent (see `viewDidMoveToWindow` calling
+/// `ghostty_surface_set_focus`). When auto-respond fires for a session the
+/// user isn't actively viewing, the surface is unfocused — text bytes still
+/// flow via the PTY (so the prompt appears in the input box), but the
+/// synthetic Return is dropped, leaving the prompt unsubmitted. Inline `\r`
+/// is delivered as a PTY byte alongside the text and submits regardless of
+/// focus.
 enum AutoRespondPrompts {
     static func build(for transition: PRStatusTransition, provider: Provider) -> String {
         let prRef = transition.prNumber.map { "PR #\($0)" } ?? "the PR"
@@ -87,7 +93,7 @@ enum AutoRespondPrompts {
                 let prNumStr = transition.prNumber.map(String.init) ?? "<number>"
                 fetchHint = "Run `gh pr view \(transition.prURL) --json reviews,comments` (and `gh api repos/{owner}/{repo}/pulls/\(prNumStr)/comments` for inline comments) to read the full review feedback."
             }
-            return "Crow detected a 'changes requested' review on \(prRef) (\(transition.prURL)). \(fetchHint) Address every reviewer comment in code, commit the fix, and push so the PR updates. If a comment is unclear or you disagree, leave a reply explaining your reasoning instead of changing the code.\n"
+            return "Crow detected a 'changes requested' review on \(prRef) (\(transition.prURL)). \(fetchHint) Address every reviewer comment in code, commit the fix, and push so the PR updates. If a comment is unclear or you disagree, leave a reply explaining your reasoning instead of changing the code.\r"
 
         case .checksFailing:
             let failedSummary: String
@@ -104,7 +110,7 @@ enum AutoRespondPrompts {
             } else {
                 logHint = "Run `\(cli) pr checks \(transition.prURL)` to list the failing checks, then `\(cli) run view --log-failed <run-id>` to read the failure output."
             }
-            return "Crow detected failing CI checks on \(prRef) (\(transition.prURL)).\(failedSummary) \(logHint) Identify the root cause, fix it locally, run the relevant tests, then commit and push so CI re-runs.\n"
+            return "Crow detected failing CI checks on \(prRef) (\(transition.prURL)).\(failedSummary) \(logHint) Identify the root cause, fix it locally, run the relevant tests, then commit and push so CI re-runs.\r"
         }
     }
 }
