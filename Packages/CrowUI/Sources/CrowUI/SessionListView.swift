@@ -470,6 +470,11 @@ struct SessionRow: View {
         case .active:
             // Reflect terminal readiness state
             switch terminalReadiness {
+            case .failed:
+                Circle()
+                    .fill(.red)
+                    .frame(width: 8, height: 8)
+                    .accessibilityLabel("Terminal failed to launch")
             case .uninitialized, nil:
                 Circle()
                     .fill(CorveilTheme.textMuted)
