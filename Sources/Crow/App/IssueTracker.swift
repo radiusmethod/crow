@@ -240,10 +240,10 @@ final class IssueTracker {
 
         appState.assignedIssues = allIssues
 
-        let ticketExcludeSet = Set(config.defaults.excludeTicketRepos.map { $0.lowercased() })
-        let autoCreateCandidates = ticketExcludeSet.isEmpty
+        let ticketExcludePatterns = config.defaults.excludeTicketRepos
+        let autoCreateCandidates = ticketExcludePatterns.isEmpty
             ? allIssues
-            : allIssues.filter { !ticketExcludeSet.contains($0.repo.lowercased()) }
+            : allIssues.filter { !repoMatchesExcludePatterns($0.repo, patterns: ticketExcludePatterns) }
         detectAutoCreateCandidates(issues: autoCreateCandidates, config: config)
 
         if let ghResult {
@@ -282,9 +282,9 @@ final class IssueTracker {
                 }
             }
             let allCurrentIDs = Set(reviews.map(\.id))
-            let excludeSet = Set(config.defaults.excludeReviewRepos.map { $0.lowercased() })
-            if !excludeSet.isEmpty {
-                reviews = reviews.filter { !excludeSet.contains($0.repo.lowercased()) }
+            let reviewExcludePatterns = config.defaults.excludeReviewRepos
+            if !reviewExcludePatterns.isEmpty {
+                reviews = reviews.filter { !repoMatchesExcludePatterns($0.repo, patterns: reviewExcludePatterns) }
             }
             let currentIDs = Set(reviews.map(\.id))
             let newIDs = currentIDs.subtracting(previousReviewRequestIDs)

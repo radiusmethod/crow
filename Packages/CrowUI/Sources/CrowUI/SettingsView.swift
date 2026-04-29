@@ -170,7 +170,7 @@ public struct SettingsView: View {
                             .filter { !$0.isEmpty }
                         save()
                     }
-                Text("Comma-separated list of repos to hide from the review board (e.g., zarf-dev/zarf, bmlt-enabled/yap).")
+                Text("Comma-separated repos to hide from the review board. Supports wildcards (e.g., zarf-dev/*, bmlt-enabled/yap).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -185,7 +185,7 @@ public struct SettingsView: View {
                             .filter { !$0.isEmpty }
                         save()
                     }
-                Text("Comma-separated list of repos to hide from the ticket board (e.g., zarf-dev/zarf, bmlt-enabled/yap).")
+                Text("Comma-separated repos to hide from the ticket board. Supports wildcards (e.g., zarf-dev/*, bmlt-enabled/yap).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

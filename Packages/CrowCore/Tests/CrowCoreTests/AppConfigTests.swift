@@ -191,3 +191,42 @@ import Testing
     #expect(ConfigDefaults.isValidBranchPrefix("feature.") == false)         // trailing dot
     #expect(ConfigDefaults.isValidBranchPrefix("feature@{/") == false)       // @{
 }
+
+// MARK: - Repo Exclude Pattern Matching
+
+@Test func repoExcludeExactMatch() {
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["org/repo"]) == true)
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["org/other"]) == false)
+}
+
+@Test func repoExcludeCaseInsensitive() {
+    #expect(repoMatchesExcludePatterns("Org/Repo", patterns: ["org/repo"]) == true)
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["ORG/REPO"]) == true)
+}
+
+@Test func repoExcludeWildcardSuffix() {
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["org/*"]) == true)
+    #expect(repoMatchesExcludePatterns("org/other", patterns: ["org/*"]) == true)
+    #expect(repoMatchesExcludePatterns("different/repo", patterns: ["org/*"]) == false)
+}
+
+@Test func repoExcludeWildcardPrefix() {
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["*/repo"]) == true)
+    #expect(repoMatchesExcludePatterns("other/repo", patterns: ["*/repo"]) == true)
+    #expect(repoMatchesExcludePatterns("org/other", patterns: ["*/repo"]) == false)
+}
+
+@Test func repoExcludeWildcardOnly() {
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["*"]) == true)
+}
+
+@Test func repoExcludeMultiplePatterns() {
+    let patterns = ["org/specific", "other-org/*"]
+    #expect(repoMatchesExcludePatterns("org/specific", patterns: patterns) == true)
+    #expect(repoMatchesExcludePatterns("other-org/anything", patterns: patterns) == true)
+    #expect(repoMatchesExcludePatterns("org/different", patterns: patterns) == false)
+}
+
+@Test func repoExcludeEmptyPatterns() {
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: []) == false)
+}
