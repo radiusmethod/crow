@@ -239,15 +239,27 @@ final class SessionService {
             envPrefix = ""
         }
 
-        // For review sessions, launch claude with the review prompt file
-        if let sessionID,
-           let session = appState.sessions.first(where: { $0.id == sessionID }),
-           session.kind == .review,
-           let worktree = appState.primaryWorktree(for: sessionID) {
-            let promptPath = (worktree.worktreePath as NSString).appendingPathComponent(".crow-review-prompt.md")
-            TerminalManager.shared.send(id: terminalID, text: "\(envPrefix)\(claudePath)\(rcArgs) \"$(cat \(promptPath))\"\n")
+        // Look up the SessionTerminal so we can route through TerminalRouter
+        // (works for both .ghostty and .tmux backends). Falls back to the
+        // legacy direct-send path if the terminal is unknown.
+        let routedTerminal: SessionTerminal? = sessionID.flatMap { sid in
+            appState.terminals[sid]?.first(where: { $0.id == terminalID })
+        }
+        let claudeText: String = {
+            if let sessionID,
+               let session = appState.sessions.first(where: { $0.id == sessionID }),
+               session.kind == .review,
+               let worktree = appState.primaryWorktree(for: sessionID) {
+                let promptPath = (worktree.worktreePath as NSString).appendingPathComponent(".crow-review-prompt.md")
+                return "\(envPrefix)\(claudePath)\(rcArgs) \"$(cat \(promptPath))\"\n"
+            } else {
+                return "\(envPrefix)\(claudePath)\(rcArgs) --continue\n"
+            }
+        }()
+        if let routedTerminal {
+            TerminalRouter.send(routedTerminal, text: claudeText)
         } else {
-            TerminalManager.shared.send(id: terminalID, text: "\(envPrefix)\(claudePath)\(rcArgs) --continue\n")
+            TerminalManager.shared.send(id: terminalID, text: claudeText)
         }
 
         appState.terminalReadiness[terminalID] = .claudeLaunched
