@@ -75,14 +75,21 @@ mkdir -p "$XCFW_DIR"
 cp "$XCFW_SRC/Info.plist" "$FRAMEWORKS_DIR/GhosttyKit.xcframework/"
 cp -R "$XCFW_SRC/macos-arm64/Headers" "$XCFW_DIR/" 2>/dev/null || true  # Headers may not exist in all configurations
 
+# SPM 6.3+ requires module.modulemap at the library identifier level (not just in Headers/)
+if [ -f "$XCFW_DIR/Headers/module.modulemap" ] && [ ! -f "$XCFW_DIR/module.modulemap" ]; then
+    cp "$XCFW_DIR/Headers/module.modulemap" "$XCFW_DIR/module.modulemap"
+fi
+
 # Start with the dependency library from the xcframework
 OUTPUT="$XCFW_DIR/libghostty-fat.a"
 cp "$XCFW_SRC/macos-arm64/libghostty-fat.a" "$OUTPUT"
 
 # Find and add the Zig-compiled ghostty API object (libghostty_zcu.o)
-ZCU=$(find "$CACHE" -name "libghostty_zcu.o" -print -quit 2>/dev/null)
+# There may be multiple libghostty_zcu.o files in the cache; we need the one
+# containing the public API symbols (e.g. ghostty_app_new), not the SIMD-only one.
+ZCU=$(find "$CACHE" -name "libghostty_zcu.o" -exec sh -c 'nm "$1" 2>/dev/null | grep -q "T _ghostty_app_new" && echo "$1"' _ {} \; 2>/dev/null | head -1)
 if [ -z "$ZCU" ]; then
-    echo "WARNING: libghostty_zcu.o not found in Zig cache — fat library may be incomplete"
+    echo "WARNING: libghostty_zcu.o with API symbols not found in Zig cache — fat library may be incomplete"
 fi
 if [ -n "$ZCU" ]; then
     ar r "$OUTPUT" "$ZCU" 2>/dev/null

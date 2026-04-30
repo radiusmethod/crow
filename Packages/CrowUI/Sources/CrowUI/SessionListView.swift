@@ -18,7 +18,7 @@ public struct SessionListView: View {
         VStack(spacing: 0) {
             sessionList
 
-            if isSelectionMode && !selectedSessionIDs.isEmpty {
+            if isSelectionMode {
                 bulkActionBar
             }
         }
@@ -76,7 +76,12 @@ public struct SessionListView: View {
 
             // Active sessions
             if !appState.activeSessions.isEmpty {
-                SectionDivider(title: "Active")
+                SectionDivider(
+                    title: "Active",
+                    isSelectionMode: isSelectionMode,
+                    sectionIDs: Set(filteredSessions(appState.activeSessions).map(\.id)),
+                    selectedSessionIDs: $selectedSessionIDs
+                )
                 ForEach(filteredSessions(appState.activeSessions)) { session in
                     SessionRow(
                         session: session,
@@ -95,7 +100,12 @@ public struct SessionListView: View {
 
             // Review sessions
             if !appState.reviewSessions.isEmpty {
-                SectionDivider(title: "Reviews")
+                SectionDivider(
+                    title: "Reviews",
+                    isSelectionMode: isSelectionMode,
+                    sectionIDs: Set(filteredSessions(appState.reviewSessions).map(\.id)),
+                    selectedSessionIDs: $selectedSessionIDs
+                )
                 ForEach(filteredSessions(appState.reviewSessions)) { session in
                     SessionRow(
                         session: session,
@@ -118,7 +128,12 @@ public struct SessionListView: View {
 
             // In Review sessions
             if !appState.inReviewSessions.isEmpty {
-                SectionDivider(title: "In Review")
+                SectionDivider(
+                    title: "In Review",
+                    isSelectionMode: isSelectionMode,
+                    sectionIDs: Set(filteredSessions(appState.inReviewSessions).map(\.id)),
+                    selectedSessionIDs: $selectedSessionIDs
+                )
                 ForEach(filteredSessions(appState.inReviewSessions)) { session in
                     SessionRow(
                         session: session,
@@ -137,7 +152,12 @@ public struct SessionListView: View {
 
             // Completed sessions
             if !appState.completedSessions.isEmpty {
-                SectionDivider(title: "Completed")
+                SectionDivider(
+                    title: "Completed",
+                    isSelectionMode: isSelectionMode,
+                    sectionIDs: Set(filteredSessions(appState.completedSessions).map(\.id)),
+                    selectedSessionIDs: $selectedSessionIDs
+                )
                 ForEach(filteredSessions(appState.completedSessions)) { session in
                     SessionRow(
                         session: session,
@@ -186,30 +206,34 @@ public struct SessionListView: View {
                 isSelectionMode = false
                 selectedSessionIDs.removeAll()
             } label: {
-                Text("Cancel")
-                    .font(.system(size: 12))
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(CorveilTheme.textSecondary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
+                    .padding(5)
             }
             .buttonStyle(.plain)
+            .help("Cancel selection")
+            .accessibilityLabel("Cancel selection")
 
-            Button {
-                showBulkDeleteConfirm = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 10))
-                    Text("Delete (\(selectedSessionIDs.count))")
-                        .font(.system(size: 12, weight: .semibold))
+            if !selectedSessionIDs.isEmpty {
+                Button {
+                    showBulkDeleteConfirm = true
+                } label: {
+                    HStack(spacing: 2) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 11))
+                        Text("(\(selectedSessionIDs.count))")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Color.red)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
-                .background(Color.red)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete \(selectedSessionIDs.count) selected sessions")
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -273,16 +297,51 @@ struct SidebarBrandmark: View {
 /// Uppercase section label used to group sessions in the sidebar.
 struct SectionDivider: View {
     let title: String
+    var isSelectionMode: Bool = false
+    var sectionIDs: Set<UUID> = []
+    @Binding var selectedSessionIDs: Set<UUID>
+
+    init(title: String, isSelectionMode: Bool = false, sectionIDs: Set<UUID> = [], selectedSessionIDs: Binding<Set<UUID>> = .constant([])) {
+        self.title = title
+        self.isSelectionMode = isSelectionMode
+        self.sectionIDs = sectionIDs
+        self._selectedSessionIDs = selectedSessionIDs
+    }
+
+    private var allSelected: Bool {
+        !sectionIDs.isEmpty && sectionIDs.isSubset(of: selectedSessionIDs)
+    }
 
     var body: some View {
-        Text(title)
-            .font(.system(size: 10, weight: .bold))
-            .tracking(1.5)
-            .textCase(.uppercase)
-            .foregroundStyle(CorveilTheme.goldDark)
-            .padding(.top, 10)
-            .padding(.bottom, 2)
-            .listRowSeparator(.hidden)
+        HStack {
+            Text(title)
+                .font(.system(size: 10, weight: .bold))
+                .tracking(1.5)
+                .textCase(.uppercase)
+                .foregroundStyle(CorveilTheme.goldDark)
+
+            Spacer()
+
+            if isSelectionMode && !sectionIDs.isEmpty {
+                Button {
+                    if allSelected {
+                        selectedSessionIDs.subtract(sectionIDs)
+                    } else {
+                        selectedSessionIDs.formUnion(sectionIDs)
+                    }
+                } label: {
+                    Image(systemName: allSelected ? "checkmark.circle.fill" : "checklist")
+                        .font(.system(size: 12))
+                        .foregroundStyle(allSelected ? CorveilTheme.gold : CorveilTheme.goldDark)
+                }
+                .buttonStyle(.plain)
+                .help(allSelected ? "Deselect all \(title.lowercased())" : "Select all \(title.lowercased())")
+                .accessibilityLabel(allSelected ? "Deselect all \(title.lowercased())" : "Select all \(title.lowercased())")
+            }
+        }
+        .padding(.top, 10)
+        .padding(.bottom, 2)
+        .listRowSeparator(.hidden)
     }
 }
 
