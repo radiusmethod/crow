@@ -213,6 +213,7 @@ public struct SessionListView: View {
             }
             .buttonStyle(.plain)
             .help("Cancel selection")
+            .accessibilityLabel("Cancel selection")
 
             if !selectedSessionIDs.isEmpty {
                 Button {
@@ -231,6 +232,7 @@ public struct SessionListView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Delete \(selectedSessionIDs.count) selected sessions")
             }
         }
         .padding(.horizontal, 12)
@@ -334,6 +336,7 @@ struct SectionDivider: View {
                 }
                 .buttonStyle(.plain)
                 .help(allSelected ? "Deselect all \(title.lowercased())" : "Select all \(title.lowercased())")
+                .accessibilityLabel(allSelected ? "Deselect all \(title.lowercased())" : "Select all \(title.lowercased())")
             }
         }
         .padding(.top, 10)
