@@ -1,22 +1,40 @@
 import Foundation
 
 /// Status of a pull request associated with a session.
-public struct PRStatus: Codable, Sendable {
+public struct PRStatus: Codable, Sendable, Equatable {
     public var checksPass: CheckStatus
     public var reviewStatus: ReviewStatus
     public var mergeable: MergeStatus
     public var failedCheckNames: [String]
+    /// Head commit SHA. Used to dedupe per-commit transition events
+    /// (e.g. don't re-fire "checks failing" when the same commit is re-run).
+    public var headSha: String?
 
     public init(
         checksPass: CheckStatus = .unknown,
         reviewStatus: ReviewStatus = .unknown,
         mergeable: MergeStatus = .unknown,
-        failedCheckNames: [String] = []
+        failedCheckNames: [String] = [],
+        headSha: String? = nil
     ) {
         self.checksPass = checksPass
         self.reviewStatus = reviewStatus
         self.mergeable = mergeable
         self.failedCheckNames = failedCheckNames
+        self.headSha = headSha
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        checksPass = try c.decodeIfPresent(CheckStatus.self, forKey: .checksPass) ?? .unknown
+        reviewStatus = try c.decodeIfPresent(ReviewStatus.self, forKey: .reviewStatus) ?? .unknown
+        mergeable = try c.decodeIfPresent(MergeStatus.self, forKey: .mergeable) ?? .unknown
+        failedCheckNames = try c.decodeIfPresent([String].self, forKey: .failedCheckNames) ?? []
+        headSha = try c.decodeIfPresent(String.self, forKey: .headSha)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case checksPass, reviewStatus, mergeable, failedCheckNames, headSha
     }
 
     public enum CheckStatus: String, Codable, Sendable {

@@ -31,6 +31,11 @@ final class IssueTracker {
     /// trigger a session, not just newly-arrived ones.
     var onReviewRequestsRefreshed: (([ReviewRequest]) -> Void)?
 
+    /// Callback for detected PR status transitions — fires once per
+    /// transition, after dedupe. Wired in AppDelegate to drive notifications
+    /// and the auto-respond coordinator.
+    var onPRStatusTransitions: (([PRStatusTransition]) -> Void)?
+
     /// Previously seen review request IDs for delta detection.
     private var previousReviewRequestIDs: Set<String> = []
     private var isFirstFetch = true
@@ -44,6 +49,18 @@ final class IssueTracker {
     /// assigned issue. Removed after a successful dispatch (best-effort) so
     /// the trigger is one-shot and visible across machines.
     static let autoCreateLabel = "crow:auto"
+
+    /// Last observed `PRStatus` per session, used to compute transitions.
+    /// Populated lazily on first observation; that first poll never fires
+    /// transitions (matches the `previousReviewRequestIDs` first-fetch
+    /// behavior so existing PR state isn't replayed at startup).
+    private var previousPRStatus: [UUID: PRStatus] = [:]
+
+    /// Stable keys of transitions we've already emitted, used to suppress
+    /// duplicates across the in-process lifetime. See `PRStatusTransition.dedupeKey`.
+    /// Cleared per-session when we observe the rule "re-arm" (e.g. checks
+    /// move back to passing/pending) so subsequent transitions still fire.
+    private var emittedTransitionKeys: Set<String> = []
 
     /// Guards the GitHub-scope console warning so it fires once per session.
     private var didLogGitHubScopeWarning = false
@@ -421,6 +438,7 @@ final class IssueTracker {
         let reviewDecision: String // APPROVED / CHANGES_REQUESTED / REVIEW_REQUIRED / ""
         let isDraft: Bool
         let headRefName: String
+        let headRefOid: String     // Head commit SHA (empty if unavailable)
         let baseRefName: String
         let repoNameWithOwner: String
         let linkedIssueReferences: [LinkedIssue]
@@ -464,6 +482,7 @@ final class IssueTracker {
             reviewDecision: winner.reviewDecision.isEmpty ? loser.reviewDecision : winner.reviewDecision,
             isDraft: winner.isDraft,
             headRefName: winner.headRefName.isEmpty ? loser.headRefName : winner.headRefName,
+            headRefOid: winner.headRefOid.isEmpty ? loser.headRefOid : winner.headRefOid,
             baseRefName: winner.baseRefName.isEmpty ? loser.baseRefName : winner.baseRefName,
             repoNameWithOwner: winner.repoNameWithOwner.isEmpty ? loser.repoNameWithOwner : winner.repoNameWithOwner,
             linkedIssueReferences: winner.linkedIssueReferences.isEmpty ? loser.linkedIssueReferences : winner.linkedIssueReferences,
@@ -510,7 +529,7 @@ final class IssueTracker {
       viewerPRs: viewer {
         pullRequests(first: 50, states: [OPEN], orderBy: {field: UPDATED_AT, direction: DESC}) {
           nodes {
-            number url state mergeable reviewDecision isDraft headRefName baseRefName
+            number url state mergeable reviewDecision isDraft headRefName headRefOid baseRefName
             repository { nameWithOwner }
             closingIssuesReferences(first: 5) { nodes { number repository { nameWithOwner } } }
             statusCheckRollup {
@@ -670,7 +689,7 @@ final class IssueTracker {
               pr\(i): repository(owner: $owner\(i), name: $repo\(i)) {
                 pullRequest(number: $num\(i)) {
                   number url state mergeable reviewDecision isDraft
-                  headRefName baseRefName
+                  headRefName headRefOid baseRefName
                   repository { nameWithOwner }
                 }
               }
@@ -721,6 +740,7 @@ final class IssueTracker {
             let reviewDecision = prObj["reviewDecision"] as? String ?? ""
             let isDraft = prObj["isDraft"] as? Bool ?? false
             let headRefName = prObj["headRefName"] as? String ?? ""
+            let headRefOid = prObj["headRefOid"] as? String ?? ""
             let baseRefName = prObj["baseRefName"] as? String ?? ""
             let repoName = (prObj["repository"] as? [String: Any])?["nameWithOwner"] as? String ?? ""
 
@@ -732,6 +752,7 @@ final class IssueTracker {
                 reviewDecision: reviewDecision,
                 isDraft: isDraft,
                 headRefName: headRefName,
+                headRefOid: headRefOid,
                 baseRefName: baseRefName,
                 repoNameWithOwner: repoName,
                 linkedIssueReferences: [],
@@ -844,6 +865,7 @@ final class IssueTracker {
             let reviewDecision = node["reviewDecision"] as? String ?? ""
             let isDraft = node["isDraft"] as? Bool ?? false
             let headRefName = node["headRefName"] as? String ?? ""
+            let headRefOid = node["headRefOid"] as? String ?? ""
             let baseRefName = node["baseRefName"] as? String ?? ""
             let repoName = (node["repository"] as? [String: Any])?["nameWithOwner"] as? String ?? ""
 
@@ -879,6 +901,7 @@ final class IssueTracker {
                 reviewDecision: reviewDecision,
                 isDraft: isDraft,
                 headRefName: headRefName,
+                headRefOid: headRefOid,
                 baseRefName: baseRefName,
                 repoNameWithOwner: repoName,
                 linkedIssueReferences: linkedRefs,
@@ -1382,13 +1405,48 @@ final class IssueTracker {
         guard !viewerPRs.isEmpty else { return }
         let byURL = Dictionary(viewerPRs.map { ($0.url, $0) }, uniquingKeysWith: Self.mergePRRecords)
 
+        var transitions: [PRStatusTransition] = []
         let sessionsWithPRs = appState.sessions.filter { $0.id != AppState.managerSessionID }
         for session in sessionsWithPRs {
             let links = appState.links(for: session.id)
             guard let prLink = links.first(where: { $0.linkType == .pr }) else { continue }
             guard let pr = byURL[prLink.url] else { continue }
 
-            appState.prStatus[session.id] = buildPRStatus(from: pr)
+            let newStatus = buildPRStatus(from: pr)
+            let oldStatus = previousPRStatus[session.id]
+
+            // Re-arm rules whose triggering condition has cleared, so a future
+            // re-entry (approved → changesRequested again, passing → failing on
+            // a new commit) can fire even if we previously emitted.
+            if let old = oldStatus {
+                if old.reviewStatus == .changesRequested && newStatus.reviewStatus != .changesRequested {
+                    emittedTransitionKeys.remove("\(session.id.uuidString)|changesRequested")
+                }
+                if old.checksPass == .failing && newStatus.checksPass != .failing {
+                    if let sha = old.headSha {
+                        emittedTransitionKeys.remove("\(session.id.uuidString)|checksFailing|\(sha)")
+                    }
+                }
+            }
+
+            let candidates = PRStatus.transitions(
+                from: oldStatus,
+                to: newStatus,
+                sessionID: session.id,
+                prURL: prLink.url,
+                prNumber: pr.number
+            )
+            for t in candidates where !emittedTransitionKeys.contains(t.dedupeKey) {
+                emittedTransitionKeys.insert(t.dedupeKey)
+                transitions.append(t)
+            }
+
+            previousPRStatus[session.id] = newStatus
+            appState.prStatus[session.id] = newStatus
+        }
+
+        if !transitions.isEmpty {
+            onPRStatusTransitions?(transitions)
         }
     }
 
@@ -1442,7 +1500,8 @@ final class IssueTracker {
             checksPass: checksPass,
             reviewStatus: reviewStatus,
             mergeable: mergeStatus,
-            failedCheckNames: failedChecks
+            failedCheckNames: failedChecks,
+            headSha: pr.headRefOid.isEmpty ? nil : pr.headRefOid
         )
     }
 

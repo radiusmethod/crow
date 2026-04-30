@@ -9,6 +9,8 @@ public enum NotificationEvent: String, Codable, Sendable, CaseIterable, Identifi
     case taskComplete
     case agentWaiting
     case reviewRequested
+    case changesRequested
+    case checksFailing
 
     public var id: String { rawValue }
 
@@ -17,6 +19,8 @@ public enum NotificationEvent: String, Codable, Sendable, CaseIterable, Identifi
         case .taskComplete: "Task Complete"
         case .agentWaiting: "Agent Waiting"
         case .reviewRequested: "Review Requested"
+        case .changesRequested: "Changes Requested"
+        case .checksFailing: "CI Failing"
         }
     }
 
@@ -25,6 +29,8 @@ public enum NotificationEvent: String, Codable, Sendable, CaseIterable, Identifi
         case .taskComplete: "Claude finished responding"
         case .agentWaiting: "Claude needs your input or permission"
         case .reviewRequested: "Someone requested your review on a PR"
+        case .changesRequested: "A reviewer requested changes on your PR"
+        case .checksFailing: "CI checks started failing on your PR"
         }
     }
 
@@ -33,6 +39,8 @@ public enum NotificationEvent: String, Codable, Sendable, CaseIterable, Identifi
         case .taskComplete: "Glass"
         case .agentWaiting: "Funk"
         case .reviewRequested: "Glass"
+        case .changesRequested: "Funk"
+        case .checksFailing: "Sosumi"
         }
     }
 

@@ -43,6 +43,7 @@ struct IssueTrackerCompletionTests {
             reviewDecision: "",
             isDraft: false,
             headRefName: "",
+            headRefOid: "",
             baseRefName: "",
             repoNameWithOwner: "",
             linkedIssueReferences: [],

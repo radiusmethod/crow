@@ -13,6 +13,7 @@ public struct AppConfig: Codable, Sendable, Equatable {
     public var remoteControlEnabled: Bool
     public var managerAutoPermissionMode: Bool
     public var telemetry: TelemetryConfig
+    public var autoRespond: AutoRespondSettings
 
     public init(
         workspaces: [WorkspaceInfo] = [],
@@ -21,7 +22,8 @@ public struct AppConfig: Codable, Sendable, Equatable {
         sidebar: SidebarSettings = SidebarSettings(),
         remoteControlEnabled: Bool = false,
         managerAutoPermissionMode: Bool = true,
-        telemetry: TelemetryConfig = TelemetryConfig()
+        telemetry: TelemetryConfig = TelemetryConfig(),
+        autoRespond: AutoRespondSettings = AutoRespondSettings()
     ) {
         self.workspaces = workspaces
         self.defaults = defaults
@@ -30,6 +32,7 @@ public struct AppConfig: Codable, Sendable, Equatable {
         self.remoteControlEnabled = remoteControlEnabled
         self.managerAutoPermissionMode = managerAutoPermissionMode
         self.telemetry = telemetry
+        self.autoRespond = autoRespond
     }
 
     public init(from decoder: Decoder) throws {
@@ -41,10 +44,43 @@ public struct AppConfig: Codable, Sendable, Equatable {
         remoteControlEnabled = try container.decodeIfPresent(Bool.self, forKey: .remoteControlEnabled) ?? false
         managerAutoPermissionMode = try container.decodeIfPresent(Bool.self, forKey: .managerAutoPermissionMode) ?? true
         telemetry = try container.decodeIfPresent(TelemetryConfig.self, forKey: .telemetry) ?? TelemetryConfig()
+        autoRespond = try container.decodeIfPresent(AutoRespondSettings.self, forKey: .autoRespond) ?? AutoRespondSettings()
     }
 
     private enum CodingKeys: String, CodingKey {
-        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, telemetry
+        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, telemetry, autoRespond
+    }
+}
+
+/// Opt-in settings that let Crow type instructions into a session's managed
+/// Claude Code terminal when a watched PR transitions into a state that
+/// usually requires action. Both flags default off — typing into a terminal
+/// unprompted is intrusive, so the user must explicitly enable each.
+public struct AutoRespondSettings: Codable, Sendable, Equatable {
+    /// Inject a "fix the review feedback" prompt when a PR transitions into
+    /// `reviewStatus == .changesRequested`.
+    public var respondToChangesRequested: Bool
+    /// Inject a "fix the failing checks" prompt when a PR transitions into
+    /// `checksPass == .failing` (keyed on the head SHA, so re-runs of the
+    /// same commit don't re-fire).
+    public var respondToFailedChecks: Bool
+
+    public init(
+        respondToChangesRequested: Bool = false,
+        respondToFailedChecks: Bool = false
+    ) {
+        self.respondToChangesRequested = respondToChangesRequested
+        self.respondToFailedChecks = respondToFailedChecks
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        respondToChangesRequested = try c.decodeIfPresent(Bool.self, forKey: .respondToChangesRequested) ?? false
+        respondToFailedChecks = try c.decodeIfPresent(Bool.self, forKey: .respondToFailedChecks) ?? false
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case respondToChangesRequested, respondToFailedChecks
     }
 }
 

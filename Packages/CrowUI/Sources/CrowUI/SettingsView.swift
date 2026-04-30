@@ -43,7 +43,11 @@ public struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             workspacesTab
                 .tabItem { Label("Workspaces", systemImage: "rectangle.stack") }
-            NotificationSettingsView(settings: $config.notifications, onSave: { save() })
+            NotificationSettingsView(
+                settings: $config.notifications,
+                autoRespond: $config.autoRespond,
+                onSave: { save() }
+            )
                 .tabItem { Label("Notifications", systemImage: "bell") }
         }
         .frame(width: 520, height: 480)
