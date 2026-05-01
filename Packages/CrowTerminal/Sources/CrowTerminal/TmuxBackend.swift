@@ -148,6 +148,7 @@ public final class TmuxBackend {
 
         let windowIndex = try ctrl.newWindow(
             name: name,
+            cwd: cwd.isEmpty ? nil : cwd,
             env: env,
             command: wrapperPath
         )

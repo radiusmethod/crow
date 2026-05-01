@@ -108,11 +108,18 @@ public struct TmuxController: Sendable {
 
     public func newWindow(
         name: String? = nil,
+        cwd: String? = nil,
         env: [String: String] = [:],
         command: String? = nil
     ) throws -> Int {
         var args = ["new-window", "-P", "-F", "#{window_index}", "-t", sessionName]
         if let name { args.append(contentsOf: ["-n", name]) }
+        // -c sets the start-directory for the spawned shell. tmux otherwise
+        // uses its OWN working directory (i.e., wherever Crow was launched
+        // from) — which would make `claude --continue` in this window pick
+        // up a session from the wrong project. Passing -c is mandatory for
+        // multi-worktree usage.
+        if let cwd, !cwd.isEmpty { args.append(contentsOf: ["-c", cwd]) }
         for (k, v) in env { args.append(contentsOf: ["-e", "\(k)=\(v)"]) }
         if let command { args.append(command) }
         let out = try run(args)
