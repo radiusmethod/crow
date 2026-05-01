@@ -44,6 +44,7 @@ import Testing
     #expect(config.sidebar.hideSessionDetails == false)
     #expect(config.remoteControlEnabled == false)
     #expect(config.managerAutoPermissionMode == true)
+    #expect(config.experimentalTmuxBackend == false)
 }
 
 @Test func appConfigRemoteControlRoundTrip() throws {
@@ -229,4 +230,18 @@ import Testing
 
 @Test func repoExcludeEmptyPatterns() {
     #expect(repoMatchesExcludePatterns("org/repo", patterns: []) == false)
+}
+
+@Test func appConfigExperimentalTmuxBackendRoundTrip() throws {
+    var config = AppConfig()
+    config.experimentalTmuxBackend = true
+
+    let data = try JSONEncoder().encode(config)
+    let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
+    #expect(decoded.experimentalTmuxBackend == true)
+
+    config.experimentalTmuxBackend = false
+    let data2 = try JSONEncoder().encode(config)
+    let decoded2 = try JSONDecoder().decode(AppConfig.self, from: data2)
+    #expect(decoded2.experimentalTmuxBackend == false)
 }

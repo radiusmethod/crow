@@ -173,11 +173,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("[Crow] Initializing Ghostty")
         GhosttyApp.shared.initialize()
 
+        // Load config FIRST so we can read the user's experimental-flag
+        // preference before deciding whether to spin up the tmux backend.
+        // Order matters: FeatureFlags.tmuxBackend OR-merges the env var
+        // with this configOverride, and the launch-time configure block
+        // below reads the flag.
+        let config = appConfig ?? ConfigStore.loadConfig(devRoot: devRoot) ?? AppConfig()
+        self.appConfig = config
+        NSLog("[Crow] Config loaded (workspaces: %d)", config.workspaces.count)
+        FeatureFlags.tmuxBackendConfigOverride = config.experimentalTmuxBackend
+
         // Optionally configure the tmux backend (#198 rollout). Off by
-        // default; flip via `CROW_TMUX_BACKEND=1` in the environment. If
-        // the flag is on but tmux isn't found at minimum 3.3, we log a
-        // warning and stay on the Ghostty path — first-run onboarding
-        // (PROD #4) will surface this to the user.
+        // default; flip via `CROW_TMUX_BACKEND=1` in the environment OR via
+        // Settings → Experimental → Use tmux for managed terminals. If the
+        // flag is on but tmux isn't found at minimum 3.3, we log a warning
+        // and stay on the Ghostty path — first-run onboarding (PROD #4)
+        // surfaces this to the user.
         if FeatureFlags.tmuxBackend {
             if let tmuxBinary = TmuxDiscovery.discover() {
                 // Per-app socket in $TMPDIR. v1 of the rollout kills the
@@ -193,15 +204,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 NSLog("[Crow] tmux backend configured: binary=\(tmuxBinary) socket=\(socketPath)")
             } else {
-                NSLog("[Crow] CROW_TMUX_BACKEND=1 set but no tmux ≥ 3.3 found — staying on Ghostty backend")
+                NSLog("[Crow] tmux backend requested but no tmux ≥ 3.3 found — staying on Ghostty backend")
                 showTmuxNotFoundOnboardingSheet()
             }
         }
-
-        // Load config
-        let config = appConfig ?? ConfigStore.loadConfig(devRoot: devRoot) ?? AppConfig()
-        self.appConfig = config
-        NSLog("[Crow] Config loaded (workspaces: %d)", config.workspaces.count)
 
         // Update skills and CLAUDE.md on every launch
         let scaffolder = Scaffolder(devRoot: devRoot)

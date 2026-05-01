@@ -44,6 +44,20 @@ struct FeatureFlagsTests {
         // rollout. We can't unset env reliably from a test, so we just
         // assert that under normal CI conditions it's false.
         if ProcessInfo.processInfo.environment["CROW_TMUX_BACKEND"] == nil {
+            // Reset the override so a previous test can't leak state.
+            FeatureFlags.tmuxBackendConfigOverride = false
+            #expect(!FeatureFlags.tmuxBackend)
+        }
+    }
+
+    @Test func tmuxBackendOnWhenConfigOverrideOn() {
+        // The config override is the user-facing entry point for the flag
+        // (Settings → Experimental → Use tmux for managed terminals).
+        // Should switch tmuxBackend ON without needing the env var.
+        if ProcessInfo.processInfo.environment["CROW_TMUX_BACKEND"] == nil {
+            FeatureFlags.tmuxBackendConfigOverride = true
+            #expect(FeatureFlags.tmuxBackend)
+            FeatureFlags.tmuxBackendConfigOverride = false
             #expect(!FeatureFlags.tmuxBackend)
         }
     }
