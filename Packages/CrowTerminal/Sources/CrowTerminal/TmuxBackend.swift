@@ -288,6 +288,13 @@ public final class TmuxBackend {
         sharedSurface
     }
 
+    /// Whether `id` has a live tmux-window binding. Used by callers that
+    /// want to gate a send/destroy/makeActive on "this terminal is actually
+    /// wired up" without relying on the throwing dispatch path.
+    public func isRegistered(id: UUID) -> Bool {
+        bindings[id] != nil
+    }
+
     // MARK: - Internal helpers
 
     private func ensureRunningServer() throws -> TmuxController {

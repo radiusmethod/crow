@@ -424,6 +424,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
 
+        // Wire session-card quick action buttons through the same coordinator.
+        appState.onQuickAction = { [weak self] sessionID, action in
+            self?.autoRespondCoordinator?.dispatchManual(action: action, sessionID: sessionID)
+        }
+
         // Initialize allow list service
         let allowList = AllowListService(appState: appState, devRoot: devRoot)
         self.allowListService = allowList

@@ -47,7 +47,7 @@ final class AutoRespondCoordinator {
                   transition.kind.rawValue, transition.sessionID.uuidString)
             return
         }
-        guard TerminalManager.shared.existingSurface(for: terminal.id) != nil else {
+        guard TerminalRouter.canSend(terminal) else {
             NSLog("[AutoRespond] Skipping %@ for session %@: terminal surface not initialized",
                   transition.kind.rawValue, transition.sessionID.uuidString)
             return
@@ -57,7 +57,43 @@ final class AutoRespondCoordinator {
         let prompt = AutoRespondPrompts.build(for: transition, provider: provider)
         NSLog("[AutoRespond] Sending %@ prompt to terminal %@ (%d chars)",
               transition.kind.rawValue, terminal.id.uuidString, prompt.count)
-        TerminalManager.shared.send(id: terminal.id, text: prompt)
+        TerminalRouter.send(terminal, text: prompt)
+    }
+
+    /// Manually dispatch a quick action triggered by a session-card button click.
+    /// Mirrors `dispatch(_:)` but bypasses the `AutoRespondSettings` toggle —
+    /// the click is the user's explicit consent. Resolves the PR URL/number
+    /// from the session's `.pr` link.
+    func dispatchManual(action: QuickAction, sessionID: UUID) {
+        let terminals = appState.terminals(for: sessionID)
+        guard let terminal = terminals.first(where: { $0.isManaged }) else {
+            NSLog("[QuickAction] Skipping %@ for session %@: no managed terminal",
+                  action.rawValue, sessionID.uuidString)
+            return
+        }
+        guard TerminalRouter.canSend(terminal) else {
+            NSLog("[QuickAction] Skipping %@ for session %@: terminal surface not initialized",
+                  action.rawValue, sessionID.uuidString)
+            return
+        }
+        guard let prLink = appState.links(for: sessionID).first(where: { $0.linkType == .pr }) else {
+            NSLog("[QuickAction] Skipping %@ for session %@: no PR link",
+                  action.rawValue, sessionID.uuidString)
+            return
+        }
+
+        let session = appState.sessions.first(where: { $0.id == sessionID })
+        let provider = session?.provider ?? .github
+        let prNumber = QuickActionPrompts.parsePRNumber(from: prLink.url)
+        let prompt = QuickActionPrompts.build(
+            action: action,
+            provider: provider,
+            prURL: prLink.url,
+            prNumber: prNumber
+        )
+        NSLog("[QuickAction] Sending %@ prompt to terminal %@ (%d chars)",
+              action.rawValue, terminal.id.uuidString, prompt.count)
+        TerminalRouter.send(terminal, text: prompt)
     }
 }
 
@@ -105,5 +141,67 @@ enum AutoRespondPrompts {
             }
             return "Crow detected failing CI checks on \(prRef) (\(transition.prURL)).\(failedSummary) \(logHint) Identify the root cause, fix it locally, run the relevant tests, then commit and push so CI re-runs.\n"
         }
+    }
+}
+
+/// Builds prompts for **manually-triggered** quick actions on a session
+/// card. Same single-line + `\n` contract as `AutoRespondPrompts`. The
+/// `addressChanges` and `fixChecks` cases delegate to `AutoRespondPrompts`
+/// so the auto and manual paths share a single source of truth.
+enum QuickActionPrompts {
+    static func build(action: QuickAction, provider: Provider, prURL: String, prNumber: Int?) -> String {
+        let prRef = prNumber.map { "PR #\($0)" } ?? "the PR"
+        let cli = provider == .gitlab ? "glab" : "gh"
+
+        switch action {
+        case .addressChanges:
+            // Reuse the existing changes-requested prompt verbatim.
+            let synthetic = PRStatusTransition(
+                kind: .changesRequested,
+                sessionID: UUID(), // unused by AutoRespondPrompts.build
+                prURL: prURL,
+                prNumber: prNumber
+            )
+            return AutoRespondPrompts.build(for: synthetic, provider: provider)
+
+        case .fixChecks:
+            // Reuse the existing checks-failing prompt verbatim. We don't
+            // know the failing check names from a manual click; the prompt
+            // tells Claude how to discover them.
+            let synthetic = PRStatusTransition(
+                kind: .checksFailing,
+                sessionID: UUID(),
+                prURL: prURL,
+                prNumber: prNumber
+            )
+            return AutoRespondPrompts.build(for: synthetic, provider: provider)
+
+        case .fixConflicts:
+            let rebaseHint: String
+            if provider == .gitlab {
+                rebaseHint = "Rebase your branch onto the latest target branch (`git fetch origin && git rebase origin/<target>` or `glab mr rebase`), resolve the conflicts in the affected files, run the relevant tests, then force-push with `--force-with-lease` to update the MR."
+            } else {
+                rebaseHint = "Rebase your branch onto the latest base branch (`git fetch origin && git rebase origin/<base>`), resolve the conflicts in the affected files, run the relevant tests, then force-push with `--force-with-lease` to update the PR."
+            }
+            return "Crow detected merge conflicts on \(prRef) (\(prURL)). \(rebaseHint)\n"
+
+        case .mergePR:
+            let mergeHint: String
+            if provider == .gitlab {
+                mergeHint = "Run `glab mr view \(prURL)` to verify the MR is in the expected state, then `glab mr merge \(prURL)` to merge. If the project uses a different merge strategy or extra steps, adjust accordingly."
+            } else {
+                mergeHint = "Run `\(cli) pr view \(prURL)` to verify the PR is in the expected state, then `\(cli) pr merge \(prURL) --squash --delete-branch` to merge. If the repo uses a different merge strategy, adjust accordingly."
+            }
+            return "Merge \(prRef) (\(prURL)). \(mergeHint)\n"
+        }
+    }
+
+    /// Extract the trailing numeric segment from a PR/MR URL (e.g.
+    /// `https://github.com/org/repo/pull/123` → `123`,
+    /// `https://gitlab.example.com/org/repo/-/merge_requests/45` → `45`).
+    /// Returns nil if the last path component isn't an integer.
+    static func parsePRNumber(from url: String) -> Int? {
+        guard let last = url.split(separator: "/").last else { return nil }
+        return Int(last)
     }
 }
