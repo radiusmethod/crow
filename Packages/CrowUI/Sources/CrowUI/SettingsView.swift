@@ -53,8 +53,13 @@ public struct SettingsView: View {
                 onSave: { save() }
             )
                 .tabItem { Label("Notifications", systemImage: "bell") }
+            ExperimentalSettingsView(
+                experimentalTmuxBackend: $config.experimentalTmuxBackend,
+                onSave: { save() }
+            )
+                .tabItem { Label("Experimental", systemImage: "flask") }
         }
-        .frame(width: 520, height: 480)
+        .frame(width: 720, height: 480)
         .sheet(isPresented: $isAddingWorkspace) {
             WorkspaceFormView(
                 existingNames: otherWorkspaceNames()

@@ -14,6 +14,9 @@ public struct AppConfig: Codable, Sendable, Equatable {
     public var managerAutoPermissionMode: Bool
     public var telemetry: TelemetryConfig
     public var autoRespond: AutoRespondSettings
+    /// Opt into the tmux backend (#198). Surfaced in Settings → Experimental.
+    /// Read once at app launch; takes effect on next relaunch.
+    public var experimentalTmuxBackend: Bool
 
     public init(
         workspaces: [WorkspaceInfo] = [],
@@ -23,7 +26,8 @@ public struct AppConfig: Codable, Sendable, Equatable {
         remoteControlEnabled: Bool = false,
         managerAutoPermissionMode: Bool = true,
         telemetry: TelemetryConfig = TelemetryConfig(),
-        autoRespond: AutoRespondSettings = AutoRespondSettings()
+        autoRespond: AutoRespondSettings = AutoRespondSettings(),
+        experimentalTmuxBackend: Bool = false
     ) {
         self.workspaces = workspaces
         self.defaults = defaults
@@ -33,6 +37,7 @@ public struct AppConfig: Codable, Sendable, Equatable {
         self.managerAutoPermissionMode = managerAutoPermissionMode
         self.telemetry = telemetry
         self.autoRespond = autoRespond
+        self.experimentalTmuxBackend = experimentalTmuxBackend
     }
 
     public init(from decoder: Decoder) throws {
@@ -45,10 +50,11 @@ public struct AppConfig: Codable, Sendable, Equatable {
         managerAutoPermissionMode = try container.decodeIfPresent(Bool.self, forKey: .managerAutoPermissionMode) ?? true
         telemetry = try container.decodeIfPresent(TelemetryConfig.self, forKey: .telemetry) ?? TelemetryConfig()
         autoRespond = try container.decodeIfPresent(AutoRespondSettings.self, forKey: .autoRespond) ?? AutoRespondSettings()
+        experimentalTmuxBackend = try container.decodeIfPresent(Bool.self, forKey: .experimentalTmuxBackend) ?? false
     }
 
     private enum CodingKeys: String, CodingKey {
-        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, telemetry, autoRespond
+        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, telemetry, autoRespond, experimentalTmuxBackend
     }
 }
 

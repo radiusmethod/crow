@@ -91,4 +91,102 @@ struct SessionTerminalTests {
 
         #expect(terminal.isManaged == true)
     }
+
+    // MARK: - Backend discriminator (#198 follow-up)
+
+    /// Existing rows on disk lack `backend` and `tmuxBinding`. They must
+    /// keep loading and default to the historical Ghostty path.
+    @Test func missingBackendDefaultsToGhostty() throws {
+        let json = """
+        {
+            "id": "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+            "sessionID": "11111111-2222-3333-4444-555555555555",
+            "name": "Shell",
+            "cwd": "/Users/test",
+            "createdAt": 1700000000
+        }
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let terminal = try decoder.decode(SessionTerminal.self, from: json)
+
+        #expect(terminal.backend == .ghostty)
+        #expect(terminal.tmuxBinding == nil)
+    }
+
+    @Test func tmuxBackendRoundTrip() throws {
+        let binding = TmuxBinding(
+            socketPath: "/Users/test/Library/Application Support/Crow/tmux.sock",
+            sessionName: "crow-cockpit",
+            windowIndex: 3
+        )
+        let terminal = SessionTerminal(
+            id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            sessionID: UUID(uuidString: "11111111-2222-3333-4444-555555555555")!,
+            name: "Build",
+            cwd: "/Users/test/project",
+            command: nil,
+            isManaged: false,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            backend: .tmux,
+            tmuxBinding: binding
+        )
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        let data = try encoder.encode(terminal)
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let decoded = try decoder.decode(SessionTerminal.self, from: data)
+
+        #expect(decoded.backend == .tmux)
+        #expect(decoded.tmuxBinding == binding)
+    }
+
+    @Test func explicitGhosttyBackendDecodes() throws {
+        let json = """
+        {
+            "id": "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+            "sessionID": "11111111-2222-3333-4444-555555555555",
+            "name": "Shell",
+            "cwd": "/Users/test",
+            "isManaged": false,
+            "createdAt": 1700000000,
+            "backend": "ghostty"
+        }
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let terminal = try decoder.decode(SessionTerminal.self, from: json)
+
+        #expect(terminal.backend == .ghostty)
+        #expect(terminal.tmuxBinding == nil)
+    }
+
+    @Test func tmuxBackendWithoutBindingDecodes() throws {
+        // Permissive: a `.tmux` row without a binding is invalid runtime
+        // state, but the model doesn't reject it — production construction
+        // sites enforce the invariant.
+        let json = """
+        {
+            "id": "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+            "sessionID": "11111111-2222-3333-4444-555555555555",
+            "name": "Shell",
+            "cwd": "/Users/test",
+            "isManaged": false,
+            "createdAt": 1700000000,
+            "backend": "tmux"
+        }
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let terminal = try decoder.decode(SessionTerminal.self, from: json)
+
+        #expect(terminal.backend == .tmux)
+        #expect(terminal.tmuxBinding == nil)
+    }
 }

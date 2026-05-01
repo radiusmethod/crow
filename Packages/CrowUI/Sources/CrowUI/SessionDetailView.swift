@@ -235,7 +235,8 @@ public struct SessionDetailView: View {
             TerminalSurfaceView(
                 terminalID: terminal.id,
                 workingDirectory: terminal.cwd,
-                command: terminal.command
+                command: terminal.command,
+                backend: terminal.backend
             )
             .id(terminal.id)
         } else {
@@ -257,7 +258,8 @@ public struct SessionDetailView: View {
                         TerminalSurfaceView(
                             terminalID: terminal.id,
                             workingDirectory: terminal.cwd,
-                            command: terminal.command
+                            command: terminal.command,
+                            backend: terminal.backend
                         )
                         .id(terminal.id)
                     }
@@ -449,7 +451,8 @@ struct ReadinessAwareTerminal: View {
             TerminalSurfaceView(
                 terminalID: terminal.id,
                 workingDirectory: terminal.cwd,
-                command: terminal.command
+                command: terminal.command,
+                backend: terminal.backend
             )
             .id(terminal.id)
 

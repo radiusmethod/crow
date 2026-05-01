@@ -93,11 +93,14 @@ final class SessionService {
             }
             appState.terminals[session.id] = terminals
 
-            // Initialize readiness tracking for managed work session terminals only
+            // Pre-create terminalReadiness slots for managed work session
+            // terminals so the readiness callbacks (Ghostty's surfaceCreated
+            // and tmux's onReadinessChanged) have something to update. The
+            // actual trackReadiness/registerTerminal call happens in
+            // rehydrateTerminalSurface below.
             if session.id != AppState.managerSessionID {
                 for terminal in terminals where terminal.isManaged {
                     appState.terminalReadiness[terminal.id] = .uninitialized
-                    TerminalManager.shared.trackReadiness(for: terminal.id)
                     appState.autoLaunchTerminals.insert(terminal.id)
                 }
             }
@@ -115,31 +118,128 @@ final class SessionService {
         // so the .created and .shellReady events are not lost.
         wireTerminalReadiness()
 
-        // Pre-initialize all terminal surfaces in the offscreen window so
-        // Ghostty can create surfaces and spawn shells without the user
-        // navigating to each tab.
+        // Re-hydrate every persisted terminal — Ghostty rows go through the
+        // offscreen-window pre-init path, .tmux rows re-register with a
+        // freshly-started tmux server (v1 doesn't keep server alive across
+        // launches; spec §12). If a .tmux row's re-registration fails (e.g.
+        // tmux uninstalled), silently fall back to .ghostty so the user
+        // can still use the app.
+        var rehydrationOverwrites: [SessionTerminal] = []
         for session in appState.sessions {
-            if let terminals = appState.terminals[session.id] {
-                for terminal in terminals {
-                    TerminalManager.shared.preInitialize(
-                        id: terminal.id,
-                        workingDirectory: terminal.cwd,
-                        command: terminal.command
-                    )
+            guard var terminals = appState.terminals[session.id] else { continue }
+            let isManagerSession = session.id == AppState.managerSessionID
+            for i in terminals.indices {
+                let trackReadiness = !isManagerSession && terminals[i].isManaged
+                let updated = rehydrateTerminalSurface(terminals[i], trackReadiness: trackReadiness)
+                if updated.backend != terminals[i].backend || updated.tmuxBinding != terminals[i].tmuxBinding {
+                    rehydrationOverwrites.append(updated)
+                }
+                terminals[i] = updated
+            }
+            appState.terminals[session.id] = terminals
+        }
+
+        if var globals = appState.terminals[AppState.globalTerminalSessionID] {
+            for i in globals.indices {
+                let updated = rehydrateTerminalSurface(globals[i], trackReadiness: false)
+                if updated.backend != globals[i].backend || updated.tmuxBinding != globals[i].tmuxBinding {
+                    rehydrationOverwrites.append(updated)
+                }
+                globals[i] = updated
+            }
+            appState.terminals[AppState.globalTerminalSessionID] = globals
+        }
+
+        // Persist any backend / windowIndex changes from re-hydration back
+        // to the store so a subsequent crash doesn't try to re-register
+        // terminals that are already on the fallback backend.
+        if !rehydrationOverwrites.isEmpty {
+            store.mutate { data in
+                for updated in rehydrationOverwrites {
+                    if let i = data.terminals.firstIndex(where: { $0.id == updated.id }) {
+                        data.terminals[i] = updated
+                    }
                 }
             }
         }
+    }
 
-        // Pre-initialize global terminals
-        if let globalTerminals = appState.terminals[AppState.globalTerminalSessionID] {
-            for terminal in globalTerminals {
+    /// Re-hydrate one persisted terminal's surface or tmux window on app
+    /// launch. Returns the (possibly-modified) row — `.tmux` rows get their
+    /// `tmuxBinding.windowIndex` updated to the freshly-registered window;
+    /// rows that fail to re-register fall back to `.ghostty` silently.
+    @MainActor
+    private func rehydrateTerminalSurface(_ terminal: SessionTerminal, trackReadiness: Bool) -> SessionTerminal {
+        switch terminal.backend {
+        case .ghostty:
+            if trackReadiness {
+                TerminalManager.shared.trackReadiness(for: terminal.id)
+            }
+            TerminalManager.shared.preInitialize(
+                id: terminal.id,
+                workingDirectory: terminal.cwd,
+                command: terminal.command
+            )
+            return terminal
+        case .tmux:
+            // Backend not configured this run (flag off, or tmux gone). Pre-
+            // initialize a Ghostty surface so the UI can still render the
+            // tab — but DO NOT mutate the persisted row. The user may have
+            // simply toggled the experimental flag off; if they toggle it
+            // back on we want the .tmux marking (and the visual T badge)
+            // to come back, not be permanently lost. The visible surface
+            // for this run goes through TerminalSurfaceView's
+            // cockpitSurface() catch path, which calls
+            // TerminalManager.shared.surface(for: id) — which finds the
+            // surface we're pre-initializing here.
+            guard !TmuxBackend.shared.tmuxBinary.isEmpty else {
+                NSLog("[SessionService] persisted .tmux row \(terminal.id) but tmux backend not configured this run — rendering as Ghostty (persisted row unchanged)")
+                if trackReadiness {
+                    TerminalManager.shared.trackReadiness(for: terminal.id)
+                }
                 TerminalManager.shared.preInitialize(
                     id: terminal.id,
                     workingDirectory: terminal.cwd,
                     command: terminal.command
                 )
+                return terminal
+            }
+            do {
+                let binding = try TmuxBackend.shared.registerTerminal(
+                    id: terminal.id,
+                    name: terminal.name,
+                    cwd: terminal.cwd,
+                    command: terminal.command,
+                    trackReadiness: trackReadiness
+                )
+                var updated = terminal
+                updated.tmuxBinding = binding
+                return updated
+            } catch {
+                // Real registration failure (registerTerminal threw despite
+                // a configured backend). This IS a permanent fallback — the
+                // tmux server is configured but can't host this row, so
+                // persist as .ghostty to avoid retrying every launch.
+                NSLog("[SessionService] tmux re-register failed on hydrate (\(error)); silently falling back to .ghostty for \(terminal.id)")
+                return rehydrateAsGhosttyFallback(terminal, trackReadiness: trackReadiness)
             }
         }
+    }
+
+    @MainActor
+    private func rehydrateAsGhosttyFallback(_ terminal: SessionTerminal, trackReadiness: Bool) -> SessionTerminal {
+        var t = terminal
+        t.backend = .ghostty
+        t.tmuxBinding = nil
+        if trackReadiness {
+            TerminalManager.shared.trackReadiness(for: t.id)
+        }
+        TerminalManager.shared.preInitialize(
+            id: t.id,
+            workingDirectory: t.cwd,
+            command: t.command
+        )
+        return t
     }
 
     /// Bridge `TerminalManager.SurfaceState` callbacks to `AppState.terminalReadiness`.
@@ -174,6 +274,21 @@ final class SessionService {
                 NSLog("[SessionService] terminal \(terminalID) failed to launch surface")
                 self.appState.terminalReadiness[terminalID] = .failed
                 // Do not auto-launch Claude; the UI will surface a Retry button.
+            }
+        }
+        // tmux-backed terminals report readiness via SentinelWaiter rather
+        // than the 5s sleep. We funnel that into the same TerminalReadiness
+        // state machine so downstream consumers (launchClaude) work without
+        // backend-specific branches. Tmux backend skips the .surfaceCreated
+        // intermediate state — its window is created synchronously by
+        // registerTerminal — so we go straight to .shellReady.
+        TmuxBackend.shared.onReadinessChanged = { [weak self] terminalID, readiness in
+            guard let self else { return }
+            guard let currentState = self.appState.terminalReadiness[terminalID] else { return }
+            NSLog("[SessionService] tmux readiness: terminal=\(terminalID), state=\(readiness), current=\(currentState)")
+            if readiness == .shellReady, currentState < .shellReady {
+                self.appState.terminalReadiness[terminalID] = .shellReady
+                self.launchClaude(terminalID: terminalID)
             }
         }
     }
@@ -229,15 +344,27 @@ final class SessionService {
             envPrefix = ""
         }
 
-        // For review sessions, launch claude with the review prompt file
-        if let sessionID,
-           let session = appState.sessions.first(where: { $0.id == sessionID }),
-           session.kind == .review,
-           let worktree = appState.primaryWorktree(for: sessionID) {
-            let promptPath = (worktree.worktreePath as NSString).appendingPathComponent(".crow-review-prompt.md")
-            TerminalManager.shared.send(id: terminalID, text: "\(envPrefix)\(claudePath)\(rcArgs) \"$(cat \(promptPath))\"\n")
+        // Look up the SessionTerminal so we can route through TerminalRouter
+        // (works for both .ghostty and .tmux backends). Falls back to the
+        // legacy direct-send path if the terminal is unknown.
+        let routedTerminal: SessionTerminal? = sessionID.flatMap { sid in
+            appState.terminals[sid]?.first(where: { $0.id == terminalID })
+        }
+        let claudeText: String = {
+            if let sessionID,
+               let session = appState.sessions.first(where: { $0.id == sessionID }),
+               session.kind == .review,
+               let worktree = appState.primaryWorktree(for: sessionID) {
+                let promptPath = (worktree.worktreePath as NSString).appendingPathComponent(".crow-review-prompt.md")
+                return "\(envPrefix)\(claudePath)\(rcArgs) \"$(cat \(promptPath))\"\n"
+            } else {
+                return "\(envPrefix)\(claudePath)\(rcArgs) --continue\n"
+            }
+        }()
+        if let routedTerminal {
+            TerminalRouter.send(routedTerminal, text: claudeText)
         } else {
-            TerminalManager.shared.send(id: terminalID, text: "\(envPrefix)\(claudePath)\(rcArgs) --continue\n")
+            TerminalManager.shared.send(id: terminalID, text: claudeText)
         }
 
         appState.terminalReadiness[terminalID] = .claudeLaunched
@@ -342,9 +469,9 @@ final class SessionService {
         let wts = appState.worktrees(for: id)
         let terminals = appState.terminals(for: id)
 
-        // Destroy live terminal surfaces
+        // Destroy live terminal surfaces (routes per-backend so .tmux windows are killed too)
         for terminal in terminals {
-            TerminalManager.shared.destroy(id: terminal.id)
+            TerminalRouter.destroy(terminal)
         }
 
         if session?.kind == .review {
@@ -672,7 +799,7 @@ final class SessionService {
             isPrimary: true
         )
 
-        let terminal = SessionTerminal(
+        let rawTerminal = SessionTerminal(
             sessionID: session.id,
             name: "Claude Code",
             cwd: worktreePath,
@@ -689,16 +816,17 @@ final class SessionService {
             links.append(prLink)
         }
 
+        // Backend dispatch — prepareTerminal returns the row with
+        // backend/tmuxBinding set and starts the surface or tmux window.
+        let terminal = prepareTerminal(rawTerminal, trackReadiness: true)
+
         // Update state
         appState.sessions.append(session)
         appState.worktrees[session.id] = [worktree]
         appState.terminals[session.id] = [terminal]
         appState.links[session.id] = links.isEmpty ? nil : links
         appState.terminalReadiness[terminal.id] = .uninitialized
-        TerminalManager.shared.trackReadiness(for: terminal.id)
         appState.autoLaunchTerminals.insert(terminal.id)
-        // Pre-initialize in offscreen window so recovered terminal starts immediately
-        TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: worktreePath)
 
         // Single atomic store mutation
         store.mutate { data in
@@ -717,14 +845,11 @@ final class SessionService {
     func addTerminal(sessionID: UUID) {
         let cwd = appState.primaryWorktree(for: sessionID)?.worktreePath
             ?? FileManager.default.homeDirectoryForCurrentUser.path
-        let terminal = SessionTerminal(
-            sessionID: sessionID, name: "Shell", cwd: cwd, isManaged: false
-        )
+        let raw = SessionTerminal(sessionID: sessionID, name: "Shell", cwd: cwd, isManaged: false)
+        let terminal = prepareTerminal(raw, trackReadiness: false)
         appState.terminals[sessionID, default: []].append(terminal)
         appState.activeTerminalID[sessionID] = terminal.id
         store.mutate { data in data.terminals.append(terminal) }
-        // Pre-initialize in offscreen window so shell starts immediately
-        TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: cwd)
     }
 
     /// Close a non-managed terminal tab. Managed terminals cannot be closed individually.
@@ -733,7 +858,7 @@ final class SessionService {
               let terminal = terminals.first(where: { $0.id == terminalID }),
               !terminal.isManaged else { return }
 
-        TerminalManager.shared.destroy(id: terminalID)
+        TerminalRouter.destroy(terminal)
         appState.terminals[sessionID]?.removeAll { $0.id == terminalID }
         appState.terminalReadiness.removeValue(forKey: terminalID)
         appState.autoLaunchTerminals.remove(terminalID)
@@ -767,22 +892,27 @@ final class SessionService {
         let cwd = ConfigStore.loadDevRoot()
             ?? FileManager.default.homeDirectoryForCurrentUser.path
         let count = appState.terminals(for: sessionID).count
-        let terminal = SessionTerminal(
+        let raw = SessionTerminal(
             sessionID: sessionID,
             name: "Terminal \(count + 1)",
             cwd: cwd,
             isManaged: false
         )
+        let terminal = prepareTerminal(raw, trackReadiness: false)
         appState.terminals[sessionID, default: []].append(terminal)
         appState.activeTerminalID[sessionID] = terminal.id
         store.mutate { data in data.terminals.append(terminal) }
-        TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: cwd)
     }
 
     /// Close a global terminal tab.
     func closeGlobalTerminal(terminalID: UUID) {
         let sessionID = AppState.globalTerminalSessionID
-        TerminalManager.shared.destroy(id: terminalID)
+        let terminal = appState.terminals[sessionID]?.first(where: { $0.id == terminalID })
+        if let terminal {
+            TerminalRouter.destroy(terminal)
+        } else {
+            TerminalManager.shared.destroy(id: terminalID)
+        }
         appState.terminals[sessionID]?.removeAll { $0.id == terminalID }
 
         if appState.activeTerminalID[sessionID] == terminalID {
@@ -902,21 +1032,23 @@ final class SessionService {
             linkType: .pr
         )
 
+        // Backend dispatch — prepareTerminal returns the row with
+        // backend/tmuxBinding set and starts the surface or tmux window.
+        let preparedTerminal = prepareTerminal(terminal, trackReadiness: true)
+
         // Add to state
         appState.sessions.append(session)
         appState.worktrees[session.id] = [worktree]
-        appState.terminals[session.id] = [terminal]
+        appState.terminals[session.id] = [preparedTerminal]
         appState.links[session.id] = [prLink]
-        appState.terminalReadiness[terminal.id] = .uninitialized
-        TerminalManager.shared.trackReadiness(for: terminal.id)
-        appState.autoLaunchTerminals.insert(terminal.id)
-        TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: clonePath, command: nil)
+        appState.terminalReadiness[preparedTerminal.id] = .uninitialized
+        appState.autoLaunchTerminals.insert(preparedTerminal.id)
 
         // Persist
         store.mutate { data in
             data.sessions.append(session)
             data.worktrees.append(worktree)
-            data.terminals.append(terminal)
+            data.terminals.append(preparedTerminal)
             data.links.append(prLink)
         }
 
@@ -1040,5 +1172,41 @@ final class SessionService {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         process.arguments = ["-a", "Terminal", wt.worktreePath]
         try? process.run()
+    }
+
+    // MARK: - Backend dispatch helpers (#198 follow-up)
+
+    /// Decide which backend hosts a brand-new SessionTerminal and prepare it
+    /// (register a tmux window or pre-initialize a Ghostty surface). Returns
+    /// the (possibly-modified) row with `backend`/`tmuxBinding` set so the
+    /// caller can persist it. The Manager terminal is force-pinned to the
+    /// Ghostty backend until that migration is done as its own follow-up.
+    @MainActor
+    private func prepareTerminal(_ terminal: SessionTerminal, trackReadiness: Bool) -> SessionTerminal {
+        var t = terminal
+        let useTmux = FeatureFlags.tmuxBackend
+            && !TmuxBackend.shared.tmuxBinary.isEmpty
+            && t.sessionID != AppState.managerSessionID
+        if useTmux {
+            do {
+                let binding = try TmuxBackend.shared.registerTerminal(
+                    id: t.id,
+                    name: t.name,
+                    cwd: t.cwd,
+                    command: t.command,
+                    trackReadiness: trackReadiness
+                )
+                t.backend = .tmux
+                t.tmuxBinding = binding
+                return t
+            } catch {
+                NSLog("[SessionService] tmux registerTerminal failed (\(error)); falling back to Ghostty")
+            }
+        }
+        if trackReadiness {
+            TerminalManager.shared.trackReadiness(for: t.id)
+        }
+        TerminalManager.shared.preInitialize(id: t.id, workingDirectory: t.cwd, command: t.command)
+        return t
     }
 }

@@ -111,6 +111,10 @@ public final class AppState {
     /// Called to promote selected patterns to the global settings.
     public var onPromoteToGlobal: ((Set<String>) -> Void)?
 
+    /// Called when the user clicks the gear icon in the sidebar toolbar.
+    /// AppDelegate wires this to its `showSettings()` method.
+    public var onShowSettings: (() -> Void)?
+
     // MARK: - PR & Tool Status
 
     /// PR status per session (pipeline, review, merge readiness).
