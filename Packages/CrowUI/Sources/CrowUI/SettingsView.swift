@@ -3,7 +3,8 @@ import CrowCore
 
 /// Settings panel accessible via Cmd+,
 ///
-/// Three-tab interface: General (devRoot, defaults, sidebar), Workspaces (list + add/edit),
+/// Four-tab interface: General (devRoot, sidebar, telemetry), Automation (review/ticket
+/// filtering, remote control, Manager Terminal, auto-respond), Workspaces (defaults + list),
 /// and Notifications (global + per-event config). Every change is persisted immediately
 /// via the `onSave` callback — there is no explicit "Apply" button.
 public struct SettingsView: View {
@@ -12,8 +13,6 @@ public struct SettingsView: View {
     @State var config: AppConfig
     @State private var isAddingWorkspace = false
     @State private var editingWorkspace: WorkspaceInfo?
-    @State private var excludeReviewReposText: String
-    @State private var excludeTicketReposText: String
 
     public var onSave: ((String, AppConfig) -> Void)?
     public var onRescaffold: ((String) -> Void)?
@@ -24,8 +23,6 @@ public struct SettingsView: View {
         self.appState = appState
         self._devRoot = State(initialValue: devRoot)
         self._config = State(initialValue: config)
-        self._excludeReviewReposText = State(initialValue: config.defaults.excludeReviewRepos.joined(separator: ", "))
-        self._excludeTicketReposText = State(initialValue: config.defaults.excludeTicketRepos.joined(separator: ", "))
         self.onSave = onSave
         self.onRescaffold = onRescaffold
     }
@@ -41,11 +38,18 @@ public struct SettingsView: View {
         TabView {
             generalTab
                 .tabItem { Label("General", systemImage: "gearshape") }
+            AutomationSettingsView(
+                defaults: $config.defaults,
+                remoteControlEnabled: $config.remoteControlEnabled,
+                managerAutoPermissionMode: $config.managerAutoPermissionMode,
+                autoRespond: $config.autoRespond,
+                onSave: { save() }
+            )
+                .tabItem { Label("Automation", systemImage: "bolt.fill") }
             workspacesTab
                 .tabItem { Label("Workspaces", systemImage: "rectangle.stack") }
             NotificationSettingsView(
                 settings: $config.notifications,
-                autoRespond: $config.autoRespond,
                 onSave: { save() }
             )
                 .tabItem { Label("Notifications", systemImage: "bell") }
@@ -138,74 +142,10 @@ public struct SettingsView: View {
                 .font(.caption)
             }
 
-            Section("Defaults") {
-                Picker("Default Provider", selection: $config.defaults.provider) {
-                    Text("GitHub").tag("github")
-                    Text("GitLab").tag("gitlab")
-                }
-                .onChange(of: config.defaults.provider) { _, _ in save() }
-
-                TextField("Branch Prefix", text: $config.defaults.branchPrefix)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { save() }
-
-                if !ConfigDefaults.isValidBranchPrefix(config.defaults.branchPrefix) {
-                    Text("Contains characters invalid in git branch names.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-            }
-
             Section("Sidebar") {
                 Toggle("Hide session details", isOn: $config.sidebar.hideSessionDetails)
                     .onChange(of: config.sidebar.hideSessionDetails) { _, _ in save() }
                 Text("Hides ticket title and repo/branch lines in sidebar rows.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Reviews") {
-                TextField("Excluded Repos", text: $excludeReviewReposText)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: excludeReviewReposText) { _, _ in
-                        config.defaults.excludeReviewRepos = excludeReviewReposText
-                            .split(separator: ",")
-                            .map { $0.trimmingCharacters(in: .whitespaces) }
-                            .filter { !$0.isEmpty }
-                        save()
-                    }
-                Text("Comma-separated repos to hide from the review board. Supports wildcards (e.g., zarf-dev/*, bmlt-enabled/yap).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Tickets") {
-                TextField("Excluded Repos", text: $excludeTicketReposText)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: excludeTicketReposText) { _, _ in
-                        config.defaults.excludeTicketRepos = excludeTicketReposText
-                            .split(separator: ",")
-                            .map { $0.trimmingCharacters(in: .whitespaces) }
-                            .filter { !$0.isEmpty }
-                        save()
-                    }
-                Text("Comma-separated repos to hide from the ticket board. Supports wildcards (e.g., zarf-dev/*, bmlt-enabled/yap).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Remote Control") {
-                Toggle("Enable remote control for new sessions", isOn: $config.remoteControlEnabled)
-                    .onChange(of: config.remoteControlEnabled) { _, _ in save() }
-                Text("New Claude Code sessions start with --rc so you can control them from claude.ai or the Claude mobile app. Each session's name matches its Crow session name.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section("Manager Terminal") {
-                Toggle("Launch in auto permission mode", isOn: $config.managerAutoPermissionMode)
-                    .onChange(of: config.managerAutoPermissionMode) { _, _ in save() }
-                Text("Passes --permission-mode auto so the Manager can run crow, gh, and git commands without per-call approval. Requires Claude Code 2.1.83+ on a Max, Team, Enterprise, or API plan with the Anthropic provider. Turn off if your account reports auto mode as unavailable. Takes effect on next app launch.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -244,6 +184,28 @@ public struct SettingsView: View {
 
     private var workspacesTab: some View {
         Form {
+            Section("Defaults") {
+                Picker("Default Provider", selection: $config.defaults.provider) {
+                    Text("GitHub").tag("github")
+                    Text("GitLab").tag("gitlab")
+                }
+                .onChange(of: config.defaults.provider) { _, _ in save() }
+
+                TextField("Branch Prefix", text: $config.defaults.branchPrefix)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { save() }
+
+                if !ConfigDefaults.isValidBranchPrefix(config.defaults.branchPrefix) {
+                    Text("Contains characters invalid in git branch names.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+
+                Text("Applied when creating new workspaces.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 if config.workspaces.isEmpty {
                     Text("No workspaces configured")

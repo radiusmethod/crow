@@ -1,0 +1,108 @@
+import SwiftUI
+import CrowCore
+
+/// Settings view for automation toggles: which repos surface review/ticket activity,
+/// whether new sessions opt into remote control, Manager Terminal permission mode,
+/// and auto-respond on PR review / CI signals.
+public struct AutomationSettingsView: View {
+    @Binding var defaults: ConfigDefaults
+    @Binding var remoteControlEnabled: Bool
+    @Binding var managerAutoPermissionMode: Bool
+    @Binding var autoRespond: AutoRespondSettings
+    var onSave: (() -> Void)?
+
+    @State private var excludeReviewReposText: String
+    @State private var excludeTicketReposText: String
+
+    public init(
+        defaults: Binding<ConfigDefaults>,
+        remoteControlEnabled: Binding<Bool>,
+        managerAutoPermissionMode: Binding<Bool>,
+        autoRespond: Binding<AutoRespondSettings>,
+        onSave: (() -> Void)? = nil
+    ) {
+        self._defaults = defaults
+        self._remoteControlEnabled = remoteControlEnabled
+        self._managerAutoPermissionMode = managerAutoPermissionMode
+        self._autoRespond = autoRespond
+        self.onSave = onSave
+        self._excludeReviewReposText = State(initialValue: defaults.wrappedValue.excludeReviewRepos.joined(separator: ", "))
+        self._excludeTicketReposText = State(initialValue: defaults.wrappedValue.excludeTicketRepos.joined(separator: ", "))
+    }
+
+    public var body: some View {
+        Form {
+            Section("Reviews") {
+                TextField("Excluded Repos", text: $excludeReviewReposText)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: excludeReviewReposText) { _, _ in
+                        defaults.excludeReviewRepos = excludeReviewReposText
+                            .split(separator: ",")
+                            .map { $0.trimmingCharacters(in: .whitespaces) }
+                            .filter { !$0.isEmpty }
+                        onSave?()
+                    }
+                Text("Comma-separated repos to hide from the review board. Supports wildcards (e.g., zarf-dev/*, bmlt-enabled/yap).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Per-workspace auto-review opt-ins are configured in Workspaces → edit a workspace.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Tickets") {
+                TextField("Excluded Repos", text: $excludeTicketReposText)
+                    .textFieldStyle(.roundedBorder)
+                    .onChange(of: excludeTicketReposText) { _, _ in
+                        defaults.excludeTicketRepos = excludeTicketReposText
+                            .split(separator: ",")
+                            .map { $0.trimmingCharacters(in: .whitespaces) }
+                            .filter { !$0.isEmpty }
+                        onSave?()
+                    }
+                Text("Comma-separated repos to hide from the ticket board. Supports wildcards (e.g., zarf-dev/*, bmlt-enabled/yap).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Remote Control") {
+                Toggle("Enable remote control for new sessions", isOn: $remoteControlEnabled)
+                    .onChange(of: remoteControlEnabled) { _, _ in onSave?() }
+                Text("New Claude Code sessions start with --rc so you can control them from claude.ai or the Claude mobile app. Each session's name matches its Crow session name.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Manager Terminal") {
+                Toggle("Launch in auto permission mode", isOn: $managerAutoPermissionMode)
+                    .onChange(of: managerAutoPermissionMode) { _, _ in onSave?() }
+                Text("Passes --permission-mode auto so the Manager can run crow, gh, and git commands without per-call approval. Requires Claude Code 2.1.83+ on a Max, Team, Enterprise, or API plan with the Anthropic provider. Turn off if your account reports auto mode as unavailable. Takes effect on next app launch.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            autoRespondSection
+        }
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private var autoRespondSection: some View {
+        Section {
+            Toggle("Respond to 'changes requested' reviews", isOn: $autoRespond.respondToChangesRequested)
+                .onChange(of: autoRespond.respondToChangesRequested) { _, _ in onSave?() }
+            Toggle("Respond to failed CI checks", isOn: $autoRespond.respondToFailedChecks)
+                .onChange(of: autoRespond.respondToFailedChecks) { _, _ in onSave?() }
+            Text("When enabled, Crow types an instruction into the session's Claude Code terminal asking Claude to read the review or CI logs and address the issue. Off by default — typing into a terminal unprompted is intrusive.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } header: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Auto-respond")
+                Text("Automatically prompt Claude to fix PR feedback")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
