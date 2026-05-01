@@ -444,6 +444,13 @@ struct SessionRow: View {
         return appState.terminalReadiness[primary.id]
     }
 
+    /// True if any terminal in this session is backed by tmux. Sessions whose
+    /// terminals all fell back to (or were created as) `.ghostty` get no
+    /// badge — matches the "show me which ones use tmux" intent.
+    private var isTmuxBacked: Bool {
+        appState.terminals(for: session.id).contains { $0.backend == .tmux }
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             if isSelectionMode {
@@ -468,6 +475,25 @@ struct SessionRow: View {
                         .strokeBorder(rowBorderColor, lineWidth: 1)
                 )
         )
+        .overlay(alignment: .bottomTrailing) {
+            if isTmuxBacked {
+                Text("T")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(CorveilTheme.textSecondary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(CorveilTheme.bgDeep.opacity(0.7))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 3)
+                                    .strokeBorder(CorveilTheme.borderSubtle, lineWidth: 0.5)
+                            )
+                    )
+                    .padding(4)
+                    .help("This session's terminals are backed by tmux")
+            }
+        }
         .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: needsAttention)
         .animation(.easeInOut(duration: 0.2), value: appState.hideSessionDetails)
         .padding(.vertical, 1)
