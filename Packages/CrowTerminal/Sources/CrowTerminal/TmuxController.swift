@@ -47,28 +47,16 @@ public struct TmuxController: Sendable {
         p.standardError = stderr
         try p.run()
 
-        // Watchdog: schedule a one-shot terminator. If the process exits
-        // first, we cancel the timer; otherwise the timer fires
-        // p.terminate() and we surface .timedOut.
-        let timedOut = TimeoutFlag()
-        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        timer.schedule(deadline: .now() + timeout)
-        timer.setEventHandler { [weak p] in
-            guard let p, p.isRunning else { return }
-            timedOut.fire()
-            p.terminate()
-        }
-        timer.resume()
-
+        let watchdog = ProcessWatchdog(p, timeout: timeout)
         p.waitUntilExit()
-        timer.cancel()
+        watchdog.cancel()
 
         let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
         let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
         let outString = String(data: stdoutData, encoding: .utf8) ?? ""
         let errString = String(data: stderrData, encoding: .utf8) ?? ""
 
-        if timedOut.didFire {
+        if watchdog.didFire {
             throw TmuxError.timedOut(args: args, after: timeout)
         }
         guard p.terminationStatus == 0 else {
@@ -152,25 +140,54 @@ public struct TmuxController: Sendable {
     /// Stage `data` into a named tmux buffer via stdin. Avoids the
     /// ARG_MAX-derived `command too long` error that hits `send-keys -l`
     /// for large payloads (~10KB+ in our measurements).
-    public func loadBufferFromStdin(name: String, data: Data) throws {
+    ///
+    /// Same `timeout` semantics as `run()` — if the child hangs (server
+    /// wedged, pipe never drained), the watchdog SIGTERMs it and this
+    /// throws `TmuxError.timedOut` rather than blocking the caller. The
+    /// payload write itself is covered too: if the watchdog has already
+    /// terminated the process, the stdin write will throw EPIPE which
+    /// we convert to `.timedOut` for the caller.
+    public func loadBufferFromStdin(
+        name: String,
+        data: Data,
+        timeout: TimeInterval = TmuxController.defaultTimeout
+    ) throws {
+        let args = ["load-buffer", "-b", name, "-"]
         let p = Process()
         p.executableURL = URL(fileURLWithPath: tmuxBinary)
-        p.arguments = ["-S", socketPath, "load-buffer", "-b", name, "-"]
+        p.arguments = ["-S", socketPath] + args
         let stdin = Pipe()
         let stderr = Pipe()
         p.standardInput = stdin
         p.standardError = stderr
         try p.run()
-        try stdin.fileHandleForWriting.write(contentsOf: data)
-        try stdin.fileHandleForWriting.close()
+
+        let watchdog = ProcessWatchdog(p, timeout: timeout)
+        do {
+            try stdin.fileHandleForWriting.write(contentsOf: data)
+            try stdin.fileHandleForWriting.close()
+        } catch {
+            p.waitUntilExit()
+            watchdog.cancel()
+            if watchdog.didFire {
+                throw TmuxError.timedOut(args: args, after: timeout)
+            }
+            throw error
+        }
+
         p.waitUntilExit()
+        watchdog.cancel()
+
+        if watchdog.didFire {
+            throw TmuxError.timedOut(args: args, after: timeout)
+        }
         guard p.terminationStatus == 0 else {
             let errString = String(
                 data: stderr.fileHandleForReading.readDataToEndOfFile(),
                 encoding: .utf8
             ) ?? ""
             throw TmuxError.cliFailed(
-                args: ["load-buffer", "-b", name, "-"],
+                args: args,
                 status: p.terminationStatus,
                 stdout: "",
                 stderr: errString
@@ -220,11 +237,30 @@ public enum TmuxError: Error, CustomStringConvertible {
     }
 }
 
-/// Tiny boxed flag for the timeout-fired signal. The closure
-/// `setEventHandler` captures this; the result is read after waitUntilExit.
-private final class TimeoutFlag: @unchecked Sendable {
+/// One-shot SIGTERM watchdog for a child Process. Schedules a timer
+/// on a background queue at construction; if the timer fires before
+/// `cancel()` is called, the wrapped process is sent `terminate()` and
+/// `didFire` flips to true. Used by `run()` and `loadBufferFromStdin`
+/// to keep the UI thread from wedging on a hung tmux server (spec
+/// §10.1).
+private final class ProcessWatchdog: @unchecked Sendable {
+    private let timer: DispatchSourceTimer
     private let lock = NSLock()
     private var fired = false
-    func fire() { lock.lock(); fired = true; lock.unlock() }
+
+    init(_ p: Process, timeout: TimeInterval) {
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.schedule(deadline: .now() + timeout)
+        self.timer = timer
+        timer.setEventHandler { [weak p, weak self] in
+            guard let p, p.isRunning else { return }
+            self?.fire()
+            p.terminate()
+        }
+        timer.resume()
+    }
+
+    private func fire() { lock.lock(); fired = true; lock.unlock() }
     var didFire: Bool { lock.lock(); defer { lock.unlock() }; return fired }
+    func cancel() { timer.cancel() }
 }

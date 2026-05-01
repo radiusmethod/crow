@@ -422,9 +422,9 @@ final class SessionService {
         let wts = appState.worktrees(for: id)
         let terminals = appState.terminals(for: id)
 
-        // Destroy live terminal surfaces
+        // Destroy live terminal surfaces (routes per-backend so .tmux windows are killed too)
         for terminal in terminals {
-            TerminalManager.shared.destroy(id: terminal.id)
+            TerminalRouter.destroy(terminal)
         }
 
         if session?.kind == .review {

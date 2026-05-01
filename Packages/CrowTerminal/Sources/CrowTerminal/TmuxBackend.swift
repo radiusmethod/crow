@@ -226,7 +226,7 @@ public final class TmuxBackend {
         }
         do {
             let ctrl = try ensureRunningServer()
-            let bufferName = "crow-\(id.uuidString.prefix(8))"
+            let bufferName = "crow-\(id.uuidString)"
             try ctrl.loadBufferFromStdin(name: bufferName, data: Data(text.utf8))
             defer { ctrl.deleteBuffer(name: bufferName) }
             try ctrl.pasteBuffer(name: bufferName, target: "\(ctrl.sessionName):\(windowIndex)")
@@ -300,7 +300,7 @@ public final class TmuxBackend {
     private func sentinelPath(for id: UUID) -> String {
         let dir = ProcessInfo.processInfo.environment["TMPDIR"] ?? "/tmp/"
         return (dir as NSString)
-            .appendingPathComponent("crow-ready-\(id.uuidString.prefix(8)).sentinel")
+            .appendingPathComponent("crow-ready-\(id.uuidString).sentinel")
     }
 
     private func startReadinessWatch(id: UUID, sentinelPath: String) {

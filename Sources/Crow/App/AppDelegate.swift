@@ -1243,6 +1243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = semaphore.wait(timeout: .now() + 2)
         }
         socketServer?.stop()
+        TmuxBackend.shared.shutdown()
         GhosttyApp.shared.shutdown()
         NSLog("[Crow] Cleanup complete")
     }
