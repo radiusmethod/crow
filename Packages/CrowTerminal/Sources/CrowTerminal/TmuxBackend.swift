@@ -294,8 +294,13 @@ public final class TmuxBackend {
         if let ctrl = controller, ctrl.hasSession() {
             return ctrl
         }
-        precondition(!tmuxBinary.isEmpty, "TmuxBackend.configure(...) must be called first")
-        precondition(!socketPath.isEmpty, "TmuxBackend.configure(...) must be called first")
+        guard !tmuxBinary.isEmpty, !socketPath.isEmpty else {
+            // Backend wasn't configured this run (flag off, or tmux not
+            // discovered). Throw rather than precondition-crash — callers
+            // (notably TerminalSurfaceView's surfaceForBackend) catch and
+            // fall back to per-terminal Ghostty rendering.
+            throw TmuxBackendError.notConfigured
+        }
         let ctrl = TmuxController(
             tmuxBinary: tmuxBinary,
             socketPath: socketPath,
@@ -385,6 +390,7 @@ public enum TmuxBackendError: Error, CustomStringConvertible {
     case unknownTerminal(UUID)
     case bindingMismatch(expected: String, actual: String)
     case windowNotFound(Int)
+    case notConfigured
 
     public var description: String {
         switch self {
@@ -396,6 +402,8 @@ public enum TmuxBackendError: Error, CustomStringConvertible {
             return "TmuxBackend binding mismatch: expected \(expected), got \(actual)"
         case let .windowNotFound(index):
             return "TmuxBackend: no live window at index \(index)"
+        case .notConfigured:
+            return "TmuxBackend.configure(...) was not called this run (CROW_TMUX_BACKEND off and no Settings → Experimental override)"
         }
     }
 }

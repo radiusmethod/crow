@@ -182,12 +182,27 @@ final class SessionService {
             )
             return terminal
         case .tmux:
-            // v1: kill-server on app exit (spec §12). On launch we re-create
-            // every .tmux window from the persisted row. Adoption of an
-            // already-running server is future work.
+            // Backend not configured this run (flag off, or tmux gone). Pre-
+            // initialize a Ghostty surface so the UI can still render the
+            // tab — but DO NOT mutate the persisted row. The user may have
+            // simply toggled the experimental flag off; if they toggle it
+            // back on we want the .tmux marking (and the visual T badge)
+            // to come back, not be permanently lost. The visible surface
+            // for this run goes through TerminalSurfaceView's
+            // cockpitSurface() catch path, which calls
+            // TerminalManager.shared.surface(for: id) — which finds the
+            // surface we're pre-initializing here.
             guard !TmuxBackend.shared.tmuxBinary.isEmpty else {
-                NSLog("[SessionService] persisted .tmux terminal but TmuxBackend not configured — falling back to .ghostty for \(terminal.id)")
-                return rehydrateAsGhosttyFallback(terminal, trackReadiness: trackReadiness)
+                NSLog("[SessionService] persisted .tmux row \(terminal.id) but tmux backend not configured this run — rendering as Ghostty (persisted row unchanged)")
+                if trackReadiness {
+                    TerminalManager.shared.trackReadiness(for: terminal.id)
+                }
+                TerminalManager.shared.preInitialize(
+                    id: terminal.id,
+                    workingDirectory: terminal.cwd,
+                    command: terminal.command
+                )
+                return terminal
             }
             do {
                 let binding = try TmuxBackend.shared.registerTerminal(
@@ -201,6 +216,10 @@ final class SessionService {
                 updated.tmuxBinding = binding
                 return updated
             } catch {
+                // Real registration failure (registerTerminal threw despite
+                // a configured backend). This IS a permanent fallback — the
+                // tmux server is configured but can't host this row, so
+                // persist as .ghostty to avoid retrying every launch.
                 NSLog("[SessionService] tmux re-register failed on hydrate (\(error)); silently falling back to .ghostty for \(terminal.id)")
                 return rehydrateAsGhosttyFallback(terminal, trackReadiness: trackReadiness)
             }
