@@ -108,3 +108,51 @@ struct IssueTrackerRemoteHostTests {
         #expect(IssueTracker.extractHost(fromRemote: "") == "")
     }
 }
+
+@Suite("IssueTracker remote slug extraction")
+struct IssueTrackerRemoteSlugTests {
+    @Test func parsesGitHubSSH() {
+        #expect(IssueTracker.extractSlug(fromRemote: "git@github.com:radiusmethod/corveil") == "radiusmethod/corveil")
+    }
+
+    @Test func parsesGitHubHTTPS() {
+        #expect(IssueTracker.extractSlug(fromRemote: "https://github.com/radiusmethod/corveil") == "radiusmethod/corveil")
+    }
+
+    @Test func parsesGitLabTwoLevel() {
+        #expect(IssueTracker.extractSlug(fromRemote: "https://gitlab.internal.example/acme/api") == "acme/api")
+        #expect(IssueTracker.extractSlug(fromRemote: "git@gitlab.corp.example:acme/api") == "acme/api")
+    }
+
+    @Test func parsesGitLabNestedGroupsHTTPS() {
+        // Regression test for #232: nested-group paths must not be truncated.
+        #expect(
+            IssueTracker.extractSlug(
+                fromRemote: "https://gitlab.example.com/big-bang/product/packages/elasticsearch-kibana"
+            ) == "big-bang/product/packages/elasticsearch-kibana"
+        )
+    }
+
+    @Test func parsesGitLabNestedGroupsSSH() {
+        #expect(
+            IssueTracker.extractSlug(
+                fromRemote: "git@gitlab.example.com:big-bang/product/packages/elasticsearch-kibana"
+            ) == "big-bang/product/packages/elasticsearch-kibana"
+        )
+    }
+
+    @Test func stripsTrailingDotGit() {
+        #expect(IssueTracker.extractSlug(fromRemote: "https://github.com/radiusmethod/corveil.git") == "radiusmethod/corveil")
+        #expect(IssueTracker.extractSlug(fromRemote: "git@github.com:radiusmethod/corveil.git") == "radiusmethod/corveil")
+        #expect(
+            IssueTracker.extractSlug(
+                fromRemote: "https://gitlab.example.com/big-bang/product/packages/elasticsearch-kibana.git"
+            ) == "big-bang/product/packages/elasticsearch-kibana"
+        )
+    }
+
+    @Test func returnsEmptyForUnrecognized() {
+        #expect(IssueTracker.extractSlug(fromRemote: "/tmp/local/repo") == "")
+        #expect(IssueTracker.extractSlug(fromRemote: "") == "")
+    }
+}

@@ -1337,8 +1337,8 @@ final class IssueTracker {
             var url = output.trimmingCharacters(in: .whitespacesAndNewlines)
             if url.hasSuffix(".git") { url = String(url.dropLast(4)) }
             let host = Self.extractHost(fromRemote: url)
-            if let match = url.range(of: #"[:/]([^/:]+/[^/:]+)$"#, options: .regularExpression) {
-                let slug = String(url[match]).trimmingCharacters(in: CharacterSet(charactersIn: "/:"))
+            let slug = Self.extractSlug(fromRemote: url)
+            if !slug.isEmpty {
                 return RepoInfo(slug: slug, host: host)
             }
         }
@@ -1365,6 +1365,30 @@ final class IssueTracker {
             let trimmed = match
                 .replacingOccurrences(of: #"^https?://"#, with: "", options: .regularExpression)
             return trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        }
+        return ""
+    }
+
+    /// Extract the project slug ("org/repo", "group/sub/repo", ...) from a git
+    /// remote URL. Handles both SSH (`git@host:path`) and HTTPS
+    /// (`https://host/path`), and preserves nested-group paths so that GitLab
+    /// projects under nested groups (e.g.
+    /// `big-bang/product/packages/elasticsearch-kibana`) keep their full path.
+    /// Strips a trailing `.git` if present. Returns "" when the URL can't be
+    /// parsed.
+    nonisolated static func extractSlug(fromRemote url: String) -> String {
+        var trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasSuffix(".git") { trimmed = String(trimmed.dropLast(4)) }
+
+        // SSH: git@host:org/repo or user@host:group/sub/repo
+        if let range = trimmed.range(of: #"^[^@/\s]+@[^:/\s]+:"#, options: .regularExpression) {
+            let path = String(trimmed[range.upperBound...])
+            return path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        }
+        // HTTPS: https://host/org/repo
+        if let range = trimmed.range(of: #"^https?://[^/]+/"#, options: .regularExpression) {
+            let path = String(trimmed[range.upperBound...])
+            return path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         }
         return ""
     }
@@ -1706,10 +1730,13 @@ final class IssueTracker {
     private func fetchGitLabIssues(host: String) async -> [AssignedIssue] {
         let output: String
         do {
+            // Use `glab api` rather than `glab issue list`: the latter shells
+            // out to `git` even when no repo is involved and aborts with
+            // "fatal: not a git repository" when cwd isn't a git working tree.
             output = try await shell(
                 env: ["GITLAB_HOST": host],
                 cwd: NSHomeDirectory(),
-                "glab", "issue", "list", "-a", "@me", "--output-format", "json"
+                "glab", "api", "issues?scope=assigned_to_me&state=opened&per_page=100"
             )
         } catch {
             print("[IssueTracker] fetchGitLabIssues(host: \(host)) failed: \(error)")
