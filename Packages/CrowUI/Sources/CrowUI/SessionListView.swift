@@ -37,6 +37,16 @@ public struct SessionListView: View {
                 .help(appState.soundMuted ? "Unmute notifications" : "Mute notifications")
                 .accessibilityLabel(appState.soundMuted ? "Unmute notifications" : "Mute notifications")
             }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    appState.onShowSettings?()
+                } label: {
+                    Image(systemName: "gearshape")
+                        .foregroundStyle(CorveilTheme.textSecondary)
+                }
+                .help("Open Settings")
+                .accessibilityLabel("Open Settings")
+            }
         }
         .deleteSessionAlert(session: $sessionToDelete, appState: appState)
         .bulkDeleteSessionsAlert(

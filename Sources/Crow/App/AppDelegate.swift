@@ -189,8 +189,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // flag is on but tmux isn't found at minimum 3.3, we log a warning
         // and stay on the Ghostty path — first-run onboarding (PROD #4)
         // surfaces this to the user.
+        //
+        // Independently of the flag, reap any orphan tmux servers from past
+        // Crow runs that exited ungracefully (Force Quit / crash bypasses
+        // applicationWillTerminate and therefore the shutdown fix). Reaping
+        // is keyed on $TMPDIR/crow-tmux-<pid>.sock files whose PID is no
+        // longer a live CrowApp process. Costs ~50ms when there's nothing
+        // to do; idempotent.
+        let discoveredTmuxBinary = TmuxDiscovery.discover()
+        if let tmuxBinary = discoveredTmuxBinary {
+            TmuxOrphanReaper.reap(
+                tmuxBinary: tmuxBinary,
+                currentPID: ProcessInfo.processInfo.processIdentifier
+            )
+        }
         if FeatureFlags.tmuxBackend {
-            if let tmuxBinary = TmuxDiscovery.discover() {
+            if let tmuxBinary = discoveredTmuxBinary {
                 // Per-app socket in $TMPDIR. v1 of the rollout kills the
                 // tmux server on app quit, so restart-survival isn't a
                 // requirement; ~/Library/Application Support is reserved
@@ -423,6 +437,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Hydrate mute state from config and wire toggle
         appState.soundMuted = config.notifications.globalMute
         appState.hideSessionDetails = config.sidebar.hideSessionDetails
+        appState.onShowSettings = { [weak self] in
+            self?.showSettings()
+        }
         appState.onSoundMutedChanged = { [weak self] muted in
             self?.appConfig?.notifications.globalMute = muted
             if let settings = self?.appConfig?.notifications {
@@ -567,11 +584,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showSettings() {
         guard let devRoot, let appConfig else { return }
 
-        if let existing = settingsWindow {
-            existing.makeKeyAndOrderFront(nil)
-            return
-        }
-
+        // Settings is app-modal — the user must dismiss it before returning
+        // to the main app. (`NSApp.runModal(for:)` blocks until stopModal
+        // is called; we trigger that on the window's willClose notification.)
         let settingsView = SettingsView(
             appState: appState,
             devRoot: devRoot,
@@ -587,7 +602,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hostingView = NSHostingView(rootView: settingsView)
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 480),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -597,8 +612,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         win.isReleasedWhenClosed = false
         win.contentView = hostingView
         win.center()
-        win.makeKeyAndOrderFront(nil)
         self.settingsWindow = win
+
+        let token = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: win,
+            queue: .main
+        ) { _ in
+            // .main queue dispatches to the main thread, but Swift 6 doesn't
+            // statically know that's the MainActor's executor. NSApp is
+            // MainActor-isolated; assume isolation explicitly.
+            MainActor.assumeIsolated { NSApp.stopModal() }
+        }
+        NSApp.runModal(for: win)
+        NotificationCenter.default.removeObserver(token)
+        self.settingsWindow = nil
     }
 
     private func saveSettings(devRoot: String, config: AppConfig) {

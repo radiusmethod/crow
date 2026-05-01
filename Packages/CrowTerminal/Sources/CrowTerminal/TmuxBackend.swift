@@ -375,7 +375,9 @@ public final class TmuxBackend {
     }
 
     /// Fixed session name for the cockpit. Per-app, not per-user-session.
-    public static let cockpitSessionName = "crow-cockpit"
+    /// `nonisolated` because the value is an immutable string literal —
+    /// safe to read from any context (e.g., TmuxOrphanReaper at launch).
+    nonisolated public static let cockpitSessionName = "crow-cockpit"
 }
 
 public enum TmuxBackendError: Error, CustomStringConvertible {
