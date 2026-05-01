@@ -324,9 +324,15 @@ public final class TmuxBackend {
     private func startReadinessWatch(id: UUID, sentinelPath: String) {
         let waiter = SentinelWaiter()
         Task { [weak self] in
+            // 30s budget (was 5s). On app restart with many managed terminals
+            // hydrating concurrently, shell startup is CPU-contended and the
+            // wrapper's first precmd may not fire within 5s. The previous
+            // budget left the readiness UI permanently stuck on
+            // "Waiting for terminal..." in that case, with no recovery path.
+            let timeoutBudget: TimeInterval = 30.0
             let elapsed = await waiter.waitForPrompt(
                 sentinelPath: sentinelPath,
-                timeout: 5.0
+                timeout: timeoutBudget
             )
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -335,11 +341,20 @@ public final class TmuxBackend {
                     NSLog("[CrowTelemetry tmux:first_prompt_ms=\(ms) terminal=\(id)]")
                     self.onReadinessChanged?(id, .shellReady)
                 } else {
-                    NSLog("[CrowTelemetry tmux:first_prompt_timeout terminal=\(id) budget_ms=5000]")
+                    // Genuine timeout. Most likely the shell is alive but its
+                    // startup is pathologically slow (heavy zshrc + concurrent
+                    // hydrate); less likely the wrapper failed to install the
+                    // precmd hook (exotic shell) or the shell crashed at start.
+                    // Advance to .shellReady anyway: a stuck "Waiting for
+                    // terminal..." spinner is strictly worse than letting
+                    // launchClaude proceed. If the shell is alive but slow,
+                    // the paste-buffered `claude --continue` will run when the
+                    // shell finally reads its tty. If the shell is dead, the
+                    // pane stays empty (which is the truthful state).
+                    let ms = Int(timeoutBudget * 1000)
+                    NSLog("[CrowTelemetry tmux:first_prompt_timeout terminal=\(id) budget_ms=\(ms) — advancing readiness anyway]")
+                    self.onReadinessChanged?(id, .shellReady)
                 }
-                // Timeout case: caller can decide via their own watchdog;
-                // we don't downgrade to a "failed" state here because the
-                // shell may still be valid, just slow (e.g. heavy zshrc).
             }
         }
     }
