@@ -39,6 +39,7 @@ public enum ClaudeState: String, Codable, Sendable {
 
 /// Terminal surface lifecycle state.
 public enum TerminalReadiness: String, Codable, Sendable, Comparable {
+    case failed           // createSurface() exhausted retries; UI shows error overlay with Retry
     case uninitialized    // GhosttySurfaceView exists but createSurface() not called
     case surfaceCreated   // ghostty_surface_t exists, shell process spawning
     case shellReady       // Shell prompt detected (probe file appeared)
@@ -46,6 +47,7 @@ public enum TerminalReadiness: String, Codable, Sendable, Comparable {
 
     private var sortOrder: Int {
         switch self {
+        case .failed: -1
         case .uninitialized: 0
         case .surfaceCreated: 1
         case .shellReady: 2

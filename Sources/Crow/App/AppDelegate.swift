@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var socketServer: SocketServer?
     private var issueTracker: IssueTracker?
     private var notificationManager: NotificationManager?
+    private var autoRespondCoordinator: AutoRespondCoordinator?
     private var allowListService: AllowListService?
     private var telemetryService: TelemetryService?
     private var devRoot: String?
@@ -221,6 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.remoteControlEnabled = config.remoteControlEnabled
         appState.managerAutoPermissionMode = config.managerAutoPermissionMode
         appState.excludeReviewRepos = config.defaults.excludeReviewRepos
+        appState.excludeTicketRepos = config.defaults.excludeTicketRepos
 
         // Create session service and hydrate state
         let service = SessionService(store: store, appState: appState, telemetryPort: config.telemetry.enabled ? config.telemetry.port : nil)
@@ -268,6 +270,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         appState.onLaunchClaude = { [weak service] terminalID in
             service?.launchClaude(terminalID: terminalID)
+        }
+
+        appState.onRetryTerminal = { [weak service] terminalID in
+            service?.retryTerminal(terminalID: terminalID)
         }
 
         // Wire terminal tab management
@@ -369,6 +375,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.appState.onWorkOnIssue?(issue.url)
             self.notificationManager?.notifyAutoWorkspaceCreated(issue)
         }
+        tracker.onPRStatusTransitions = { [weak self] transitions in
+            guard let self else { return }
+            for transition in transitions {
+                if let session = self.appState.sessions.first(where: { $0.id == transition.sessionID }) {
+                    self.notificationManager?.notifyPRTransition(transition, session: session)
+                }
+            }
+            self.autoRespondCoordinator?.handle(transitions)
+        }
         tracker.start()
         self.issueTracker = tracker
 
@@ -379,6 +394,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Initialize notification manager
         let notifManager = NotificationManager(appState: appState, settings: config.notifications)
         self.notificationManager = notifManager
+
+        // Initialize auto-respond coordinator. Reads `autoRespond` lazily from
+        // `self.appConfig` so toggles take effect on the next transition.
+        self.autoRespondCoordinator = AutoRespondCoordinator(
+            appState: appState,
+            settingsProvider: { [weak self] in
+                self?.appConfig?.autoRespond ?? AutoRespondSettings()
+            }
+        )
 
         // Initialize allow list service
         let allowList = AllowListService(appState: appState, devRoot: devRoot)
@@ -589,6 +613,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.remoteControlEnabled = config.remoteControlEnabled
         appState.managerAutoPermissionMode = config.managerAutoPermissionMode
         appState.excludeReviewRepos = config.defaults.excludeReviewRepos
+        appState.excludeTicketRepos = config.defaults.excludeTicketRepos
     }
 
     // MARK: - Socket Server

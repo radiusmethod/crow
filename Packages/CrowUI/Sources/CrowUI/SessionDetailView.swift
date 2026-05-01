@@ -453,8 +453,29 @@ struct ReadinessAwareTerminal: View {
             )
             .id(terminal.id)
 
-            // Loading overlay while terminal is not yet ready
-            if readiness < .shellReady {
+            if readiness == .failed {
+                // Permanent failure overlay with Retry affordance.
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.orange)
+                    Text("Terminal failed to launch")
+                        .font(.headline)
+                    Text("Ghostty couldn't create a surface after several retries.")
+                        .font(.caption)
+                        .foregroundStyle(CorveilTheme.textMuted)
+                        .multilineTextAlignment(.center)
+                    Button("Retry") {
+                        appState.onRetryTerminal?(terminal.id)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                }
+                .padding(24)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(CorveilTheme.bgDeep.opacity(0.95))
+            } else if readiness < .shellReady {
+                // Loading overlay while terminal is not yet ready
                 VStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.regular)

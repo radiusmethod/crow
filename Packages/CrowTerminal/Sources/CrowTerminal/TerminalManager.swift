@@ -6,6 +6,7 @@ import GhosttyKit
 public enum SurfaceState: String, Sendable {
     case created       // ghostty_surface_t created, shell spawning
     case shellReady    // Shell assumed ready after startup delay
+    case failed        // ghostty_surface_new returned nil and retries were exhausted
 }
 
 /// Manages live terminal surfaces, keeping them alive across SwiftUI view reloads.
@@ -58,6 +59,10 @@ public final class TerminalManager {
             NSLog("[TerminalManager] onSurfaceCreated (offscreen) for \(id)")
             self?.surfaceDidCreate(id: id)
         }
+        view.onSurfaceCreationFailed = { [weak self] in
+            NSLog("[TerminalManager] surface creation failed permanently for \(id)")
+            self?.surfaceDidFail(id: id)
+        }
         surfaces[id] = view
         // Adding to offscreenWindow triggers viewDidMoveToWindow → createSurface()
         offscreenWindow.contentView?.addSubview(view)
@@ -67,16 +72,28 @@ public final class TerminalManager {
     ///
     /// The returned view is kept alive in an internal dictionary so that
     /// SwiftUI re-renders reuse the same `GhosttySurfaceView` instance.
+    /// A cached view whose underlying `ghostty_surface_t` is nil (i.e. a prior
+    /// `createSurface()` failed) is treated as a miss: it is destroyed and
+    /// replaced so callers don't get permanently stuck with a broken view.
     public func surface(for id: UUID, workingDirectory: String, command: String? = nil) -> GhosttySurfaceView {
         if let existing = surfaces[id] {
-            NSLog("[TerminalManager] surface(for: \(id)) — returning EXISTING view")
-            return existing
+            if existing.hasSurface {
+                NSLog("[TerminalManager] surface(for: \(id)) — returning EXISTING view")
+                return existing
+            }
+            NSLog("[TerminalManager] surface(for: \(id)) — cached view has nil surface, discarding")
+            existing.destroy()
+            surfaces.removeValue(forKey: id)
         }
         NSLog("[TerminalManager] surface(for: \(id)) — creating NEW view, setting onSurfaceCreated callback")
         let view = GhosttySurfaceView(frame: .zero, workingDirectory: workingDirectory, command: command)
         view.onSurfaceCreated = { [weak self] in
             NSLog("[TerminalManager] onSurfaceCreated callback fired for \(id)")
             self?.surfaceDidCreate(id: id)
+        }
+        view.onSurfaceCreationFailed = { [weak self] in
+            NSLog("[TerminalManager] surface creation failed permanently for \(id)")
+            self?.surfaceDidFail(id: id)
         }
         surfaces[id] = view
         return view
@@ -86,6 +103,16 @@ public final class TerminalManager {
 
     public func destroy(id: UUID) {
         if let view = surfaces.removeValue(forKey: id) { view.destroy() }
+    }
+
+    /// Discard the cached view for `id` (if any) and re-run preInitialize.
+    /// Used by the UI's "Retry" affordance after a permanent surface-creation failure.
+    public func retry(id: UUID, workingDirectory: String, command: String? = nil) {
+        NSLog("[TerminalManager] retry(\(id)) — destroying broken surface and re-preInitializing")
+        if let view = surfaces.removeValue(forKey: id) { view.destroy() }
+        // Re-arm readiness tracking; surfaceDidFail removed the id from the set.
+        monitoredTerminals.insert(id)
+        preInitialize(id: id, workingDirectory: workingDirectory, command: command)
     }
 
     public func send(id: UUID, text: String) { surfaces[id]?.writeText(text) }
@@ -124,5 +151,11 @@ public final class TerminalManager {
                 self.onStateChanged?(id, .shellReady)
             }
         }
+    }
+
+    /// Called after a surface's `createSurface()` exhausts its retry budget.
+    public func surfaceDidFail(id: UUID) {
+        monitoredTerminals.remove(id)
+        onStateChanged?(id, .failed)
     }
 }

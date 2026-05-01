@@ -227,6 +227,7 @@ final class SessionService {
     ///
     /// Maps `SurfaceState.created` → `.surfaceCreated` and `.shellReady` → `.shellReady`,
     /// only for terminals already registered in `terminalReadiness` (managed work session terminals).
+    /// `.failed` is forwarded unconditionally so the UI can render an error overlay with Retry.
     func wireTerminalReadiness() {
         NSLog("[SessionService] wireTerminalReadiness — setting onStateChanged callback")
         TerminalManager.shared.onStateChanged = { [weak self] terminalID, state in
@@ -250,6 +251,10 @@ final class SessionService {
                 // Previously this was triggered by the SwiftUI view's onChange,
                 // but with offscreen pre-init the view may not be rendered yet.
                 self.launchClaude(terminalID: terminalID)
+            case .failed:
+                NSLog("[SessionService] terminal \(terminalID) failed to launch surface")
+                self.appState.terminalReadiness[terminalID] = .failed
+                // Do not auto-launch Claude; the UI will surface a Retry button.
             }
         }
         // tmux-backed terminals report readiness via SentinelWaiter rather
@@ -347,6 +352,29 @@ final class SessionService {
         if rcEnabled {
             appState.remoteControlActiveTerminals.insert(terminalID)
         }
+    }
+
+    /// Discard a failed terminal surface and re-attempt creation.
+    ///
+    /// Called when the user clicks "Retry" on a terminal whose readiness is `.failed`.
+    /// Resets readiness back to `.uninitialized`, re-arms auto-launch (so Claude relaunches
+    /// on success), and asks `TerminalManager` to destroy the broken view and re-preInitialize.
+    func retryTerminal(terminalID: UUID) {
+        let terminal = appState.terminals.values.flatMap { $0 }.first(where: { $0.id == terminalID })
+        guard let terminal else {
+            NSLog("[SessionService] retryTerminal: no terminal record for \(terminalID)")
+            return
+        }
+        NSLog("[SessionService] retryTerminal(\(terminalID))")
+        appState.terminalReadiness[terminalID] = .uninitialized
+        if terminal.isManaged {
+            appState.autoLaunchTerminals.insert(terminalID)
+        }
+        TerminalManager.shared.retry(
+            id: terminalID,
+            workingDirectory: terminal.cwd,
+            command: terminal.command
+        )
     }
 
     // MARK: - Ensure Manager Session

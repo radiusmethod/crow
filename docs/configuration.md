@@ -48,7 +48,8 @@ All persistent state lives under `~/Library/Application Support/crow/` (see `Pac
     "cli": "gh",
     "branchPrefix": "feature/",
     "excludeDirs": ["node_modules", ".git", "vendor", "dist", "build", "target"],
-    "excludeReviewRepos": ["zarf-dev/zarf", "bmlt-enabled/yap"]
+    "excludeReviewRepos": ["zarf-dev/zarf", "bmlt-enabled/yap"],
+    "excludeTicketRepos": []
   }
 }
 ```
@@ -58,13 +59,14 @@ All persistent state lives under `~/Library/Application Support/crow/` (see `Pac
 - **`host`** — set for self-hosted GitLab; exported as `GITLAB_HOST` when invoking `glab`.
 - **`branchPrefix`** — used by the `/crow-workspace` skill when creating new branches.
 - **`excludeDirs`** — ignored when scanning repos for git worktrees.
-- **`excludeReviewRepos`** — repos to hide from the review board (e.g., `["zarf-dev/zarf"]`). Matching reviews are filtered out from the board, sidebar badge count, and notifications.
+- **`excludeReviewRepos`** — repos to hide from the review board (e.g., `["zarf-dev/zarf"]`). Supports `*` wildcards (e.g., `"zarf-dev/*"`). Matching reviews are filtered out from the board, sidebar badge count, and notifications.
+- **`excludeTicketRepos`** — repos to hide from the ticket board (e.g., `["zarf-dev/zarf"]`). Supports `*` wildcards (e.g., `"zarf-dev/*"`). Matching issues are filtered out from the board, pipeline counts, and auto-create candidates.
 
 ## Manager Terminal
 
 The Manager tab runs Claude Code at the dev root and drives workspace orchestration. Its behavior is controlled by these top-level keys in `{devRoot}/.claude/config.json`:
 
-- **`managerAutoPermissionMode`** (default: `true`) — passes `--permission-mode auto` to the Manager's `claude` launch so it can run `crow`, `gh`, and `git` commands without per-call approval. Requires Claude Code **v2.1.83+**, a **Max / Team / Enterprise / API** plan, the **Anthropic** API provider (not Bedrock / Vertex / Foundry), and a supported model (**Sonnet 4.6**, **Opus 4.6**, or **Opus 4.7**). On Team/Enterprise plans an admin must enable auto mode in Claude Code admin settings. Turn this off via **Settings → General → Manager Terminal** if your account reports auto mode as unavailable. Worker sessions and CLI-spawned terminals are unaffected by this setting.
+- **`managerAutoPermissionMode`** (default: `true`) — passes `--permission-mode auto` to the Manager's `claude` launch so it can run `crow`, `gh`, and `git` commands without per-call approval. Requires Claude Code **v2.1.83+**, a **Max / Team / Enterprise / API** plan, the **Anthropic** API provider (not Bedrock / Vertex / Foundry), and a supported model (**Sonnet 4.6**, **Opus 4.6**, or **Opus 4.7**). On Team/Enterprise plans an admin must enable auto mode in Claude Code admin settings. Turn this off via **Settings → Automation → Manager Terminal** if your account reports auto mode as unavailable. Worker sessions and CLI-spawned terminals are unaffected by this setting.
 - **`remoteControlEnabled`** (default: `false`) — launches new Claude Code sessions with `--rc` so you can control them from claude.ai or the Claude mobile app.
 
 Changes take effect on next app launch — the Manager's stored command is rebuilt on hydration.

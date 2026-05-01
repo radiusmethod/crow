@@ -8,7 +8,7 @@ import Testing
             WorkspaceInfo(name: "TestOrg", provider: "github", cli: "gh", alwaysInclude: ["repo1"]),
             WorkspaceInfo(name: "GitLabOrg", provider: "gitlab", cli: "glab", host: "gitlab.example.com"),
         ],
-        defaults: ConfigDefaults(provider: "gitlab", cli: "glab", branchPrefix: "fix/", excludeDirs: ["vendor"], excludeReviewRepos: ["zarf-dev/zarf", "bmlt-enabled/yap"]),
+        defaults: ConfigDefaults(provider: "gitlab", cli: "glab", branchPrefix: "fix/", excludeDirs: ["vendor"], excludeReviewRepos: ["zarf-dev/zarf", "bmlt-enabled/yap"], excludeTicketRepos: ["org/hidden-repo"]),
         notifications: NotificationSettings(globalMute: true),
         sidebar: SidebarSettings(hideSessionDetails: true)
     )
@@ -26,6 +26,7 @@ import Testing
     #expect(decoded.defaults.branchPrefix == "fix/")
     #expect(decoded.defaults.excludeDirs == ["vendor"])
     #expect(decoded.defaults.excludeReviewRepos == ["zarf-dev/zarf", "bmlt-enabled/yap"])
+    #expect(decoded.defaults.excludeTicketRepos == ["org/hidden-repo"])
     #expect(decoded.notifications.globalMute == true)
     #expect(decoded.sidebar.hideSessionDetails == true)
 }
@@ -38,6 +39,7 @@ import Testing
     #expect(config.defaults.provider == "github")
     #expect(config.defaults.branchPrefix == "feature/")
     #expect(config.defaults.excludeReviewRepos.isEmpty)
+    #expect(config.defaults.excludeTicketRepos.isEmpty)
     #expect(config.notifications.globalMute == false)
     #expect(config.sidebar.hideSessionDetails == false)
     #expect(config.remoteControlEnabled == false)
@@ -113,6 +115,7 @@ import Testing
     """.data(using: .utf8)!
     let config = try JSONDecoder().decode(AppConfig.self, from: json)
     #expect(config.defaults.excludeReviewRepos.isEmpty)
+    #expect(config.defaults.excludeTicketRepos.isEmpty)
     #expect(config.defaults.excludeDirs == ["node_modules"])
 }
 
@@ -187,4 +190,43 @@ import Testing
     #expect(ConfigDefaults.isValidBranchPrefix("feat..ure/") == false)       // consecutive dots
     #expect(ConfigDefaults.isValidBranchPrefix("feature.") == false)         // trailing dot
     #expect(ConfigDefaults.isValidBranchPrefix("feature@{/") == false)       // @{
+}
+
+// MARK: - Repo Exclude Pattern Matching
+
+@Test func repoExcludeExactMatch() {
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["org/repo"]) == true)
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["org/other"]) == false)
+}
+
+@Test func repoExcludeCaseInsensitive() {
+    #expect(repoMatchesExcludePatterns("Org/Repo", patterns: ["org/repo"]) == true)
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["ORG/REPO"]) == true)
+}
+
+@Test func repoExcludeWildcardSuffix() {
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["org/*"]) == true)
+    #expect(repoMatchesExcludePatterns("org/other", patterns: ["org/*"]) == true)
+    #expect(repoMatchesExcludePatterns("different/repo", patterns: ["org/*"]) == false)
+}
+
+@Test func repoExcludeWildcardPrefix() {
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["*/repo"]) == true)
+    #expect(repoMatchesExcludePatterns("other/repo", patterns: ["*/repo"]) == true)
+    #expect(repoMatchesExcludePatterns("org/other", patterns: ["*/repo"]) == false)
+}
+
+@Test func repoExcludeWildcardOnly() {
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["*"]) == true)
+}
+
+@Test func repoExcludeMultiplePatterns() {
+    let patterns = ["org/specific", "other-org/*"]
+    #expect(repoMatchesExcludePatterns("org/specific", patterns: patterns) == true)
+    #expect(repoMatchesExcludePatterns("other-org/anything", patterns: patterns) == true)
+    #expect(repoMatchesExcludePatterns("org/different", patterns: patterns) == false)
+}
+
+@Test func repoExcludeEmptyPatterns() {
+    #expect(repoMatchesExcludePatterns("org/repo", patterns: []) == false)
 }
