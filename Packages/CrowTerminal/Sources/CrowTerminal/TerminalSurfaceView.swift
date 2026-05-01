@@ -122,7 +122,10 @@ public struct TerminalSurfaceView: NSViewRepresentable {
         case .ghostty:
             return TerminalManager.shared.existingSurface(for: terminalID)
         case .tmux:
-            return try? TmuxBackend.shared.cockpitSurface()
+            // Side-effect-free peek — must NOT create the cockpit, otherwise
+            // updateNSView would race with the makeNSView path and could
+            // spawn a duplicate tmux client.
+            return TmuxBackend.shared.existingCockpitSurface
         }
     }
 }

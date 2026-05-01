@@ -261,12 +261,30 @@ public final class TmuxBackend {
             workingDirectory: NSHomeDirectory(),
             command: attachCommand
         )
+        // CRITICAL ORDER: cache the view in sharedSurface BEFORE adding it to
+        // a window. addSubview synchronously triggers viewDidMoveToWindow →
+        // createSurface → ghostty_surface_new, which can pump the main runloop
+        // briefly while libghostty's renderer registers. Any re-entrant
+        // cockpitSurface() call during that window must see the cached view
+        // and short-circuit, otherwise it observes sharedSurface == nil and
+        // spawns a second GhosttySurfaceView with the attach command — which
+        // attaches a duplicate tmux client (visible via `tmux list-clients`).
+        // This was the root cause of the duplicate-client bug observed during
+        // PR #229 dogfood.
+        sharedSurface = view
         // Park in offscreen window so libghostty's viewDidMoveToWindow
         // fires and the attach process starts in the background. SwiftUI
         // re-parents into the real container when a tab becomes visible.
         offscreenWindow.contentView?.addSubview(view)
-        sharedSurface = view
         return view
+    }
+
+    /// Cached cockpit surface, or nil if it hasn't been created yet. Use this
+    /// from call sites that want to act ONLY when the cockpit is already live
+    /// (e.g. SwiftUI's updateNSView re-parent path) — unlike `cockpitSurface()`
+    /// this never creates the surface as a side effect.
+    public var existingCockpitSurface: GhosttySurfaceView? {
+        sharedSurface
     }
 
     // MARK: - Internal helpers
