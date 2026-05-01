@@ -250,6 +250,12 @@ public final class AppState {
     /// Called to open a terminal at a session's primary worktree path.
     public var onOpenTerminal: ((UUID) -> Void)?
 
+    /// Called when the user clicks a quick action button on a session card
+    /// (e.g. "Merge PR", "Rebase & Fix Conflicts"). Receives the session ID
+    /// and the action chosen; the wired handler injects the corresponding
+    /// prompt into the session's managed Claude Code terminal.
+    public var onQuickAction: ((UUID, QuickAction) -> Void)?
+
     /// Called when the sound mute toggle is changed.
     public var onSoundMutedChanged: ((Bool) -> Void)?
 
@@ -289,6 +295,14 @@ public final class AppState {
 
     public func terminals(for sessionID: UUID) -> [SessionTerminal] {
         terminals[sessionID] ?? []
+    }
+
+    /// Whether a session has a managed Claude Code terminal that quick
+    /// actions can be dispatched into. The dispatcher in AppDelegate
+    /// re-checks the surface state before sending; this is the lighter
+    /// gate the view uses to decide whether to enable the buttons.
+    public func canDispatchQuickAction(sessionID: UUID) -> Bool {
+        terminals(for: sessionID).contains(where: { $0.isManaged })
     }
 
     public func primaryWorktree(for sessionID: UUID) -> SessionWorktree? {

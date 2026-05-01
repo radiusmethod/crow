@@ -120,6 +120,8 @@ public struct SessionDetailView: View {
 
                 // Action buttons (not for Manager)
                 if session.id != AppState.managerSessionID {
+                    quickActionButtons
+
                     if appState.vsCodeAvailable, primaryWorktree != nil {
                         Button {
                             appState.onOpenInVSCode?(session.id)
@@ -216,6 +218,77 @@ public struct SessionDetailView: View {
     @ViewBuilder
     private var managerBrandmark: some View {
         BrandmarkImage()
+    }
+
+    // MARK: - Quick Action Buttons
+
+    /// PR-status-aware buttons that inject the appropriate next-step prompt
+    /// into the session's managed Claude Code terminal. Each button maps
+    /// 1:1 to a status badge so the affordance is obvious. Hidden when the
+    /// PR is merged or no status is known; disabled when the session has
+    /// no managed terminal.
+    @ViewBuilder
+    private var quickActionButtons: some View {
+        if let status = appState.prStatus[session.id], !status.isMerged {
+            let canDispatch = appState.canDispatchQuickAction(sessionID: session.id)
+            let disabledHelp = "No managed Claude Code terminal in this session"
+
+            if status.mergeable == .conflicting {
+                Button {
+                    appState.onQuickAction?(session.id, .fixConflicts)
+                } label: {
+                    Label("Rebase & Fix Conflicts", systemImage: "arrow.triangle.merge")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+                .disabled(!canDispatch)
+                .help(canDispatch ? "Send a rebase + resolve-conflicts prompt to the session terminal" : disabledHelp)
+            }
+
+            if status.reviewStatus == .changesRequested {
+                Button {
+                    appState.onQuickAction?(session.id, .addressChanges)
+                } label: {
+                    Label("Address Review", systemImage: "pencil.and.list.clipboard")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+                .disabled(!canDispatch)
+                .help(canDispatch ? "Send a 'read review feedback and fix' prompt to the session terminal" : disabledHelp)
+            }
+
+            if status.checksPass == .failing {
+                Button {
+                    appState.onQuickAction?(session.id, .fixChecks)
+                } label: {
+                    Label("Fix Checks", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.red)
+                .disabled(!canDispatch)
+                .help(canDispatch ? "Send a 'fix failing CI checks' prompt to the session terminal" : disabledHelp)
+            }
+
+            if status.isReadyToMerge {
+                Button {
+                    appState.onQuickAction?(session.id, .mergePR)
+                } label: {
+                    Label("Merge PR", systemImage: "arrow.triangle.pull")
+                        .font(.caption)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.green)
+                .disabled(!canDispatch)
+                .help(canDispatch ? "Send a 'merge this PR' prompt to the session terminal" : disabledHelp)
+            }
+        }
     }
 
     // MARK: - Terminal Area
