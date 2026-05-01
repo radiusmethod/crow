@@ -47,7 +47,7 @@ final class AutoRespondCoordinator {
                   transition.kind.rawValue, transition.sessionID.uuidString)
             return
         }
-        guard TerminalManager.shared.existingSurface(for: terminal.id) != nil else {
+        guard TerminalRouter.canSend(terminal) else {
             NSLog("[AutoRespond] Skipping %@ for session %@: terminal surface not initialized",
                   transition.kind.rawValue, transition.sessionID.uuidString)
             return
@@ -57,7 +57,7 @@ final class AutoRespondCoordinator {
         let prompt = AutoRespondPrompts.build(for: transition, provider: provider)
         NSLog("[AutoRespond] Sending %@ prompt to terminal %@ (%d chars)",
               transition.kind.rawValue, terminal.id.uuidString, prompt.count)
-        TerminalManager.shared.send(id: terminal.id, text: prompt)
+        TerminalRouter.send(terminal, text: prompt)
     }
 
     /// Manually dispatch a quick action triggered by a session-card button click.
@@ -71,7 +71,7 @@ final class AutoRespondCoordinator {
                   action.rawValue, sessionID.uuidString)
             return
         }
-        guard TerminalManager.shared.existingSurface(for: terminal.id) != nil else {
+        guard TerminalRouter.canSend(terminal) else {
             NSLog("[QuickAction] Skipping %@ for session %@: terminal surface not initialized",
                   action.rawValue, sessionID.uuidString)
             return
@@ -93,7 +93,7 @@ final class AutoRespondCoordinator {
         )
         NSLog("[QuickAction] Sending %@ prompt to terminal %@ (%d chars)",
               action.rawValue, terminal.id.uuidString, prompt.count)
-        TerminalManager.shared.send(id: terminal.id, text: prompt)
+        TerminalRouter.send(terminal, text: prompt)
     }
 }
 

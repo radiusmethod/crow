@@ -50,4 +50,18 @@ public enum TerminalRouter {
             break
         }
     }
+
+    /// Whether the terminal's backing surface (Ghostty) or window
+    /// (tmux) is alive enough to receive a `send`. Callers that want to
+    /// fail-soft when the user hasn't materialized the terminal yet — e.g.
+    /// auto-respond and the session-card quick action buttons — gate on
+    /// this instead of relying on the underlying send to throw.
+    public static func canSend(_ terminal: SessionTerminal) -> Bool {
+        switch terminal.backend {
+        case .ghostty:
+            return TerminalManager.shared.existingSurface(for: terminal.id) != nil
+        case .tmux:
+            return TmuxBackend.shared.isRegistered(id: terminal.id)
+        }
+    }
 }
