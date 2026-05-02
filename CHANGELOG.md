@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Backfill of merged PRs since the 0.1.0 release, grouped by theme.
+
+### Automation
+
+- #137 — Session analytics emitted via Claude Code's OpenTelemetry exporter (configure via `CLAUDE_CODE_ENABLE_TELEMETRY` and `OTEL_EXPORTER_OTLP_ENDPOINT`).
+- #163 / #165 — Add `remoteControlEnabled` setting; new sessions launch with `--rc` so they can be driven from claude.ai or the mobile app. The `/crow-workspace` skill honors the setting.
+- #182 — Auto-complete now requires positive evidence that the session was worked before flipping to Completed; prevents idle sessions being marked done by an unrelated PR merge.
+- #189 — Manager terminal launches in `--permission-mode auto` by default so orchestration commands (`crow`, `gh`, `git`) skip per-call approval. Toggle at Settings → Automation → Manager Terminal.
+- #209 — Per-workspace opt-in to auto-start review sessions when a PR becomes reviewable.
+- #211 — Auto-create a workspace when an issue assigned to you carries the `crow:auto` label.
+- #213 — Auto-suggest opening a PR when a session completes its work but no PR is linked yet.
+- #214 — Optional auto-respond toggles: when enabled, Crow types an instruction into the session's Claude Code terminal in response to changes-requested reviews and failed CI checks. Off by default.
+- #222 — PRs opened from a Crow session are auto-labeled `crow:auto`.
+- #228 — Settings split into discrete tabs; every automation toggle lives under Settings → Automation. New `docs/automation.md` covers the full lifecycle.
+
+### Review Board & Sessions
+
+- #153 — Fix PR review status not reflecting the actual review state.
+- #174 — Ticket card issue and PR chips are now clickable.
+- #188 — "Move to Active" button on completed sessions returns them to active without deletion.
+- #205 — PR link reconciliation for sessions that missed reactive detection — `gh pr list` is consulted on the next polling cycle.
+- #206 — Rename terminals via the UI and via `crow rename-terminal`.
+- #207 — `defaults.excludeReviewRepos` filters repos from the review board, badge counts, and notifications. Wildcards supported.
+- #210 — Bulk delete for sessions in the sidebar.
+- #212 — Multi-select + batch Start Review on the review board.
+- #220 — Filtering for the tickets list.
+- #226 — Per-section select all and icon-only cancel button in selection mode.
+- #231 — Quick action buttons on the session detail header.
+
+### Terminal Runtime
+
+- #159 — Fix diagonal window resize and content-driven window growth.
+- #161 — Fix batch "Work on" sending a malformed `/crow-batch-workspace` line.
+- #218 — Recover from failed Ghostty surface creation by retrying.
+- #229 — New tmux backend behind the `CROW_TMUX_BACKEND` feature flag (or Settings → Experimental). Off by default; opt in for a headless-PTY runtime that decouples terminal lifecycle from view rendering.
+
+### GitLab
+
+- #215 — Fix GitLab fetch failing when `GITLAB_HOST` did not match the workspace host; reconcile now silently skips GitLab candidates whose host can't be determined.
+- #233 — Fix `glab` fetch failures from a non-repo cwd and slug truncation on nested groups (`big-bang/product/packages/elasticsearch-kibana` is no longer truncated to `big-bang/product`).
+
+### Tooling & Misc
+
+- #152 — Replace dock icon with the Corveil Brandmark.
+- #155 — Docs refresh: README, `make build` promotion, GitHub project scope wording.
+- #162 — Silence noisy console logs from Ghostty and IssueTracker.
+- #172 — Log `gh` stderr on IssueTracker shell failures.
+- #175 — Consolidate IssueTracker `gh` calls into a single GraphQL query.
+- #176 — Open-source readiness: license, code of conduct, CI, doc cleanup.
+- #178 — CI warms the Ghostty cache on `main` so PRs share it.
+- #180 — Fix IssueTracker duplicate-key crash on PR status refresh.
+- #185 — Replace the Corveil Brandmark PNG with an SVG for crisper rendering.
+- #208 — Ignore subagent hook events fired after a turn's `Stop` so the sidebar dot doesn't get stuck "working".
+- #234 — `crow hook-event` is a silent no-op when the Crow app is not running, so non-Crow `claude` sessions don't log noise.
+
 ## [0.1.0] - 2025-04-05
 
 Initial open-source release of Crow.

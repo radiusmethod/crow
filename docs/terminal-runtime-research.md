@@ -747,3 +747,18 @@ write(masterfd, text, length);      // Send input to shell
 - [macOS Metal + NSView Setup](https://metashapes.com/blog/advanced-nsview-setup-opengl-metal-macos/)
 - [Apple Developer Forums — Swift PTY](https://developer.apple.com/forums/thread/688534)
 - [Apple Developer Forums — forkpty in sandbox](https://developer.apple.com/forums/thread/685544)
+
+---
+
+## Implementation Status (2026-05)
+
+The "long-term" recommendation in this document — a headless PTY backend that decouples terminal lifecycle from view rendering — landed in PR #229 as the **tmux backend**, behind the `CROW_TMUX_BACKEND` feature flag. tmux's control-mode protocol gives Crow a stable PTY supervisor without writing one from scratch, while a Swift `TmuxBackend` wraps the per-window operations Crow needs (spawn, send text via paste-buffer route, destroy).
+
+- Default backend remains Ghostty (`TerminalManager`).
+- Opt in via `CROW_TMUX_BACKEND=1` or **Settings → Experimental → Use tmux for managed terminals**. The two sources are OR-merged at launch and frozen for the process lifetime.
+- Per-terminal dispatch happens in `Sources/Crow/App/TerminalRouter.swift` based on `SessionTerminal.backend`.
+- Requires `tmux ≥ 3.3`; missing-tmux is detected at launch and surfaced via a one-shot alert with a `brew install tmux` hint.
+
+The short-term recommendation (offscreen `NSWindow` to unblock surface creation, see PR #105) was implemented earlier and is in production today. PR #218 added retry on Ghostty surface creation failure as a follow-up reliability fix.
+
+See [architecture.md › Terminal Backends](architecture.md#terminal-backends) for the integration layer and [troubleshooting.md](troubleshooting.md) for common tmux-backend failure modes.

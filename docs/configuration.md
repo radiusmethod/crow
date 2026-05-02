@@ -59,8 +59,10 @@ All persistent state lives under `~/Library/Application Support/crow/` (see `Pac
 - **`host`** — set for self-hosted GitLab; exported as `GITLAB_HOST` when invoking `glab`.
 - **`branchPrefix`** — used by the `/crow-workspace` skill when creating new branches.
 - **`excludeDirs`** — ignored when scanning repos for git worktrees.
-- **`excludeReviewRepos`** — repos to hide from the review board (e.g., `["zarf-dev/zarf"]`). Supports `*` wildcards (e.g., `"zarf-dev/*"`). Matching reviews are filtered out from the board, sidebar badge count, and notifications.
-- **`excludeTicketRepos`** — repos to hide from the ticket board (e.g., `["zarf-dev/zarf"]`). Supports `*` wildcards (e.g., `"zarf-dev/*"`). Matching issues are filtered out from the board, pipeline counts, and auto-create candidates.
+- **`excludeReviewRepos`** — repos to hide from the review board (e.g., `["zarf-dev/zarf"]`). Supports `*` wildcards (e.g., `"zarf-dev/*"`). Matching reviews are filtered out from the board, sidebar badge count, and notifications. Editable in Settings → Automation → Reviews.
+- **`excludeTicketRepos`** — repos to hide from the ticket board (e.g., `["zarf-dev/zarf"]`). Supports `*` wildcards (e.g., `"zarf-dev/*"`). Matching issues are filtered out from the board, pipeline counts, and auto-create candidates. Editable in Settings → Automation → Tickets.
+
+For the full set of automation toggles backed by this config, see [automation.md](automation.md).
 
 ## Manager Terminal
 
@@ -90,11 +92,13 @@ Worktrees are created **at the same level as the main repo**, not in a `worktree
 
 ## Environment Variables
 
-| Variable      | Purpose                                                          | Default                        |
-| ------------- | ---------------------------------------------------------------- | ------------------------------ |
-| `CROW_SOCKET` | Override the Unix socket path for CLI ↔ app IPC                  | `~/.local/share/crow/crow.sock` |
-| `TMPDIR`      | Temporary file directory (used by the terminal subsystem)       | System default                 |
-| `GITLAB_HOST` | GitLab instance hostname (set automatically per workspace)      | —                              |
+| Variable              | Purpose                                                                                            | Default                        |
+| --------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `CROW_SOCKET`         | Override the Unix socket path for CLI ↔ app IPC                                                    | `~/.local/share/crow/crow.sock` |
+| `TMPDIR`              | Temporary file directory (used by the terminal subsystem)                                          | System default                 |
+| `GITLAB_HOST`         | GitLab instance hostname (set automatically per workspace from `host` in `config.json`)            | —                              |
+| `CROW_TMUX_BACKEND`   | Set to `1`/`true`/`yes`/`on` to opt into the tmux terminal backend (#229). OR-merged with the Settings → Experimental toggle. Frozen at app launch — relaunch to flip. | unset (Ghostty backend) |
+| `CROW_HOOK_DEBUG`     | Set to `1` to enable `[hook-event]` debug logging                                                  | unset                          |
 
 ## Session Lifecycle
 
