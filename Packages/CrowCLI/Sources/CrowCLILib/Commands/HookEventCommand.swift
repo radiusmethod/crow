@@ -24,10 +24,23 @@ public struct HookEventCmd: ParsableCommand {
 
     public func run() throws {
         let payload = parseHookPayload(from: FileHandle.standardInput.readDataToEndOfFile())
+        try forwardHookEvent(sessionID: session, eventName: event, payload: payload)
+    }
+}
 
+/// Forward a parsed hook event over the Unix socket.
+///
+/// Silently no-ops when the Crow app is not running (socket connection
+/// refused or socket file absent). Hooks are fire-and-forget — a missing
+/// listener is an expected state, not an error, so we must not exit
+/// non-zero or write to stderr (it pollutes Claude Code's hook output).
+/// Other socket errors (timeout, write/read failures) and JSON-RPC
+/// errors still propagate so genuine misbehavior is visible.
+func forwardHookEvent(sessionID: String, eventName: String, payload: [String: JSONValue]) throws {
+    do {
         let result = try rpc("hook-event", params: [
-            "session_id": .string(session),
-            "event_name": .string(event),
+            "session_id": .string(sessionID),
+            "event_name": .string(eventName),
             "payload": .object(payload),
         ])
 
@@ -35,6 +48,8 @@ public struct HookEventCmd: ParsableCommand {
         if result["error"] != nil {
             printJSON(result)
         }
+    } catch SocketError.connectionFailed {
+        return
     }
 }
 

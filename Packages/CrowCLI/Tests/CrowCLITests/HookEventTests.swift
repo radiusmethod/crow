@@ -48,3 +48,20 @@ import CrowIPC
     let payload = parseHookPayload(from: data)
     #expect(payload.isEmpty)
 }
+
+// MARK: - Connection Refused Handling
+
+/// Regression test for #227: when the Crow app is not running, the hook-event
+/// command must silently no-op instead of exiting non-zero. Otherwise Claude
+/// Code surfaces "Stop hook error: …" on every session exit.
+@Test func forwardHookEventSilentWhenAppNotRunning() throws {
+    let nonExistent = NSTemporaryDirectory() + "crow-test-\(UUID().uuidString).sock"
+    setenv("CROW_SOCKET", nonExistent, 1)
+    defer { unsetenv("CROW_SOCKET") }
+
+    try forwardHookEvent(
+        sessionID: UUID().uuidString,
+        eventName: "Stop",
+        payload: [:]
+    )
+}
