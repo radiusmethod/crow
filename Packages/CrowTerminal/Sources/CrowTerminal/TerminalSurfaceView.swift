@@ -36,33 +36,17 @@ public struct TerminalSurfaceView: NSViewRepresentable {
     public func makeNSView(context: Context) -> NSView {
         let surface = surfaceForBackend()
         let container = NSView()
-        container.addSubview(surface)
-        surface.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            surface.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            surface.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            surface.topAnchor.constraint(equalTo: container.topAnchor),
-            surface.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-        ])
-        // Resize after layout settles
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            let size = container.bounds.size
-            if size.width > 0 && size.height > 0 {
-                surface.setFrameSize(size)
-            }
-            surface.window?.makeFirstResponder(surface)
-        }
-        // For tmux backends, switch to this terminal's window now that it's
-        // about to be visible.
-        if backend == .tmux {
-            try? TmuxBackend.shared.makeActive(id: terminalID)
-        }
+        attach(surface: surface, to: container)
+        // makeActive is fired from updateNSView — issuing it here too can
+        // double-fire `tmux select-window` on the same tab activation when
+        // SwiftUI calls update right after make on .id() recreation.
         return container
     }
 
-    /// Re-parent the surface if SwiftUI replaced the container, and resize.
-    /// For tmux backends, also fire makeActive — this is the "tab switched
-    /// to a different tmux terminal" hook in the shared-surface model.
+    /// Re-parent the surface if SwiftUI replaced the container, and acquire
+    /// first responder once the view is in a window. For tmux backends, also
+    /// fire makeActive — this is the "tab switched to a different tmux
+    /// terminal" hook in the shared-surface model.
     @MainActor
     public func updateNSView(_ nsView: NSView, context: Context) {
         guard let surface = existingSurfaceForBackend() else { return }
@@ -72,23 +56,41 @@ public struct TerminalSurfaceView: NSViewRepresentable {
         }
 
         if surface.superview !== nsView {
-            surface.removeFromSuperview()
-            nsView.addSubview(surface)
-            surface.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                surface.leadingAnchor.constraint(equalTo: nsView.leadingAnchor),
-                surface.trailingAnchor.constraint(equalTo: nsView.trailingAnchor),
-                surface.topAnchor.constraint(equalTo: nsView.topAnchor),
-                surface.bottomAnchor.constraint(equalTo: nsView.bottomAnchor),
-            ])
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                let size = nsView.bounds.size
-                if size.width > 0 && size.height > 0 {
-                    surface.setFrameSize(size)
-                }
-                surface.window?.makeFirstResponder(surface)
-            }
+            // addSubview re-parents atomically — no need for an explicit
+            // removeFromSuperview, which would trigger an extra
+            // viewDidMoveToWindow(nil) round-trip and a redundant
+            // ghostty_surface_set_focus(false) on the shared surface.
+            attach(surface: surface, to: nsView)
         }
+
+        // Acquire first responder after AppKit has had a chance to add the
+        // container to the window hierarchy. Scheduling via Task @MainActor
+        // hops to the next main-actor execution without an arbitrary delay,
+        // so rapid tab switches don't stack stale closures against the
+        // (shared, in tmux mode) surface.
+        Task { @MainActor [weak surface] in
+            guard let surface,
+                  let window = nsView.window,
+                  surface.superview === nsView,
+                  surface.window === window else { return }
+            window.makeFirstResponder(surface)
+        }
+    }
+
+    /// Re-parent `surface` into `container` and pin to its edges. Idempotent
+    /// constraint setup: relies on `addSubview` to atomically re-parent and
+    /// on autolayout to drive subsequent `setFrameSize` calls — manual
+    /// `setFrameSize` here races with autolayout and is unnecessary.
+    @MainActor
+    private func attach(surface: GhosttySurfaceView, to container: NSView) {
+        container.addSubview(surface)
+        surface.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            surface.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            surface.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            surface.topAnchor.constraint(equalTo: container.topAnchor),
+            surface.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
     }
 
     @MainActor

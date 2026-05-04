@@ -82,6 +82,7 @@ public final class TerminalManager {
                 return existing
             }
             NSLog("[TerminalManager] surface(for: \(id)) — cached view has nil surface, discarding")
+            existing.removeFromSuperview()
             existing.destroy()
             surfaces.removeValue(forKey: id)
         }
@@ -102,14 +103,20 @@ public final class TerminalManager {
     public func existingSurface(for id: UUID) -> GhosttySurfaceView? { surfaces[id] }
 
     public func destroy(id: UUID) {
-        if let view = surfaces.removeValue(forKey: id) { view.destroy() }
+        if let view = surfaces.removeValue(forKey: id) {
+            view.removeFromSuperview()
+            view.destroy()
+        }
     }
 
     /// Discard the cached view for `id` (if any) and re-run preInitialize.
     /// Used by the UI's "Retry" affordance after a permanent surface-creation failure.
     public func retry(id: UUID, workingDirectory: String, command: String? = nil) {
         NSLog("[TerminalManager] retry(\(id)) — destroying broken surface and re-preInitializing")
-        if let view = surfaces.removeValue(forKey: id) { view.destroy() }
+        if let view = surfaces.removeValue(forKey: id) {
+            view.removeFromSuperview()
+            view.destroy()
+        }
         // Re-arm readiness tracking; surfaceDidFail removed the id from the set.
         monitoredTerminals.insert(id)
         preInitialize(id: id, workingDirectory: workingDirectory, command: command)
