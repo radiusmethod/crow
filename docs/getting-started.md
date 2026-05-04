@@ -170,5 +170,6 @@ Alternatively, you can scaffold without launching the GUI by running the CLI set
 
 - [CLI reference](cli-reference.md) — every `crow` subcommand and its flags
 - [Configuration](configuration.md) — file locations, workspace config schema, directory layout
+- [Automation](automation.md) — Settings → Automation toggles for auto-create, auto-respond, and the rest of the auto-flow
 - [Architecture](architecture.md) — packages, key components, data flow
 - [Troubleshooting](troubleshooting.md) — common errors and fixes

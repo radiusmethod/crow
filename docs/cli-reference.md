@@ -212,6 +212,22 @@ Close a terminal tab in a session.
 crow close-terminal --session <uuid> --terminal <uuid>
 ```
 
+### `crow rename-terminal`
+
+Rename a terminal tab. The new name is positional.
+
+```bash
+crow rename-terminal --session <uuid> --terminal <uuid> "Build watcher"
+```
+
+| Arg / Flag              | Required | Description       |
+| ----------------------- | -------- | ----------------- |
+| `--session`             | yes      | Session UUID      |
+| `--terminal`            | yes      | Terminal UUID     |
+| *(positional)* `NAME`   | yes      | New terminal name |
+
+Returns `{"session_id": "...", "terminal_id": "...", "name": "..."}`.
+
 ### `crow send`
 
 Write text to a terminal. Newlines in `TEXT` are converted to Enter keypresses; include a trailing newline to submit a command.

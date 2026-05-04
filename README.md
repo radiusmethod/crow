@@ -61,6 +61,7 @@ On first launch, a setup wizard guides you through choosing your development roo
 - [**CLI Reference**](docs/cli-reference.md) — Every `crow` subcommand and its flags
 - [**Architecture**](docs/architecture.md) — Packages, key components, data flow
 - [**Configuration**](docs/configuration.md) — File locations, workspace config, directory layout, session lifecycle
+- [**Automation**](docs/automation.md) — Auto-create, auto-respond, auto-complete, and the Settings → Automation tab
 - [**Troubleshooting**](docs/troubleshooting.md) — Build and runtime errors
 
 ## Usage
@@ -68,7 +69,7 @@ On first launch, a setup wizard guides you through choosing your development roo
 ### The Sidebar
 
 - **Tickets** — Assigned issues grouped by project board status (Backlog, Ready, In Progress, In Review, Done in last 24h). Click a status to filter.
-- **Manager** — A persistent Claude Code terminal for orchestrating work. Use `/crow-workspace` here to create new sessions. Launches in `--permission-mode auto` by default so orchestration commands (`crow`, `gh`, `git`) run without per-call approval; opt out via Settings → General → Manager Terminal.
+- **Manager** — A persistent Claude Code terminal for orchestrating work. Use `/crow-workspace` here to create new sessions. Launches in `--permission-mode auto` by default so orchestration commands (`crow`, `gh`, `git`) run without per-call approval; opt out via Settings → Automation → Manager Terminal.
 - **Active Sessions** — One per work context. Shows repo, branch, issue/PR badges with pipeline and review status.
 - **Completed Sessions** — Sessions whose PRs have been merged or issues closed.
 
@@ -113,6 +114,31 @@ This will:
 
 - Sessions automatically move to "Completed" when their linked PR is merged or issue is closed
 - Checked every 60 seconds during the issue polling cycle
+- Requires positive evidence the session was worked, so an unrelated PR merge can't flip an idle session
+
+### Automation Suite
+
+Crow can drive a ticket from assignment to merged with minimal manual steps. Toggles live under **Settings → Automation**; full walkthrough in [docs/automation.md](docs/automation.md).
+
+- **Auto-create workspace** when an issue assigned to you is labeled `crow:auto`
+- **Auto-label PRs** opened from a Crow session with `crow:auto`
+- **Auto-suggest opening a PR** if a session completes with no PR linked
+- **Auto-start review sessions** for opted-in workspaces when a PR becomes reviewable
+- **Auto-respond** to changes-requested reviews and failed CI checks (off by default)
+
+### Review Board
+
+- Multi-select with batch Start Review
+- Bulk delete sessions
+- Filter projects out via `excludeReviewRepos`
+- Quick action buttons on the session detail header (open PR, mark in review, copy branch)
+- Move completed sessions back to active
+
+### Terminals
+
+- Rename tabs from the UI or via `crow rename-terminal`
+- Default Ghostty backend with GPU-accelerated rendering
+- Opt-in tmux backend (experimental) behind `CROW_TMUX_BACKEND` or Settings → Experimental — see [docs/architecture.md#terminal-backends](docs/architecture.md#terminal-backends)
 
 ### Orphan Recovery
 
