@@ -6,7 +6,13 @@ import Testing
 /// flip the live environment from tests, so this exercises the same shape
 /// directly via a free function. The intent is to lock in which spellings
 /// of "true" we accept so the rollout's flag flips are predictable.
-@Suite("FeatureFlags env parsing")
+///
+/// `.serialized` because `tmuxBackendDefaultIsOff` and
+/// `tmuxBackendOnWhenConfigOverrideOn` both mutate the global static
+/// `FeatureFlags.tmuxBackendConfigOverride`. Without serialization the two
+/// tests race on that shared state and the suite fails intermittently
+/// (one test's `= false` reset lands between the other's set + read).
+@Suite("FeatureFlags env parsing", .serialized)
 struct FeatureFlagsTests {
 
     /// Mirror of the parsing rule in `FeatureFlags.boolFlag`. If the
