@@ -274,16 +274,17 @@ final class IssueTracker {
             // for every viewer (which routinely returned 100 PRs / ~86 KB).
             let openPRURLs = Set(ghResult.viewerPRs.map(\.url))
             let staleCandidateURLs = collectStalePRURLs(excluding: openPRURLs)
-            // nil here means the follow-up fetch errored (rate limit, exit != 0,
-            // parse failure). We thread that through to auto-complete so
-            // "PR missing from payload" doesn't get treated as "PR is closed"
-            // on a degraded response. An empty list with no candidate URLs is
-            // a real empty success.
-            let staleFetchResult: [ViewerPR]? = staleCandidateURLs.isEmpty
-                ? []
+            // `complete == false` means at least one provider's follow-up errored
+            // (rate limit, exit != 0, parse failure). We thread that through to
+            // auto-complete so "PR missing from payload" doesn't get treated as
+            // "PR is closed" on a degraded response. Partial-success is allowed:
+            // PRs from the working provider still flow through so merged badges
+            // can flip even if the other provider failed.
+            let staleFetch = staleCandidateURLs.isEmpty
+                ? StalePRFetchResult(prs: [], complete: true)
                 : await fetchStalePRStates(urls: staleCandidateURLs)
-            let stalePRs = staleFetchResult ?? []
-            let prDataComplete = staleFetchResult != nil
+            let stalePRs = staleFetch.prs
+            let prDataComplete = staleFetch.complete
             let allKnownPRs = Self.dedupedByURL(ghResult.viewerPRs + stalePRs)
 
             applyPRStatuses(viewerPRs: allKnownPRs)
@@ -665,20 +666,73 @@ final class IssueTracker {
         return Array(urls)
     }
 
-    /// Fetch state for a small set of PRs in one aliased GraphQL query.
-    /// Used for PRs that are linked to a session but are no longer in the
-    /// open viewer set (typically merged or closed). Returns minimal `ViewerPR`
-    /// records — only `state`, `url`, repo, and branch refs are populated;
-    /// checks/reviews are left empty since they're moot for closed PRs.
-    /// Returns `nil` if the shell call or response parse fails, so callers
-    /// can distinguish a partial fetch from a successful empty result.
-    private func fetchStalePRStates(urls: [String]) async -> [ViewerPR]? {
+    /// Result of a stale-PR follow-up: any PRs successfully fetched, plus
+    /// whether every provider call returned cleanly. `complete == false`
+    /// signals downstream auto-completion to treat the cycle as degraded.
+    private struct StalePRFetchResult {
+        var prs: [ViewerPR]
+        var complete: Bool
+    }
+
+    /// Fetch state for a small set of PRs/MRs that are linked to a session
+    /// but no longer in the open viewer set (typically merged or closed).
+    /// Splits URLs by provider — GitHub PRs go through one batched aliased
+    /// `gh api graphql` call, GitLab MRs go through one `glab api` call per
+    /// MR (with `GITLAB_HOST` set per host). A failure on either side marks
+    /// the result incomplete but doesn't suppress the other side's PRs.
+    /// Returns minimal `ViewerPR` records — only `state`, `url`, repo, and
+    /// branch refs are populated; checks/reviews are left empty since
+    /// they're moot for closed PRs.
+    private func fetchStalePRStates(urls: [String]) async -> StalePRFetchResult {
         // Parse each URL into (owner, repo, number); skip any we can't parse.
-        var parsed: [(url: String, owner: String, repo: String, number: Int)] = []
+        var githubParsed: [(url: String, owner: String, repo: String, number: Int)] = []
+        var gitlabParsedByHost: [String: [(url: String, slug: String, number: Int)]] = [:]
         for url in urls {
+            if let g = Self.parseGitLabMRURL(url) {
+                gitlabParsedByHost[g.host, default: []].append((url, g.slug, g.number))
+                continue
+            }
             guard let p = ProviderManager.parseTicketURLComponents(url) else { continue }
-            parsed.append((url, p.org, p.repo, p.number))
+            // Anything not parsed as GitLab is treated as GitHub. The
+            // ProviderManager parser covers github.com URLs; self-hosted
+            // GitLab URLs are caught above by `parseGitLabMRURL`.
+            if let host = URL(string: url)?.host, host != "github.com" {
+                // Unrecognized host that didn't match the GitLab MR shape —
+                // skip rather than blindly route to gh.
+                continue
+            }
+            githubParsed.append((url, p.org, p.repo, p.number))
         }
+        guard !githubParsed.isEmpty || !gitlabParsedByHost.isEmpty else {
+            return StalePRFetchResult(prs: [], complete: true)
+        }
+
+        var prs: [ViewerPR] = []
+        var complete = true
+
+        if !githubParsed.isEmpty {
+            if let ghPRs = await fetchStalePRStatesGitHub(parsed: githubParsed) {
+                prs.append(contentsOf: ghPRs)
+            } else {
+                complete = false
+            }
+        }
+
+        for (host, parsed) in gitlabParsedByHost {
+            let (mrPRs, ok) = await fetchStaleMRStatesGitLab(parsed: parsed, host: host)
+            prs.append(contentsOf: mrPRs)
+            if !ok { complete = false }
+        }
+
+        return StalePRFetchResult(prs: prs, complete: complete)
+    }
+
+    /// GitHub stale-PR fetch: one aliased GraphQL query covering every
+    /// (owner, repo, number) tuple. Returns `nil` on shell error or rate
+    /// limit so the caller can mark the cycle incomplete.
+    private func fetchStalePRStatesGitHub(
+        parsed: [(url: String, owner: String, repo: String, number: Int)]
+    ) async -> [ViewerPR]? {
         guard !parsed.isEmpty else { return [] }
 
         // Build aliased query: pr0, pr1, ... each fetching one pullRequest.
@@ -717,6 +771,117 @@ final class IssueTracker {
             return nil
         }
         return parseStalePRResponse(result.stdout, count: parsed.count)
+    }
+
+    /// GitLab stale-MR fetch: one `glab api projects/{slug}/merge_requests/{iid}`
+    /// per MR for a given host. GitLab's REST API doesn't support batching by
+    /// IDs the way GitHub's GraphQL does, but the per-cycle stale set is
+    /// usually tiny (sessions with merged/closed PRs that haven't been
+    /// auto-completed yet). Returns `(prs, ok)` where `ok` is false if any
+    /// call for this host failed.
+    private func fetchStaleMRStatesGitLab(
+        parsed: [(url: String, slug: String, number: Int)],
+        host: String
+    ) async -> ([ViewerPR], Bool) {
+        var prs: [ViewerPR] = []
+        var ok = true
+        for entry in parsed {
+            let encodedSlug = entry.slug.addingPercentEncoding(
+                withAllowedCharacters: .alphanumerics
+            ) ?? entry.slug
+            let endpoint = "projects/\(encodedSlug)/merge_requests/\(entry.number)"
+
+            let output: String
+            do {
+                output = try await shell(env: ["GITLAB_HOST": host], cwd: NSHomeDirectory(), "glab", "api", endpoint)
+            } catch {
+                print("[IssueTracker] Stale-PR follow-up failed for \(entry.slug)!\(entry.number) on \(host): \(error.localizedDescription.prefix(200))")
+                ok = false
+                continue
+            }
+            if let pr = Self.parseGitLabStaleMRResponse(output, fallbackURL: entry.url, fallbackSlug: entry.slug) {
+                prs.append(pr)
+            } else {
+                ok = false
+            }
+        }
+        return (prs, ok)
+    }
+
+    /// Parse a GitLab `projects/{slug}/merge_requests/{iid}` REST response
+    /// into a minimal `ViewerPR`. State is normalized to GitHub's
+    /// `OPEN|MERGED|CLOSED` so downstream code stays provider-agnostic.
+    /// Returns nil if the JSON shape doesn't match.
+    nonisolated static func parseGitLabStaleMRResponse(
+        _ output: String,
+        fallbackURL: String,
+        fallbackSlug: String
+    ) -> ViewerPR? {
+        guard let data = output.data(using: .utf8),
+              let item = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        guard let number = item["iid"] as? Int else { return nil }
+        let url = (item["web_url"] as? String) ?? fallbackURL
+        let rawState = (item["state"] as? String) ?? ""
+        let state = normalizeGitLabPRState(rawState)
+        let headRefName = (item["source_branch"] as? String) ?? ""
+        let baseRefName = (item["target_branch"] as? String) ?? ""
+        let headRefOid = (item["sha"] as? String) ?? ""
+        let isDraft = (item["draft"] as? Bool) ?? (item["work_in_progress"] as? Bool) ?? false
+
+        return ViewerPR(
+            number: number,
+            url: url,
+            state: state,
+            mergeable: "UNKNOWN",
+            reviewDecision: "",
+            isDraft: isDraft,
+            headRefName: headRefName,
+            headRefOid: headRefOid,
+            baseRefName: baseRefName,
+            repoNameWithOwner: fallbackSlug,
+            linkedIssueReferences: [],
+            checksState: "",
+            failedCheckNames: [],
+            latestReviewStates: []
+        )
+    }
+
+    /// Normalize GitLab MR state strings to the GitHub `state` vocabulary
+    /// the rest of the codebase reads (`OPEN`/`MERGED`/`CLOSED`). Falls back
+    /// to upper-casing the raw value for unrecognized states (matches
+    /// `fetchGitLabMRsForReconcile`).
+    nonisolated static func normalizeGitLabPRState(_ raw: String) -> String {
+        switch raw {
+        case "opened": return "OPEN"
+        case "merged": return "MERGED"
+        case "closed": return "CLOSED"
+        default:       return raw.uppercased()
+        }
+    }
+
+    /// Parse a GitLab MR URL into (host, slug, number). Robust to nested
+    /// groups (slug is everything between the host and `/-/merge_requests/`).
+    /// Returns nil for non-GitLab-MR URLs.
+    nonisolated static func parseGitLabMRURL(_ url: String) -> (host: String, slug: String, number: Int)? {
+        guard let protoRange = url.range(of: "://") else { return nil }
+        let afterProto = String(url[protoRange.upperBound...])
+        guard let mrRange = afterProto.range(of: "/-/merge_requests/") else { return nil }
+        let leading = String(afterProto[..<mrRange.lowerBound])
+        let trailing = String(afterProto[mrRange.upperBound...])
+
+        let leadParts = leading.split(separator: "/").map(String.init)
+        guard leadParts.count >= 3 else { return nil }
+        let host = leadParts[0]
+        let slug = leadParts.dropFirst().joined(separator: "/")
+
+        // `trailing` is everything after `/-/merge_requests/` — usually just
+        // the MR number, occasionally `<n>/diffs` or similar from a deep
+        // link. Take the first segment as the number.
+        let trailParts = trailing.split(separator: "/").map(String.init)
+        guard let first = trailParts.first, let number = Int(first) else { return nil }
+        return (host, slug, number)
     }
 
     private func parseStalePRResponse(_ output: String, count: Int) -> [ViewerPR]? {
@@ -1276,13 +1441,7 @@ final class IssueTracker {
                 guard let number = item["iid"] as? Int,
                       let url = item["web_url"] as? String else { continue }
                 let rawState = (item["state"] as? String) ?? ""
-                let normalized: String
-                switch rawState {
-                case "opened": normalized = "OPEN"
-                case "merged": normalized = "MERGED"
-                case "closed": normalized = "CLOSED"
-                default: normalized = rawState.uppercased()
-                }
+                let normalized = Self.normalizeGitLabPRState(rawState)
                 let updatedAt = (item["updated_at"] as? String).flatMap { dateFormatter.date(from: $0) }
                 matches.append(ReconcileBranchMatch(
                     sessionID: candidate.sessionID,
