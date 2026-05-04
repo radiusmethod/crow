@@ -11,6 +11,7 @@ import CrowTelemetry
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var settingsWindow: NSWindow?
+    private var settingsWindowCloseObserver: NSObjectProtocol?
     private var aboutWindow: NSWindow?
     private let appState = AppState()
     private var store: JSONStore?
@@ -589,9 +590,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showSettings() {
         guard let devRoot, let appConfig else { return }
 
-        // Settings is app-modal — the user must dismiss it before returning
-        // to the main app. (`NSApp.runModal(for:)` blocks until stopModal
-        // is called; we trigger that on the window's willClose notification.)
+        if let existing = settingsWindow {
+            existing.makeKeyAndOrderFront(nil)
+            return
+        }
+
         let settingsView = SettingsView(
             appState: appState,
             devRoot: devRoot,
@@ -617,21 +620,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         win.isReleasedWhenClosed = false
         win.contentView = hostingView
         win.center()
+        win.makeKeyAndOrderFront(nil)
         self.settingsWindow = win
 
-        let token = NotificationCenter.default.addObserver(
+        settingsWindowCloseObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: win,
             queue: .main
-        ) { _ in
-            // .main queue dispatches to the main thread, but Swift 6 doesn't
-            // statically know that's the MainActor's executor. NSApp is
+        ) { [weak self] _ in
+            // .main queue dispatches on the main thread, but Swift 6 doesn't
+            // statically know that's the MainActor's executor. AppDelegate is
             // MainActor-isolated; assume isolation explicitly.
-            MainActor.assumeIsolated { NSApp.stopModal() }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.settingsWindow = nil
+                if let token = self.settingsWindowCloseObserver {
+                    NotificationCenter.default.removeObserver(token)
+                    self.settingsWindowCloseObserver = nil
+                }
+            }
         }
-        NSApp.runModal(for: win)
-        NotificationCenter.default.removeObserver(token)
-        self.settingsWindow = nil
     }
 
     private func saveSettings(devRoot: String, config: AppConfig) {
