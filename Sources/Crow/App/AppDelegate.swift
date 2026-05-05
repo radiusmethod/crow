@@ -26,12 +26,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appConfig: AppConfig?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installUncaughtExceptionHandler()
+
         // Check for devRoot pointer
         if let root = ConfigStore.loadDevRoot() {
             devRoot = root
             launchMainApp()
         } else {
             showSetupWizard()
+        }
+    }
+
+    /// Capture ObjC exceptions that would otherwise tear the app down
+    /// silently. The macOS crash reporter handles Mach exceptions / pure
+    /// SIGSEGV on its own, but ObjC exceptions thrown out of AppKit or
+    /// libghostty wrappers can `abort()` without producing a useful .ips
+    /// file. Logging name + reason + symbolicated stack to NSLog routes
+    /// them into Console.app and the unified log so the next reproduction
+    /// of issue #240 (and similar) is debuggable.
+    private func installUncaughtExceptionHandler() {
+        NSSetUncaughtExceptionHandler { exception in
+            let symbols = exception.callStackSymbols.joined(separator: "\n")
+            NSLog(
+                "[CrowCrash] uncaught NSException name=\(exception.name.rawValue) " +
+                "reason=\(exception.reason ?? "<nil>")\n\(symbols)"
+            )
         }
     }
 
