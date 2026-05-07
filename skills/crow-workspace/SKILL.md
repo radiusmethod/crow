@@ -299,6 +299,8 @@ For cross-workspace setups with multiple repos, call `setup.sh` once per repo:
 
 The baseline covers commands the prompt template instructs sessions to run on step 1 (`gh issue view`, `glab issue view`, `gh pr view`), the git operations a feature branch needs (`status`, `diff`, `add`, `commit`, `push`, …), common shell utilities (`cat`, `grep`, `jq`, `tee`), and redirects to `$TMPDIR` / `/tmp/claude`.
 
+The template also sets `sandbox.exclude_commands: [git, crow, gh, glab]` so users who have the sandbox enabled don't get an "unsandboxed" prompt for these commands. Crucially the template does **not** set `sandbox.enabled` — that key takes the highest-precedence value across scopes, so omitting it keeps each user's existing sandbox preference (off stays off, on stays on); the exclude list is a no-op when sandbox is disabled.
+
 If `{worktree}/.claude/settings.local.json` already exists (e.g. checked in by the repo, or left over from a previous setup run), the script leaves it untouched. Edit `session-settings.template.json` to extend the baseline.
 
 ## First Prompt Template

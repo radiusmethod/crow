@@ -75,5 +75,8 @@
       "Glob",
       "Grep"
     ]
+  },
+  "sandbox": {
+    "exclude_commands": ["git", "crow", "gh", "glab"]
   }
 }
