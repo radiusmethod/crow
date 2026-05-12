@@ -222,6 +222,12 @@ public final class AppState {
     /// watch timed out before the shell signaled it was interactive.
     public var onRetryReadiness: ((UUID) -> Void)?  // receives terminal ID
 
+    /// Called when the user clicks "Copy diagnostics" on a terminal whose
+    /// tmux readiness watch timed out. The handler captures a multi-section
+    /// bundle (wrapper log, pane capture, ps tree, sentinel state) and
+    /// places it on the clipboard (issue #256).
+    public var onCopyDiagnostics: ((UUID) -> Void)?  // receives terminal ID
+
     /// Called to add a new plain-shell terminal tab to a session.
     public var onAddTerminal: ((UUID) -> Void)?  // receives session ID
 

@@ -312,6 +312,17 @@ final class SessionService {
         TmuxBackend.shared.retryReadinessWatch(id: terminalID)
     }
 
+    /// Capture a stage-by-stage diagnostic bundle for `terminalID` (wrapper
+    /// log, pane capture, ps tree, sentinel state) and copy it to the
+    /// clipboard so a teammate hitting the .timedOut state can paste it
+    /// into a comment without screenshot-archaeology (issue #256).
+    func copyDiagnostics(terminalID: UUID) {
+        let bundle = TmuxBackend.shared.captureDiagnostics(id: terminalID)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(bundle, forType: .string)
+        NSLog("[SessionService] copied tmux diagnostics for terminal=\(terminalID) bytes=\(bundle.utf8.count)")
+    }
+
     /// Re-arm any tmux readiness watches that have stalled while the app
     /// was backgrounded. Called from `NSApplication.didBecomeActiveNotification`
     /// so a user who returns to a long-idle app doesn't have to click

@@ -212,6 +212,21 @@ public struct TmuxController: Sendable {
 
     // MARK: - Diagnostic
 
+    /// `tmux capture-pane -p -t <target> -S -<linesBack>`. Returns the
+    /// visible pane contents (last `linesBack` lines). Used by the readiness
+    /// timeout diagnostics to show what state the shell got stuck in
+    /// (issue #256).
+    public func capturePane(target: String, linesBack: Int = 200) throws -> String {
+        try run(["capture-pane", "-p", "-t", target, "-S", "-\(linesBack)"])
+    }
+
+    /// `tmux display-message -p -t <target> <format>`. Used by the readiness
+    /// timeout diagnostics to read `#{pane_pid}` and `#{pane_current_command}`
+    /// for the wedged window (issue #256).
+    public func displayMessage(target: String, format: String) throws -> String {
+        try run(["display-message", "-p", "-t", target, format])
+    }
+
     public static func versionString(tmuxBinary: String) -> String? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: tmuxBinary)
