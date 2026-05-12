@@ -321,6 +321,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             service?.retryReadiness(terminalID: terminalID)
         }
 
+        appState.onCopyDiagnostics = { [weak service] terminalID in
+            service?.copyDiagnostics(terminalID: terminalID)
+        }
+
         // Wire terminal tab management
         appState.onAddTerminal = { [weak service] sessionID in
             service?.addTerminal(sessionID: sessionID)

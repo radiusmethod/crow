@@ -516,6 +516,8 @@ struct ReadinessAwareTerminal: View {
     let terminal: SessionTerminal
     @Bindable var appState: AppState
 
+    @State private var diagnosticsCopied = false
+
     private var readiness: TerminalReadiness {
         appState.terminalReadiness[terminal.id] ?? .claudeLaunched  // Default for non-tracked terminals
     }
@@ -568,11 +570,27 @@ struct ReadinessAwareTerminal: View {
                         .foregroundStyle(CorveilTheme.textMuted)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
-                    Button("Retry") {
-                        appState.onRetryReadiness?(terminal.id)
+                    HStack(spacing: 10) {
+                        Button("Retry") {
+                            appState.onRetryReadiness?(terminal.id)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+
+                        // Bundles wrapper-stage log + pane capture + ps tree +
+                        // sentinel state onto the clipboard so reporters can
+                        // paste a one-shot diagnostic into a comment instead
+                        // of describing the symptom (issue #256).
+                        Button(diagnosticsCopied ? "Copied!" : "Copy diagnostics") {
+                            appState.onCopyDiagnostics?(terminal.id)
+                            diagnosticsCopied = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                diagnosticsCopied = false
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
