@@ -161,4 +161,33 @@ struct TmuxBackendTests {
         #expect(received.contains(.timedOut))
         #expect(!received.contains(.shellReady))
     }
+
+    @Test func ensureRunningServerScrubsContaminatingEnvVars() throws {
+        // Plant a synthetic CMUX_* var in the parent process before the
+        // backend starts the server. The scrub runs in
+        // `ensureRunningServer`, which `registerTerminal` triggers via
+        // its first call.
+        setenv("CMUX_FOO", "1", 1)
+        defer { unsetenv("CMUX_FOO") }
+
+        let backend = makeBackend()
+        defer { backend.shutdown() }
+
+        _ = try backend.registerTerminal(
+            id: UUID(), name: "scrub-test", cwd: NSHomeDirectory(),
+            command: nil, trackReadiness: false
+        )
+
+        // Talk to the same server the backend just launched.
+        let ctrl = TmuxController(
+            tmuxBinary: discoveredTmuxBinary!,
+            socketPath: backend.socketPath,
+            sessionName: TmuxBackend.cockpitSessionName
+        )
+        let env = try ctrl.showGlobalEnv()
+        // After `set-environment -g -u CMUX_FOO`, tmux either omits the
+        // var entirely or lists it as `-CMUX_FOO` (marked for removal).
+        // The unscrubbed assignment must not appear.
+        #expect(!env.contains("CMUX_FOO=1"))
+    }
 }

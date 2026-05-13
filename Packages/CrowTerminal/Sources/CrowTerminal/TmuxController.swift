@@ -104,6 +104,19 @@ public struct TmuxController: Sendable {
         return out.split(separator: "\n").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
     }
 
+    /// Mark `name` as removed in the server's global environment so new
+    /// windows do not inherit it from the env tmux was launched with
+    /// (issue #259).
+    public func unsetGlobalEnv(_ name: String) throws {
+        try run(["set-environment", "-g", "-u", name])
+    }
+
+    /// `tmux show-environment -g`. Returns the global env one entry per
+    /// line (`NAME=value` for set vars, `-NAME` for vars marked removed).
+    public func showGlobalEnv() throws -> String {
+        try run(["show-environment", "-g"])
+    }
+
     // MARK: - Windows
 
     public func newWindow(

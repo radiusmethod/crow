@@ -348,7 +348,65 @@ public final class TmuxBackend {
             command: "/usr/bin/tail -f /dev/null"
         )
         controller = ctrl
+        scrubInheritedHostTerminalEnv(ctrl: ctrl)
         return ctrl
+    }
+
+    /// Host-terminal env-var families that must not propagate from the
+    /// CrowApp process into the tmux server's global env. When inherited,
+    /// these trigger oh-my-zsh integration code paths (notably
+    /// `CMUX_LOAD_GHOSTTY_ZSH_INTEGRATION`) whose `$(...)` subshell
+    /// deadlocks the shell that backs each tmux window — the readiness
+    /// sentinel never fires and the watch reports `.timedOut`. See #259.
+    private static let hostTerminalEnvPrefixes: [String] = [
+        "CMUX_",
+        "GHOSTTY_",
+        "ITERM_",
+        "KITTY_",
+        "WEZTERM_",
+        "ALACRITTY_",
+    ]
+
+    /// Single-key host-terminal markers. `TERMINFO`/`TERMINFO_DIRS` are
+    /// scrubbed unconditionally if present — tmux falls back to the
+    /// system terminfo, which is what the cockpit shells expect.
+    private static let hostTerminalEnvExact: Set<String> = [
+        "TERM_PROGRAM",
+        "TERM_PROGRAM_VERSION",
+        "TERMINFO",
+        "TERMINFO_DIRS",
+    ]
+
+    /// Remove host-terminal contamination from the freshly-started tmux
+    /// server's global env. Runs once per server launch from
+    /// `ensureRunningServer` immediately after `newSessionDetached`. The
+    /// session anchor (`tail -f /dev/null`) doesn't care about env, and
+    /// no user-visible window has been created yet, so scrubbing here is
+    /// safe and affects every subsequent `new-window`.
+    private func scrubInheritedHostTerminalEnv(ctrl: TmuxController) {
+        let env = ProcessInfo.processInfo.environment
+        var toScrub: [String] = []
+        for key in env.keys {
+            if Self.hostTerminalEnvExact.contains(key) {
+                toScrub.append(key)
+                continue
+            }
+            if Self.hostTerminalEnvPrefixes.contains(where: { key.hasPrefix($0) }) {
+                toScrub.append(key)
+            }
+        }
+        guard !toScrub.isEmpty else { return }
+        toScrub.sort()
+        for name in toScrub {
+            do {
+                try ctrl.unsetGlobalEnv(name)
+            } catch {
+                // Best-effort: a single var we can't unset shouldn't wedge
+                // server startup. Log and keep going.
+                NSLog("[CrowTelemetry tmux:env_scrub_failed var=\(name) error=\"\(error)\"]")
+            }
+        }
+        NSLog("[CrowTelemetry tmux:env_scrubbed vars=\(toScrub.joined(separator: ","))]")
     }
 
     private func sentinelPath(for id: UUID) -> String {
