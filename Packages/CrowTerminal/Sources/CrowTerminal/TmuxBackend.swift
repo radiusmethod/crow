@@ -241,16 +241,47 @@ public final class TmuxBackend {
     /// Send text to `id`'s window via the buffer-paste path. Works for
     /// arbitrary-size payloads (Phase 3 §3 finding: send-keys -l fails
     /// on >10KB; load-buffer + paste-buffer scales to 50KB+ in 133ms).
+    ///
+    /// Quirk: Claude Code's TUI enables bracketed-paste mode, which wraps
+    /// `paste-buffer` output in `\e[200~…\e[201~`. A trailing `\n` inside the
+    /// bracket is treated as literal text, not as Enter — so prompts that
+    /// rely on `\n` to submit (quick actions, auto-respond) get pasted but
+    /// never submitted (#264). Strip the trailing newline before pasting and
+    /// deliver a separate `Enter` via `send-keys` afterwards, mirroring what
+    /// `GhosttySurfaceView.writeText` does with keycode 36.
+    ///
+    /// A 50ms delay between the paste and the Enter keystroke gives the TUI
+    /// time to process the bracket-end sequence (`\e[201~`). Without this,
+    /// auto-respond prompts (which fire when the terminal has been idle) can
+    /// race: the Enter arrives before the TUI finishes handling the paste,
+    /// causing it to be silently dropped (#272).
     public func sendText(id: UUID, text: String) throws {
         guard let windowIndex = bindings[id] else {
             throw TmuxBackendError.unknownTerminal(id)
         }
         do {
             let ctrl = try ensureRunningServer()
-            let bufferName = "crow-\(id.uuidString)"
-            try ctrl.loadBufferFromStdin(name: bufferName, data: Data(text.utf8))
-            defer { ctrl.deleteBuffer(name: bufferName) }
-            try ctrl.pasteBuffer(name: bufferName, target: "\(ctrl.sessionName):\(windowIndex)")
+            let target = "\(ctrl.sessionName):\(windowIndex)"
+            let endsWithNewline = text.hasSuffix("\n")
+            let payload = endsWithNewline ? String(text.dropLast()) : text
+
+            var didPaste = false
+            if !payload.isEmpty {
+                let bufferName = "crow-\(id.uuidString)"
+                try ctrl.loadBufferFromStdin(name: bufferName, data: Data(payload.utf8))
+                defer { ctrl.deleteBuffer(name: bufferName) }
+                try ctrl.pasteBuffer(name: bufferName, target: target)
+                didPaste = true
+            }
+            if endsWithNewline {
+                // Give the TUI time to process the paste bracket-end before
+                // the Enter key arrives. Only needed when we actually pasted
+                // content — a bare "\n" (Enter-only) needs no delay.
+                if didPaste {
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+                try ctrl.sendKeys(target: target, keys: ["Enter"])
+            }
         } catch {
             reportIfTimeout(error)
             throw error

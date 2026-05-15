@@ -125,6 +125,42 @@ struct TmuxBackendTests {
         #expect(binding.windowIndex >= 0)
     }
 
+    @Test func sendTextWithTrailingNewlineDoesNotThrow() throws {
+        let backend = makeBackend()
+        defer { backend.shutdown() }
+
+        let id = UUID()
+        _ = try backend.registerTerminal(
+            id: id,
+            name: "newline-test",
+            cwd: NSHomeDirectory(),
+            command: nil,
+            trackReadiness: false
+        )
+
+        // Trailing \n triggers the paste + separate Enter path (#264/#272).
+        // Verify the full code path executes without throwing.
+        let payload = "AUTO-RESPOND-TEST-\(UUID().uuidString)\n"
+        try backend.sendText(id: id, text: payload)
+    }
+
+    @Test func sendTextEmptyWithNewlineDoesNotThrow() throws {
+        let backend = makeBackend()
+        defer { backend.shutdown() }
+
+        let id = UUID()
+        _ = try backend.registerTerminal(
+            id: id,
+            name: "bare-enter",
+            cwd: NSHomeDirectory(),
+            command: nil,
+            trackReadiness: false
+        )
+
+        // Edge case: bare "\n" should only send Enter (no paste).
+        try backend.sendText(id: id, text: "\n")
+    }
+
     @Test func retryReadinessEmitsTimedOutWhenSentinelMissing() async throws {
         let backend = makeBackend()
         defer { backend.shutdown() }
