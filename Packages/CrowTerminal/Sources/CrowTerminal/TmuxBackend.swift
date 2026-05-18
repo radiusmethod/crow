@@ -58,6 +58,11 @@ public final class TmuxBackend {
     /// on destroy. Issue #256.
     private var wrapperLogs: [UUID: String] = [:]
 
+    /// UUID → in-flight readiness watch Tasks (the 10s progress beacon and
+    /// the waiter). `destroyTerminal` cancels these so they don't fire
+    /// `onReadinessChanged` for a tab the user just closed. Issue #282.
+    private var readinessTasks: [UUID: [Task<Void, Never>]] = [:]
+
     /// Offscreen window the shared surface lives in until SwiftUI re-parents
     /// it into the visible UI. Same trick the Ghostty path uses for
     /// background surface creation.
@@ -294,6 +299,10 @@ public final class TmuxBackend {
             controller?.killWindow(index: windowIndex)
         }
         bindings.removeValue(forKey: id)
+        // Cancel in-flight readiness watch Tasks so a 30s waiter doesn't
+        // fire `onReadinessChanged` against a stale id long after the tab
+        // is gone (issue #282).
+        readinessTasks.removeValue(forKey: id)?.forEach { $0.cancel() }
         if let sentinelPath = sentinels.removeValue(forKey: id) {
             try? FileManager.default.removeItem(atPath: sentinelPath)
         }
@@ -417,7 +426,7 @@ public final class TmuxBackend {
                 NSLog("[CrowTelemetry tmux:first_prompt_progress terminal=\(id) elapsed_ms=\(elapsed) sentinel_exists=\(exists)]")
             }
         }
-        Task { [weak self] in
+        let waiterTask = Task { [weak self] in
             // 30s default budget (was 5s). On app restart with many managed
             // terminals hydrating concurrently, shell startup is CPU-contended
             // and the wrapper's first precmd may not fire within 5s. Callers
@@ -428,7 +437,11 @@ public final class TmuxBackend {
             )
             progressTask.cancel()
             await MainActor.run { [weak self] in
-                guard let self else { return }
+                // Bail if the terminal was destroyed (or the backend went
+                // away) while we were waiting. Without this guard a 30s
+                // waiter could fire readiness for a tab the user closed
+                // 29s ago — issue #282.
+                guard let self, self.bindings[id] != nil else { return }
                 if let elapsed {
                     let ms = Int(elapsed * 1000)
                     NSLog("[CrowTelemetry tmux:first_prompt_ms=\(ms) terminal=\(id)]")
@@ -459,6 +472,11 @@ public final class TmuxBackend {
                 }
             }
         }
+        // Track both Tasks so `destroyTerminal` can cancel them (#282).
+        // `retryReadinessWatch` may call us again for the same id; the
+        // previous Tasks are already resolved (or about to be), so appending
+        // here rather than replacing keeps the contract simple.
+        readinessTasks[id, default: []].append(contentsOf: [progressTask, waiterTask])
     }
 
     /// Re-arm the readiness watch for a terminal whose first attempt timed
