@@ -38,10 +38,18 @@ public struct SentinelWaiter: Sendable {
         let nanosPerInterval = UInt64(pollInterval * 1_000_000_000)
         let fm = FileManager.default
         while Date() < deadline {
+            // Cancellation: TmuxBackend.destroyTerminal cancels the waiter
+            // Task when the user closes a tab. Without this check, `try?`
+            // below would swallow `CancellationError` and the loop would
+            // tighten into a `fileExists` spin until the deadline (#282
+            // review). Re-check before the sleep too in case cancellation
+            // arrives mid-iteration.
+            if Task.isCancelled { return nil }
             if fm.fileExists(atPath: sentinelPath) {
                 return Date().timeIntervalSince(start)
             }
             try? await Task.sleep(nanoseconds: nanosPerInterval)
+            if Task.isCancelled { return nil }
         }
         return nil
     }

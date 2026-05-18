@@ -996,7 +996,6 @@ final class SessionService {
               let terminal = terminals.first(where: { $0.id == terminalID }),
               !terminal.isManaged else { return }
 
-        TerminalRouter.destroy(terminal)
         appState.terminals[sessionID]?.removeAll { $0.id == terminalID }
         appState.terminalReadiness.removeValue(forKey: terminalID)
         appState.autoLaunchTerminals.remove(terminalID)
@@ -1006,6 +1005,21 @@ final class SessionService {
         }
 
         store.mutate { data in data.terminals.removeAll { $0.id == terminalID } }
+
+        // Defer the backing destroy so SwiftUI's render pass detaches the
+        // GhosttySurfaceView from the view hierarchy before we free its
+        // underlying `ghostty_surface_t` (or kill the tmux window). Freeing
+        // it while AppKit still holds the view risks a Metal/input callback
+        // landing on a dangling pointer (issue #282).
+        //
+        // Note: single-tick defer is a conservative first attempt. Neither
+        // Combine nor DispatchQueue strictly guarantee ordering against the
+        // SwiftUI CATransaction commit; if #282 recurs the next step is a
+        // two-tick defer (nested `DispatchQueue.main.async`) or moving the
+        // destroy to a runloop-quiesce sweep.
+        DispatchQueue.main.async {
+            TerminalRouter.destroy(terminal)
+        }
     }
 
     /// Rename a terminal tab. Returns `false` if the terminal was not found or the name is invalid.
@@ -1046,11 +1060,6 @@ final class SessionService {
     func closeGlobalTerminal(terminalID: UUID) {
         let sessionID = AppState.globalTerminalSessionID
         let terminal = appState.terminals[sessionID]?.first(where: { $0.id == terminalID })
-        if let terminal {
-            TerminalRouter.destroy(terminal)
-        } else {
-            TerminalManager.shared.destroy(id: terminalID)
-        }
         appState.terminals[sessionID]?.removeAll { $0.id == terminalID }
 
         if appState.activeTerminalID[sessionID] == terminalID {
@@ -1058,6 +1067,16 @@ final class SessionService {
         }
 
         store.mutate { data in data.terminals.removeAll { $0.id == terminalID } }
+
+        // Defer the backing destroy so SwiftUI detaches the view before the
+        // underlying surface is freed (issue #282). Mirrors `closeTerminal`.
+        DispatchQueue.main.async {
+            if let terminal {
+                TerminalRouter.destroy(terminal)
+            } else {
+                TerminalManager.shared.destroy(id: terminalID)
+            }
+        }
     }
 
     // MARK: - Review Session
