@@ -22,6 +22,9 @@ public struct AppConfig: Codable, Sendable, Equatable {
     /// session UUID alongside the standard `Co-Authored-By: Claude` trailer.
     public var attributionTrailers: Bool
     public var cleanup: CleanupConfig
+    /// The agent used for newly created sessions when none is specified.
+    /// Existing persisted configs without this key decode to `.claudeCode`.
+    public var defaultAgentKind: AgentKind
 
     public init(
         workspaces: [WorkspaceInfo] = [],
@@ -34,7 +37,8 @@ public struct AppConfig: Codable, Sendable, Equatable {
         autoRespond: AutoRespondSettings = AutoRespondSettings(),
         experimentalTmuxBackend: Bool = false,
         attributionTrailers: Bool = true,
-        cleanup: CleanupConfig = CleanupConfig()
+        cleanup: CleanupConfig = CleanupConfig(),
+        defaultAgentKind: AgentKind = .claudeCode
     ) {
         self.workspaces = workspaces
         self.defaults = defaults
@@ -47,6 +51,7 @@ public struct AppConfig: Codable, Sendable, Equatable {
         self.experimentalTmuxBackend = experimentalTmuxBackend
         self.attributionTrailers = attributionTrailers
         self.cleanup = cleanup
+        self.defaultAgentKind = defaultAgentKind
     }
 
     public init(from decoder: Decoder) throws {
@@ -62,10 +67,11 @@ public struct AppConfig: Codable, Sendable, Equatable {
         experimentalTmuxBackend = try container.decodeIfPresent(Bool.self, forKey: .experimentalTmuxBackend) ?? false
         attributionTrailers = try container.decodeIfPresent(Bool.self, forKey: .attributionTrailers) ?? true
         cleanup = try container.decodeIfPresent(CleanupConfig.self, forKey: .cleanup) ?? CleanupConfig()
+        defaultAgentKind = try container.decodeIfPresent(AgentKind.self, forKey: .defaultAgentKind) ?? .claudeCode
     }
 
     private enum CodingKeys: String, CodingKey {
-        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, telemetry, autoRespond, experimentalTmuxBackend, attributionTrailers, cleanup
+        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, telemetry, autoRespond, experimentalTmuxBackend, attributionTrailers, cleanup, defaultAgentKind
     }
 }
 

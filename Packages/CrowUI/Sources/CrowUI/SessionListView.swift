@@ -448,8 +448,8 @@ struct SessionRow: View {
         appState.prStatus[session.id]
     }
 
-    private var claudeState: ClaudeState {
-        appState.hookState(for: session.id).claudeState
+    private var activityState: AgentActivityState {
+        appState.hookState(for: session.id).activityState
     }
 
     private var sessionLabels: [LabelInfo] {
@@ -476,6 +476,10 @@ struct SessionRow: View {
 
     private var deletionError: String? {
         appState.sessionDeletionError[session.id]
+    }
+
+    private var agent: (any CodingAgent)? {
+        AgentRegistry.shared.agent(for: session.agentKind)
     }
 
     var body: some View {
@@ -533,11 +537,18 @@ struct SessionRow: View {
         VStack(alignment: .leading, spacing: 3) {
             // Row 1: Name + status indicator
             HStack(spacing: 4) {
+                if let agent {
+                    Image(systemName: agent.iconSystemName)
+                        .font(.caption2)
+                        .foregroundStyle(CorveilTheme.textSecondary)
+                        .help(agent.displayName)
+                }
                 Text(session.name)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(CorveilTheme.textPrimary)
                     .lineLimit(1)
-                if appState.isRemoteControlActive(sessionID: session.id) {
+                if agent?.supportsRemoteControl == true,
+                   appState.isRemoteControlActive(sessionID: session.id) {
                     RemoteControlBadge(compact: true)
                 }
                 Spacer()
@@ -579,7 +590,7 @@ struct SessionRow: View {
 
             // Row 4: Issue badge + PR badge + Claude state
             let hasIssueBadge = session.ticketNumber != nil
-            let hasBadges = hasIssueBadge || prLink != nil || claudeState != .idle
+            let hasBadges = hasIssueBadge || prLink != nil || activityState != .idle
             if hasBadges {
                 HStack(spacing: 6) {
                     if let num = session.ticketNumber {
@@ -588,8 +599,8 @@ struct SessionRow: View {
                     if let pr = prLink {
                         PRBadge(label: pr.label, status: prStatus)
                     }
-                    if claudeState != .idle || appState.hookState(for: session.id).pendingNotification != nil {
-                        claudeStateBadge
+                    if activityState != .idle || appState.hookState(for: session.id).pendingNotification != nil {
+                        activityStateBadge
                     }
                 }
             }
@@ -632,7 +643,7 @@ struct SessionRow: View {
                     .fill(.blue)
                     .frame(width: 8, height: 8)
                     .accessibilityLabel("Shell ready")
-            case .claudeLaunched:
+            case .agentLaunched:
                 if needsAttention {
                     Circle()
                         .fill(.orange)
@@ -643,7 +654,7 @@ struct SessionRow: View {
                                 .scaleEffect(1.6)
                         )
                         .accessibilityLabel("Needs attention")
-                } else if claudeState == .working {
+                } else if activityState == .working {
                     Circle()
                         .fill(.green)
                         .frame(width: 8, height: 8)
@@ -685,7 +696,7 @@ struct SessionRow: View {
     }
 
     @ViewBuilder
-    private var claudeStateBadge: some View {
+    private var activityStateBadge: some View {
         let activity = appState.hookState(for: session.id).lastToolActivity
         let notification = appState.hookState(for: session.id).pendingNotification
 
@@ -709,7 +720,7 @@ struct SessionRow: View {
                 .foregroundStyle(.orange)
             }
         } else {
-            switch claudeState {
+            switch activityState {
             case .working:
                 HStack(spacing: 3) {
                     Image(systemName: "bolt.fill")
@@ -744,7 +755,7 @@ struct SessionRow: View {
     private var rowBackgroundColor: Color {
         if needsAttention {
             return Color.orange.opacity(0.12)
-        } else if claudeState == .done && terminalReadiness == .claudeLaunched {
+        } else if activityState == .done && terminalReadiness == .agentLaunched {
             return CorveilTheme.bgDone
         }
         return CorveilTheme.bgCard
