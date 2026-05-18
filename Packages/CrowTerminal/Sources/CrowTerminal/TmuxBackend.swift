@@ -112,6 +112,11 @@ public final class TmuxBackend {
         sharedSurface = nil
         controller = nil
         bindings.removeAll()
+        // Cancel any in-flight readiness watches so they don't keep polling
+        // (sentinel files are about to be unlinked) after server teardown.
+        // Mirrors the `destroyTerminal` cleanup (#282).
+        for tasks in readinessTasks.values { tasks.forEach { $0.cancel() } }
+        readinessTasks.removeAll()
         for path in sentinels.values {
             try? FileManager.default.removeItem(atPath: path)
         }

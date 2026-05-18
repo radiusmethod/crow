@@ -1011,6 +1011,12 @@ final class SessionService {
         // underlying `ghostty_surface_t` (or kill the tmux window). Freeing
         // it while AppKit still holds the view risks a Metal/input callback
         // landing on a dangling pointer (issue #282).
+        //
+        // Note: single-tick defer is a conservative first attempt. Neither
+        // Combine nor DispatchQueue strictly guarantee ordering against the
+        // SwiftUI CATransaction commit; if #282 recurs the next step is a
+        // two-tick defer (nested `DispatchQueue.main.async`) or moving the
+        // destroy to a runloop-quiesce sweep.
         DispatchQueue.main.async {
             TerminalRouter.destroy(terminal)
         }
