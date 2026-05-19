@@ -231,3 +231,113 @@ private func makeWorktree(
     #expect(text.contains("will not be affected"))
     #expect(!text.contains("removed from disk"))
 }
+
+// MARK: - Label Pill Accent Color (WCAG AA)
+//
+// Verifies that `CorveilTheme.accentRGB(for:in:)` — the math behind the dark-
+// mode label pill fix — produces text/border colors that clear the WCAG AA
+// contrast thresholds against the chip fill and page background in both color
+// schemes. The "blue" sample is the documented edge case (low blue-channel
+// weighting in relative luminance); if it fails, raise the dark-mode lightness
+// clamp.
+
+private typealias RGB = (r: Double, g: Double, b: Double)
+private let darkPillFill: RGB  = (33.0 / 255, 38.0 / 255, 45.0 / 255)   // #21262D
+private let lightPillFill: RGB = (234.0 / 255, 238.0 / 255, 242.0 / 255) // #EAEEF2
+private let darkPageBg: RGB    = (26.0 / 255, 29.0 / 255, 32.0 / 255)   // #1A1D20 = bgSurface
+
+private func relativeLuminance(_ c: RGB) -> Double {
+    func lin(_ v: Double) -> Double {
+        v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+    }
+    return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+}
+
+private func contrast(_ a: RGB, _ b: RGB) -> Double {
+    let la = relativeLuminance(a) + 0.05
+    let lb = relativeLuminance(b) + 0.05
+    return la > lb ? la / lb : lb / la
+}
+
+/// Hex string + human label for diagnostic messages.
+private let canonicalLabels: [(name: String, hex: String)] = [
+    ("yellow",     "FBCA04"),
+    ("dark green", "0E8A16"),
+    ("orange",     "D93F0B"),
+    ("blue",       "0366D6"),
+    ("near-white", "F5F5F5"),
+    ("near-black", "111111"),
+]
+
+@Test func accentColorClearsAATextOnDarkFill() throws {
+    for label in canonicalLabels {
+        let rgb = try #require(CorveilTheme.accentRGB(for: label.hex, in: .dark))
+        let ratio = contrast(rgb, darkPillFill)
+        #expect(ratio >= 4.5, "Dark accent for \(label.name) (#\(label.hex)) only \(ratio):1 vs #21262D")
+    }
+}
+
+@Test func accentColorClearsAATextOnLightFill() throws {
+    for label in canonicalLabels {
+        let rgb = try #require(CorveilTheme.accentRGB(for: label.hex, in: .light))
+        let ratio = contrast(rgb, lightPillFill)
+        #expect(ratio >= 4.5, "Light accent for \(label.name) (#\(label.hex)) only \(ratio):1 vs #EAEEF2")
+    }
+}
+
+@Test func accentColorBorderClears3to1OnDarkPageBackground() throws {
+    for label in canonicalLabels {
+        let rgb = try #require(CorveilTheme.accentRGB(for: label.hex, in: .dark))
+        let ratio = contrast(rgb, darkPageBg)
+        #expect(ratio >= 3.0, "Dark border for \(label.name) (#\(label.hex)) only \(ratio):1 vs #1A1D20")
+    }
+}
+
+@Test func accentRGBReturnsNilForInvalidHex() {
+    #expect(CorveilTheme.accentRGB(for: "xyz", in: .dark) == nil)
+    #expect(CorveilTheme.accentRGB(for: "12345", in: .dark) == nil)
+    #expect(CorveilTheme.accentRGB(for: "GGGGGG", in: .light) == nil)
+    #expect(CorveilTheme.accentRGB(for: "", in: .light) == nil)
+}
+
+@Test func accentRGBStripsLeadingHash() throws {
+    let withHash = try #require(CorveilTheme.accentRGB(for: "#0E8A16", in: .dark))
+    let without  = try #require(CorveilTheme.accentRGB(for: "0E8A16",  in: .dark))
+    #expect(abs(withHash.r - without.r) < 1e-9)
+    #expect(abs(withHash.g - without.g) < 1e-9)
+    #expect(abs(withHash.b - without.b) < 1e-9)
+}
+
+@Test func accentRGBLightensDarkHuesInDarkMode() throws {
+    // Near-black input must be pulled up well above black so it reads on a dark fill.
+    let rgb = try #require(CorveilTheme.accentRGB(for: "111111", in: .dark))
+    #expect(relativeLuminance(rgb) > relativeLuminance(darkPillFill))
+}
+
+@Test func accentRGBDarkensPaleHuesInLightMode() throws {
+    // Near-white input must be pulled down so it reads on a light fill.
+    let rgb = try #require(CorveilTheme.accentRGB(for: "F5F5F5", in: .light))
+    #expect(relativeLuminance(rgb) < relativeLuminance(lightPillFill))
+}
+
+@Test func hslRoundTripPreservesCanonicalLabelColors() {
+    let cases: [RGB] = [
+        (0.984, 0.792, 0.016), // FBCA04
+        (0.055, 0.541, 0.086), // 0E8A16
+        (0.852, 0.247, 0.043), // D93F0B
+        (0.012, 0.400, 0.839), // 0366D6
+    ]
+    for orig in cases {
+        let hsl = CorveilTheme.rgbToHSL(r: orig.r, g: orig.g, b: orig.b)
+        let back = CorveilTheme.hslToRGB(h: hsl.h, s: hsl.s, l: hsl.l)
+        #expect(abs(back.r - orig.r) < 0.01)
+        #expect(abs(back.g - orig.g) < 0.01)
+        #expect(abs(back.b - orig.b) < 0.01)
+    }
+}
+
+@Test func hslAchromaticInputReturnsGrayWithZeroSaturation() {
+    let hsl = CorveilTheme.rgbToHSL(r: 0.5, g: 0.5, b: 0.5)
+    #expect(hsl.s == 0)
+    #expect(abs(hsl.l - 0.5) < 1e-9)
+}
