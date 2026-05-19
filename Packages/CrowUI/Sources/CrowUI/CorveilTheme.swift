@@ -70,24 +70,41 @@ extension CorveilTheme {
     /// against the neutral label-pill surface in the given color scheme.
     /// Saturation is clamped to a friendly band; lightness is clamped so any
     /// hue clears WCAG AA against the neutral fill.
+    ///
+    /// Tuning knobs:
+    /// - Saturation `[0.40, 0.85]`: lower bound keeps near-grayscale labels
+    ///   distinct as accents; upper bound calms down neon hues.
+    /// - Dark lightness `≥ 0.78`: the binding constraint is pure blue
+    ///   (H≈240°), which contributes only ~7% of relative luminance — this
+    ///   bound puts even saturated blue comfortably above 4.5:1 vs `#21262D`.
+    /// - Light lightness `≤ 0.22`: ensures dark text against `#EAEEF2`
+    ///   for the worst hues (yellow ~50°, green ~124°), whose own relative
+    ///   luminance crowds the AA threshold at higher L values.
     public static func accentColor(for hexString: String, in scheme: ColorScheme) -> Color {
-        let hex = hexString.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-        guard hex.count == 6, let value = UInt(hex, radix: 16) else {
+        guard let rgb = accentRGB(for: hexString, in: scheme) else {
             return scheme == .dark ? .white : Color(hex: 0x1A1D20)
         }
+        return Color(red: rgb.r, green: rgb.g, blue: rgb.b)
+    }
+
+    /// Underlying RGB output of `accentColor`. Exposed at module scope so the
+    /// CrowUI test target can verify WCAG contrast without round-tripping
+    /// through SwiftUI `Color` → `NSColor`.
+    static func accentRGB(for hexString: String, in scheme: ColorScheme) -> (r: Double, g: Double, b: Double)? {
+        let hex = hexString.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard hex.count == 6, let value = UInt(hex, radix: 16) else { return nil }
         let r = Double((value >> 16) & 0xFF) / 255
         let g = Double((value >> 8) & 0xFF) / 255
         let b = Double(value & 0xFF) / 255
 
         var (h, s, l) = rgbToHSL(r: r, g: g, b: b)
         s = min(max(s, 0.40), 0.85)
-        l = scheme == .dark ? max(l, 0.72) : min(l, 0.30)
+        l = scheme == .dark ? max(l, 0.78) : min(l, 0.22)
 
-        let (nr, ng, nb) = hslToRGB(h: h, s: s, l: l)
-        return Color(red: nr, green: ng, blue: nb)
+        return hslToRGB(h: h, s: s, l: l)
     }
 
-    private static func rgbToHSL(r: Double, g: Double, b: Double) -> (Double, Double, Double) {
+    static func rgbToHSL(r: Double, g: Double, b: Double) -> (h: Double, s: Double, l: Double) {
         let maxC = max(r, g, b)
         let minC = min(r, g, b)
         let l = (maxC + minC) / 2
@@ -103,7 +120,7 @@ extension CorveilTheme {
         return (h / 6, s, l)
     }
 
-    private static func hslToRGB(h: Double, s: Double, l: Double) -> (Double, Double, Double) {
+    static func hslToRGB(h: Double, s: Double, l: Double) -> (r: Double, g: Double, b: Double) {
         guard s != 0 else { return (l, l, l) }
         let q = l < 0.5 ? l * (1 + s) : l + s - l * s
         let p = 2 * l - q
