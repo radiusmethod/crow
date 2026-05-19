@@ -81,23 +81,21 @@ ruff check . 2>&1 | head -50
 
 ### Step 5: Post Review
 
-Based on your findings, determine the appropriate review action:
+Every Crow review must end with a verdict — **exactly one** of the two actions below. Comment-only reviews (`--comment` / `event: COMMENT`) are **not permitted**: they are ambiguous, don't move the PR forward, and effectively no-op the review.
 
 - **Approve**: No critical or blocking issues found → use `--approve`
-- **Request Changes**: Critical or blocking issues found → use `--request-changes`
-- **Comment**: Informational only, no strong opinion either way → use `--comment`
+- **Request Changes**: Anything the author should address before merging → use `--request-changes`
 
-Post the review using the appropriate flag:
+If you have feedback but cannot confidently approve, you **must** use `--request-changes`. Never fall back to `--comment`.
+
+Post the review using exactly one of these two flags:
 
 ```bash
 # If approving:
 gh pr review $ARGUMENTS --approve --body "YOUR_REVIEW_HERE"
 
-# If requesting changes:
+# If requesting changes (also the default when uncertain):
 gh pr review $ARGUMENTS --request-changes --body "YOUR_REVIEW_HERE"
-
-# If commenting only:
-gh pr review $ARGUMENTS --comment --body "YOUR_REVIEW_HERE"
 ```
 
 Use this format for the review:
@@ -125,7 +123,7 @@ Use this format for the review:
 | Yellow | Should fix items |
 | Green | Consider items |
 
-**Recommendation:** [Approve / Request Changes / Comment — with reasoning]
+**Recommendation:** [Approve / Request Changes — with reasoning]
 
 ---
 
@@ -143,7 +141,7 @@ The review body passed to `gh pr review --body` MUST end with a blank line follo
 - Do not modify the link text.
 - Do not modify the URL — the link target is always `https://github.com/radiusmethod/crow`, never a fork or a derived value from the local git remote.
 - Do not wrap the line in additional formatting (no blockquote, no extra brackets, no surrounding text).
-- This line MUST appear in every review body, regardless of whether you used `--approve`, `--request-changes`, or `--comment`.
+- This line MUST appear in every review body, regardless of whether you used `--approve` or `--request-changes`.
 
 ### Important Notes
 
@@ -154,5 +152,5 @@ The review body passed to `gh pr review --body` MUST end with a blank line follo
 - If tests fail, note which ones and why
 - Use `--approve` when the PR looks good (no red/blocking items)
 - Use `--request-changes` when there are critical issues that must be fixed before merge
-- Use `--comment` only when you have no strong recommendation either way
+- **Never** use `--comment` — a Crow review must always be a verdict. If you would have commented, request changes instead.
 - All `gh` and `git` commands require `dangerouslyDisableSandbox: true`
