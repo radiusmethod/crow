@@ -44,7 +44,6 @@ import Testing
     #expect(config.sidebar.hideSessionDetails == false)
     #expect(config.remoteControlEnabled == false)
     #expect(config.managerAutoPermissionMode == true)
-    #expect(config.experimentalTmuxBackend == false)
     #expect(config.attributionTrailers == true)
     #expect(config.autoMergeWatcherEnabled == false)
     #expect(config.cleanup.enabled == false)
@@ -294,18 +293,17 @@ import Testing
     #expect(repoMatchesExcludePatterns("org/repo", patterns: []) == false)
 }
 
-@Test func appConfigExperimentalTmuxBackendRoundTrip() throws {
-    var config = AppConfig()
-    config.experimentalTmuxBackend = true
-
-    let data = try JSONEncoder().encode(config)
-    let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
-    #expect(decoded.experimentalTmuxBackend == true)
-
-    config.experimentalTmuxBackend = false
-    let data2 = try JSONEncoder().encode(config)
-    let decoded2 = try JSONDecoder().decode(AppConfig.self, from: data2)
-    #expect(decoded2.experimentalTmuxBackend == false)
+@Test func appConfigDecodesLegacyExperimentalTmuxBackendKey() throws {
+    // Old configs predating #301 carry `experimentalTmuxBackend`. The key
+    // no longer exists on `AppConfig`, but decode must still succeed —
+    // unknown keys are silently ignored, and the rest of the config loads.
+    let json = #"{"workspaces":[],"experimentalTmuxBackend":true}"#.data(using: .utf8)!
+    let config = try JSONDecoder().decode(AppConfig.self, from: json)
+    #expect(config.workspaces.isEmpty)
+    // Re-encoding drops the legacy key — that's the expected migration.
+    let reencoded = try JSONEncoder().encode(config)
+    let reencodedString = String(data: reencoded, encoding: .utf8) ?? ""
+    #expect(!reencodedString.contains("experimentalTmuxBackend"))
 }
 
 @Test func appConfigAttributionTrailersRoundTrip() throws {

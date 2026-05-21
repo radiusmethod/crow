@@ -3,39 +3,25 @@ import Foundation
 /// Crow's feature-flag bag.
 ///
 /// Flags are decided once at app launch (`AppDelegate.launchMainApp`) and
-/// frozen for the process lifetime. They can be driven by either:
-///   - Environment variable (CI / dev iteration without persisting state).
-///   - User preference loaded from `AppConfig` and surfaced in Settings →
-///     Experimental.
-///
-/// The two sources are OR-merged: if either says ON, the flag is ON.
+/// frozen for the process lifetime.
 public enum FeatureFlags {
 
-    /// `CROW_TMUX_BACKEND=1` OR `Settings → Experimental → Use tmux for
-    /// managed terminals` — route new SessionTerminals through the tmux
-    /// backend (#198) instead of the per-terminal Ghostty surface model.
-    /// Off by default; the gated rollout entry point.
+    /// Route managed terminals through the tmux backend (#198 / #229).
+    ///
+    /// As of #301 this is the default. Set `CROW_TMUX_BACKEND=0` (or
+    /// `false`/`no`/`off`) in the environment to fall back to the legacy
+    /// per-terminal Ghostty backend for a launch. This escape hatch is
+    /// intended for one release of soak; it will be removed in a follow-up.
     public static var tmuxBackend: Bool {
-        boolFlag("CROW_TMUX_BACKEND") || tmuxBackendConfigOverride
+        !envExplicitlyOff("CROW_TMUX_BACKEND")
     }
 
-    /// User-level enable for the tmux backend, set once at launch from the
-    /// loaded `AppConfig.experimentalTmuxBackend`. Frozen for the process
-    /// lifetime to match the "requires restart" semantics — toggling the UI
-    /// does NOT live-update this; the user must relaunch the app for a flip
-    /// to take effect.
-    ///
-    /// `nonisolated(unsafe)` is correct here: the value is written exactly
-    /// once on the main thread during `launchMainApp()`, before any reader
-    /// runs. After that initial write the value is read-only for the
-    /// process lifetime, so concurrent reads are safe without further
-    /// synchronization.
-    nonisolated(unsafe) public static var tmuxBackendConfigOverride: Bool = false
-
-    private static func boolFlag(_ name: String) -> Bool {
-        guard let raw = ProcessInfo.processInfo.environment[name] else { return false }
-        switch raw.lowercased() {
-        case "1", "true", "yes", "on": return true
+    /// Returns true only when the env var is set to an explicit "off" value.
+    /// An unset env var is interpreted as "default" — which is ON for tmux.
+    private static func envExplicitlyOff(_ name: String) -> Bool {
+        guard let raw = ProcessInfo.processInfo.environment[name]?.lowercased() else { return false }
+        switch raw {
+        case "0", "false", "no", "off": return true
         default: return false
         }
     }
