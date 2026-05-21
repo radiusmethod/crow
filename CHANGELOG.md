@@ -42,6 +42,7 @@ Backfill of merged PRs since the 0.1.0 release, grouped by theme.
 - #161 — Fix batch "Work on" sending a malformed `/crow-batch-workspace` line.
 - #218 — Recover from failed Ghostty surface creation by retrying.
 - #229 — New tmux backend behind the `CROW_TMUX_BACKEND` feature flag (or Settings → Experimental). Off by default; opt in for a headless-PTY runtime that decouples terminal lifecycle from view rendering.
+- #301 — The tmux backend is now the default for managed terminals. The Settings → Experimental tab and `AppConfig.experimentalTmuxBackend` key are gone; existing configs containing the key still load (the key is silently dropped on next save). Escape hatch: set `CROW_TMUX_BACKEND=0` (also `false`/`no`/`off`) to fall back to the legacy per-terminal Ghostty backend for a launch — the legacy path will be removed in a follow-up release.
 
 ### GitLab
 

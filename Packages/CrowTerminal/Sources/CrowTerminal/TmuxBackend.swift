@@ -711,7 +711,7 @@ public enum TmuxBackendError: Error, CustomStringConvertible {
         case let .windowNotFound(index):
             return "TmuxBackend: no live window at index \(index)"
         case .notConfigured:
-            return "TmuxBackend.configure(...) was not called this run (CROW_TMUX_BACKEND off and no Settings → Experimental override)"
+            return "TmuxBackend.configure(...) was not called this run (tmux backend disabled via CROW_TMUX_BACKEND=0, or no tmux ≥ 3.3 binary was found)"
         }
     }
 }

@@ -49,7 +49,7 @@ There are two `CrowCLI` directories:
 | **IssueTracker**          | `Sources/Crow/App/IssueTracker.swift`              | Polls GitHub/GitLab every 60 seconds for assigned issues, PR status, project board status, auto-completes merged sessions |
 | **Scaffolder**            | `Sources/Crow/App/Scaffolder.swift`                | First-run devRoot scaffold: `.claude/` + bundled skills + settings.json                                           |
 | **TerminalManager**       | `Packages/CrowTerminal/.../TerminalManager.swift`  | Manages Ghostty `ghostty_surface_t` lifecycle; emits state transitions consumed by `TerminalReadiness`            |
-| **TmuxBackend**           | `Packages/CrowTerminal/.../TmuxBackend.swift`      | Headless-PTY backend introduced in #229; opt-in via `CROW_TMUX_BACKEND` or Settings → Experimental                |
+| **TmuxBackend**           | `Packages/CrowTerminal/.../TmuxBackend.swift`      | Headless-PTY backend (introduced in #229, defaulted on in #301); set `CROW_TMUX_BACKEND=0` to fall back to legacy Ghostty |
 | **TerminalRouter**        | `Sources/Crow/App/TerminalRouter.swift`            | Per-terminal dispatch — routes `send` / `destroy` / `trackReadiness` to either Ghostty or tmux based on `SessionTerminal.backend` |
 | **AutoRespondCoordinator**| `Sources/Crow/App/AutoRespondCoordinator.swift`    | Watches PR review / CI signals and types follow-up instructions into the linked Claude Code terminal (#214)       |
 | **TerminalReadiness**     | `Packages/CrowCore/Sources/CrowCore/Models/Enums.swift:41` | Four-state enum (uninitialized → surfaceCreated → shellReady → claudeLaunched) driving the sidebar status dot |
@@ -109,17 +109,14 @@ Crow embeds [Ghostty](https://ghostty.org) as a terminal emulator via a compiled
 
 ## Terminal Backends
 
-PR #229 introduced a second backend behind the `CROW_TMUX_BACKEND` feature flag. Crow now supports two terminal runtimes side-by-side:
+PR #229 introduced a tmux backend behind a feature flag; #301 made it the default. Crow currently supports two terminal runtimes side-by-side:
 
-- **Ghostty (default)** — per-tab `ghostty_surface_t` driven by `TerminalManager`. Each session terminal owns a real `NSView` with GPU-accelerated rendering. This is the original path and remains the default for everyone who has not opted in.
-- **tmux (opt-in)** — headless PTY plus a tmux server, driven by `TmuxBackend`. Each session terminal corresponds to a tmux window; rendering is decoupled from the surface so terminals can spin up before any view is materialized. Opt in via either:
-  - Environment variable `CROW_TMUX_BACKEND=1` (or `true`/`yes`/`on`).
-  - **Settings → Experimental → Use tmux for managed terminals** (persists in `AppConfig.experimentalTmuxBackend`).
-  - The two sources are OR-merged. Toggle is decided once at app launch by `FeatureFlags.tmuxBackend` and frozen for the process lifetime — flipping the toggle in Settings requires a relaunch.
+- **tmux (default)** — headless PTY plus a tmux server, driven by `TmuxBackend`. Each session terminal corresponds to a tmux window; rendering is decoupled from the surface so terminals can spin up before any view is materialized. Requires `tmux ≥ 3.3` on `PATH` (`brew install tmux`).
+- **Ghostty (legacy escape hatch)** — per-tab `ghostty_surface_t` driven by `TerminalManager`. Each session terminal owns a real `NSView` with GPU-accelerated rendering. Reachable for this release by setting `CROW_TMUX_BACKEND=0` (also `false`/`no`/`off`) in the environment at launch. Manager terminals still use the Ghostty path unconditionally (separate follow-up). The legacy path will be removed once one release of soak passes without regressions.
 
-Per-terminal dispatch happens in `Sources/Crow/App/TerminalRouter.swift`. Each `SessionTerminal` carries a `backend: .ghostty | .tmux` discriminator captured at create time, and `TerminalRouter.send` / `destroy` / `trackReadiness` switch on it. This keeps the rest of the app backend-agnostic.
+`FeatureFlags.tmuxBackend` is decided once at app launch and frozen for the process lifetime — changing the env var requires a relaunch. Per-terminal dispatch happens in `Sources/Crow/App/TerminalRouter.swift`. Each `SessionTerminal` carries a `backend: .ghostty | .tmux` discriminator captured at create time, and `TerminalRouter.send` / `destroy` / `trackReadiness` switch on it. This keeps the rest of the app backend-agnostic.
 
-The tmux backend requires `tmux ≥ 3.3` on `PATH` (typical Homebrew install). If the flag is on but tmux is missing or too old, Crow surfaces an alert at launch with a `brew install tmux` hint and silently falls back to Ghostty for the session.
+If tmux is missing or too old, Crow surfaces an alert at launch with a `brew install tmux` hint and silently falls back to Ghostty for the session.
 
 The original motivation and full alternative analysis are in [terminal-runtime-research.md](terminal-runtime-research.md).
 
@@ -130,7 +127,7 @@ PR #228 split Settings into discrete tabs. Each tab maps to a SwiftUI view in `P
 - **General** — devRoot, sidebar density, notifications, sounds.
 - **Workspaces** — per-workspace provider, host, branch prefix, and per-workspace auto-review opt-in (#209).
 - **Automation** — every automation toggle in one place. See [automation.md](automation.md) for a per-toggle walkthrough. Source: `AutomationSettingsView.swift`.
-- **Experimental** — feature flags including the tmux backend toggle.
+- **Notifications** — global mute + per-event sound and banner config.
 
 Tab state is persisted in `{devRoot}/.claude/config.json` via `CrowPersistence`.
 

@@ -144,8 +144,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - tmux first-run onboarding
 
-    /// Surface a native alert when CROW_TMUX_BACKEND=1 is set but no usable
-    /// tmux is on the host. Spec §11 / PROD #4. The user can:
+    /// Surface a native alert when the tmux backend (the default since #301)
+    /// can't find a usable tmux on the host. Spec §11 / PROD #4. The user
+    /// can:
     ///   - Copy the brew-install command to their clipboard.
     ///   - Open the upstream tmux installation guide.
     ///   - Continue without the tmux backend (we fall through to Ghostty).
@@ -154,7 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = .informational
         alert.messageText = "tmux ≥ 3.3 not found"
         alert.informativeText = """
-            Crow's tmux backend was requested via CROW_TMUX_BACKEND=1, but no \
+            Crow now uses tmux for managed terminals by default, but no \
             tmux binary ≥ 3.3 was found in /opt/homebrew/bin, /usr/local/bin, \
             or /usr/bin.
 
@@ -165,8 +166,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Crow won't change your dotfiles — it runs your usual shell config \
             inside the tmux session.
 
-            Continuing for now with the standard backend (one Ghostty terminal \
-            per session).
+            Falling back to the legacy per-terminal Ghostty backend for this \
+            launch. Restart Crow after installing tmux to enable the default.
             """
         alert.addButton(withTitle: "Copy `brew install tmux`")
         alert.addButton(withTitle: "Open tmux install guide")
@@ -245,22 +246,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("[Crow] Initializing Ghostty")
         GhosttyApp.shared.initialize()
 
-        // Load config FIRST so we can read the user's experimental-flag
-        // preference before deciding whether to spin up the tmux backend.
-        // Order matters: FeatureFlags.tmuxBackend OR-merges the env var
-        // with this configOverride, and the launch-time configure block
-        // below reads the flag.
+        // Load config before initializing the terminal backend so any future
+        // backend selection knobs can read it.
         let config = appConfig ?? ConfigStore.loadConfig(devRoot: devRoot) ?? AppConfig()
         self.appConfig = config
         NSLog("[Crow] Config loaded (workspaces: %d)", config.workspaces.count)
-        FeatureFlags.tmuxBackendConfigOverride = config.experimentalTmuxBackend
 
-        // Optionally configure the tmux backend (#198 rollout). Off by
-        // default; flip via `CROW_TMUX_BACKEND=1` in the environment OR via
-        // Settings → Experimental → Use tmux for managed terminals. If the
-        // flag is on but tmux isn't found at minimum 3.3, we log a warning
-        // and stay on the Ghostty path — first-run onboarding (PROD #4)
-        // surfaces this to the user.
+        // Configure the tmux backend (#198 → defaulted-on in #301). The
+        // legacy per-terminal Ghostty path is still reachable for this
+        // release via `CROW_TMUX_BACKEND=0` as an escape hatch; it will be
+        // removed once one release of soak passes without regressions. If
+        // tmux is missing or < 3.3 we log a warning, surface the first-run
+        // onboarding sheet, and fall back to Ghostty for this launch.
         //
         // Independently of the flag, reap any orphan tmux servers from past
         // Crow runs that exited ungracefully (Force Quit / crash bypasses
@@ -290,7 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 NSLog("[Crow] tmux backend configured: binary=\(tmuxBinary) socket=\(socketPath)")
             } else {
-                NSLog("[Crow] tmux backend requested but no tmux ≥ 3.3 found — staying on Ghostty backend")
+                NSLog("[Crow] tmux backend is the default but no tmux ≥ 3.3 found — falling back to Ghostty for this launch")
                 showTmuxNotFoundOnboardingSheet()
             }
         }

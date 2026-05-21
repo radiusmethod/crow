@@ -2,69 +2,61 @@ import Foundation
 import Testing
 @testable import Crow
 
-/// Test the env-var parsing in `FeatureFlags.boolFlag`. We can't easily
-/// flip the live environment from tests, so this exercises the same shape
-/// directly via a free function. The intent is to lock in which spellings
-/// of "true" we accept so the rollout's flag flips are predictable.
-///
-/// `.serialized` because `tmuxBackendDefaultIsOff` and
-/// `tmuxBackendOnWhenConfigOverrideOn` both mutate the global static
-/// `FeatureFlags.tmuxBackendConfigOverride`. Without serialization the two
-/// tests race on that shared state and the suite fails intermittently
-/// (one test's `= false` reset lands between the other's set + read).
-@Suite("FeatureFlags env parsing", .serialized)
+/// Pin the env-var policy for `FeatureFlags.tmuxBackend`. As of #301 the tmux
+/// backend is the default; the env var is parsed only as an explicit opt-out
+/// (`0`/`false`/`no`/`off`). Anything else — including unset — means tmux is
+/// on.
+@Suite("FeatureFlags tmux backend default")
 struct FeatureFlagsTests {
 
-    /// Mirror of the parsing rule in `FeatureFlags.boolFlag`. If the
+    /// Mirror of the parsing rule in `FeatureFlags.envExplicitlyOff`. If the
     /// production rule changes, this helper must change too — that's the
     /// point: the test pins the policy.
-    private func parse(_ raw: String?) -> Bool {
+    private func isExplicitlyOff(_ raw: String?) -> Bool {
         guard let raw else { return false }
         switch raw.lowercased() {
-        case "1", "true", "yes", "on": return true
+        case "0", "false", "no", "off": return true
         default: return false
         }
     }
 
-    @Test func acceptsCanonicalTrueValues() {
-        #expect(parse("1"))
-        #expect(parse("true"))
-        #expect(parse("True"))
-        #expect(parse("TRUE"))
-        #expect(parse("yes"))
-        #expect(parse("on"))
+    @Test func recognizesCanonicalOffValues() {
+        #expect(isExplicitlyOff("0"))
+        #expect(isExplicitlyOff("false"))
+        #expect(isExplicitlyOff("False"))
+        #expect(isExplicitlyOff("FALSE"))
+        #expect(isExplicitlyOff("no"))
+        #expect(isExplicitlyOff("off"))
     }
 
-    @Test func rejectsFalsishValues() {
-        #expect(!parse(nil))
-        #expect(!parse(""))
-        #expect(!parse("0"))
-        #expect(!parse("false"))
-        #expect(!parse("no"))
-        #expect(!parse("off"))
-        #expect(!parse(" 1 "))   // intentional: whitespace not trimmed
+    @Test func treatsEverythingElseAsDefault() {
+        // Anything not in the explicit-off set keeps tmux on (default).
+        #expect(!isExplicitlyOff(nil))
+        #expect(!isExplicitlyOff(""))
+        #expect(!isExplicitlyOff("1"))
+        #expect(!isExplicitlyOff("true"))
+        #expect(!isExplicitlyOff("yes"))
+        #expect(!isExplicitlyOff("on"))
+        #expect(!isExplicitlyOff(" 0 "))   // intentional: whitespace not trimmed
     }
 
-    @Test func tmuxBackendDefaultIsOff() {
-        // The flag's default-off behavior is load-bearing for the gated
-        // rollout. We can't unset env reliably from a test, so we just
-        // assert that under normal CI conditions it's false.
+    @Test func tmuxBackendDefaultIsOn() {
+        // When the env var is unset (the common case in CI), the tmux
+        // backend is on by default — that's the load-bearing policy
+        // introduced in #301.
         if ProcessInfo.processInfo.environment["CROW_TMUX_BACKEND"] == nil {
-            // Reset the override so a previous test can't leak state.
-            FeatureFlags.tmuxBackendConfigOverride = false
-            #expect(!FeatureFlags.tmuxBackend)
-        }
-    }
-
-    @Test func tmuxBackendOnWhenConfigOverrideOn() {
-        // The config override is the user-facing entry point for the flag
-        // (Settings → Experimental → Use tmux for managed terminals).
-        // Should switch tmuxBackend ON without needing the env var.
-        if ProcessInfo.processInfo.environment["CROW_TMUX_BACKEND"] == nil {
-            FeatureFlags.tmuxBackendConfigOverride = true
             #expect(FeatureFlags.tmuxBackend)
-            FeatureFlags.tmuxBackendConfigOverride = false
-            #expect(!FeatureFlags.tmuxBackend)
         }
+    }
+
+    @Test func tmuxBackendOffWhenEnvExplicitlyOff() {
+        // The env var is the escape hatch: an explicit-off value disables
+        // the backend for the launch. We can't reliably mutate the live
+        // environment from Swift Testing in CI, so skip when the env is
+        // preset and only assert when we can write it ourselves.
+        guard ProcessInfo.processInfo.environment["CROW_TMUX_BACKEND"] == nil else { return }
+        setenv("CROW_TMUX_BACKEND", "0", 1)
+        defer { unsetenv("CROW_TMUX_BACKEND") }
+        #expect(!FeatureFlags.tmuxBackend)
     }
 }

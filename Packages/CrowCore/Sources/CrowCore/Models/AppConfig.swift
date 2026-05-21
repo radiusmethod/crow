@@ -14,9 +14,6 @@ public struct AppConfig: Codable, Sendable, Equatable {
     public var managerAutoPermissionMode: Bool
     public var telemetry: TelemetryConfig
     public var autoRespond: AutoRespondSettings
-    /// Opt into the tmux backend (#198). Surfaced in Settings → Experimental.
-    /// Read once at app launch; takes effect on next relaunch.
-    public var experimentalTmuxBackend: Bool
     /// When true, `setup.sh` writes a per-worktree `.claude/settings.local.json`
     /// that overrides Claude Code's `attribution.commit` to include the crow
     /// session UUID alongside the standard `Co-Authored-By: Claude` trailer.
@@ -37,7 +34,6 @@ public struct AppConfig: Codable, Sendable, Equatable {
         managerAutoPermissionMode: Bool = true,
         telemetry: TelemetryConfig = TelemetryConfig(),
         autoRespond: AutoRespondSettings = AutoRespondSettings(),
-        experimentalTmuxBackend: Bool = false,
         attributionTrailers: Bool = true,
         autoMergeWatcherEnabled: Bool = false,
         cleanup: CleanupConfig = CleanupConfig()
@@ -50,7 +46,6 @@ public struct AppConfig: Codable, Sendable, Equatable {
         self.managerAutoPermissionMode = managerAutoPermissionMode
         self.telemetry = telemetry
         self.autoRespond = autoRespond
-        self.experimentalTmuxBackend = experimentalTmuxBackend
         self.attributionTrailers = attributionTrailers
         self.autoMergeWatcherEnabled = autoMergeWatcherEnabled
         self.cleanup = cleanup
@@ -66,14 +61,13 @@ public struct AppConfig: Codable, Sendable, Equatable {
         managerAutoPermissionMode = try container.decodeIfPresent(Bool.self, forKey: .managerAutoPermissionMode) ?? true
         telemetry = try container.decodeIfPresent(TelemetryConfig.self, forKey: .telemetry) ?? TelemetryConfig()
         autoRespond = try container.decodeIfPresent(AutoRespondSettings.self, forKey: .autoRespond) ?? AutoRespondSettings()
-        experimentalTmuxBackend = try container.decodeIfPresent(Bool.self, forKey: .experimentalTmuxBackend) ?? false
         attributionTrailers = try container.decodeIfPresent(Bool.self, forKey: .attributionTrailers) ?? true
         autoMergeWatcherEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoMergeWatcherEnabled) ?? false
         cleanup = try container.decodeIfPresent(CleanupConfig.self, forKey: .cleanup) ?? CleanupConfig()
     }
 
     private enum CodingKeys: String, CodingKey {
-        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, telemetry, autoRespond, experimentalTmuxBackend, attributionTrailers, autoMergeWatcherEnabled, cleanup
+        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, telemetry, autoRespond, attributionTrailers, autoMergeWatcherEnabled, cleanup
     }
 }
 

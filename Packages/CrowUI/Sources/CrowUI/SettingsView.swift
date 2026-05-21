@@ -3,10 +3,11 @@ import CrowCore
 
 /// Settings panel accessible via Cmd+,
 ///
-/// Four-tab interface: General (devRoot, sidebar, telemetry), Automation (review/ticket
-/// filtering, remote control, Manager Terminal, auto-respond), Workspaces (defaults + list),
-/// and Notifications (global + per-event config). Every change is persisted immediately
-/// via the `onSave` callback — there is no explicit "Apply" button.
+/// Four-tab interface: General (devRoot, sidebar, telemetry, cleanup),
+/// Automation (review/ticket filtering, remote control, Manager Terminal,
+/// auto-respond), Workspaces (defaults + list), and Notifications (global +
+/// per-event config). Every change is persisted immediately via the `onSave`
+/// callback — there is no explicit "Apply" button.
 public struct SettingsView: View {
     let appState: AppState
     @State var devRoot: String
@@ -55,11 +56,6 @@ public struct SettingsView: View {
                 onSave: { save() }
             )
                 .tabItem { Label("Notifications", systemImage: "bell") }
-            ExperimentalSettingsView(
-                experimentalTmuxBackend: $config.experimentalTmuxBackend,
-                onSave: { save() }
-            )
-                .tabItem { Label("Experimental", systemImage: "flask") }
         }
         .frame(width: 720, height: 480)
         .sheet(isPresented: $isAddingWorkspace) {
