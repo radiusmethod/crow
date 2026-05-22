@@ -13,9 +13,10 @@ public actor ClaudeLauncher {
         provider: Provider?,
         customInstructions: String? = nil
     ) -> String {
+        // Plan mode is set by the `--permission-mode plan` flag in setup.sh's
+        // launch_claude(); do not prepend `/plan` here — that token is parsed
+        // as a slash command by the receiving session. See issue #313.
         var lines: [String] = []
-        lines.append("/plan")
-        lines.append("")
         lines.append("# Workspace Context")
         lines.append("")
         lines.append("| Repository | Path | Branch | Description |")

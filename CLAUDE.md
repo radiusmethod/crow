@@ -50,7 +50,6 @@ The `crow send` command writes text to the terminal. Newlines in the text are co
 - The Manager session UUID is always `00000000-0000-0000-0000-000000000000` — do not delete it
 - Use `/crow-workspace` skill for full workspace setup (worktrees + session + Claude Code)
 - **Worktree paths go DIRECTLY under the workspace folder**: `{devRoot}/{workspace}/{repo}-{number}-{slug}` — NOT in a subfolder
-- The prompt for new Claude Code sessions must start with `/plan` to enter plan mode
 - Use `$TMPDIR` (not `/tmp`) for temporary files
 
 ## Git Worktree Best Practices
