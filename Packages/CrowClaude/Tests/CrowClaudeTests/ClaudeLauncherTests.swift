@@ -23,7 +23,7 @@ import Testing
         provider: .github
     )
 
-    #expect(prompt.hasPrefix("/plan"))
+    #expect(prompt.hasPrefix("# Workspace Context"))
     #expect(prompt.contains("| my-repo |"))
     #expect(prompt.contains("feature/42-cool"))
     #expect(prompt.contains("gh issue view"))
@@ -93,7 +93,7 @@ import Testing
         provider: nil
     )
 
-    #expect(prompt.hasPrefix("/plan"))
+    #expect(prompt.hasPrefix("# Workspace Context"))
     #expect(prompt.contains("| repo |"))
     #expect(!prompt.contains("## Ticket"))
     // Without a ticket, the PR step is still present (generic form)
@@ -149,6 +149,22 @@ import Testing
     #expect(!prompt.contains("glab mr create"))
     #expect(!prompt.contains("Closes #"))
     #expect(prompt.contains("pushing the branch updates it"))
+}
+
+@Test func generatePromptDoesNotStartWithPlanSlashCommand() async {
+    // Plan mode is set via the `--permission-mode plan` flag in setup.sh,
+    // not via a `/plan` slash-command prefix on the prompt body. See
+    // issue #313 — a leading `/plan` is parsed as a slash command by the
+    // receiving session and causes problems.
+    let launcher = ClaudeLauncher()
+    let prompt = await launcher.generatePrompt(
+        session: Session(name: "regress"),
+        worktrees: [],
+        ticketURL: nil,
+        provider: nil
+    )
+    #expect(!prompt.hasPrefix("/plan"))
+    #expect(!prompt.contains("\n/plan\n"))
 }
 
 // MARK: - launchCommand()
