@@ -62,6 +62,8 @@ import Testing
     #expect(decoded.repo == "api")
     #expect(decoded.name == "FreeForm")
     #expect(decoded.prompts == ["go"])
+    // createdAt:0 decodes as seconds since the reference date (2001-01-01).
+    #expect(decoded.createdAt == Date(timeIntervalSinceReferenceDate: 0))
 }
 
 /// A config file written before jobs existed must still decode (jobs → []).

@@ -28,6 +28,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var devRoot: String?
     private var appConfig: AppConfig?
 
+    /// Reused for the Jobs repo picker (avoids a fresh instance per form open).
+    private let providerManager = ProviderManager()
+    /// Cache of expanded `alwaysInclude` repo lists, keyed by workspace name +
+    /// its specs, with a short TTL so repeated form opens don't re-hit the
+    /// provider CLI.
+    private var workspaceRepoCache: [String: (fetchedAt: Date, repos: [String])] = [:]
+    private let workspaceRepoCacheTTL: TimeInterval = 300
+
     /// Tail of the serial review-kickoff queue. Each call to
     /// `enqueueReviewKickoff` awaits the previous tail before doing any work,
     /// so all `createReviewSession` runs are strictly sequential across both
@@ -628,12 +636,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Jobs repo picker: expand a workspace's alwaysInclude specs (owner/*,
-        // owner/repo) into the repos available from its provider.
-        appState.onListWorkspaceRepos = { ws in
-            let provider = Provider(rawValue: ws.provider) ?? .github
-            return await ProviderManager().reposForSpecs(
+        // owner/repo) into the repos available from its provider. Results are
+        // cached per (workspace, specs) with a short TTL.
+        appState.onListWorkspaceRepos = { [weak self] ws in
+            guard let self else { return [] }
+            let provider: Provider
+            if let p = Provider(rawValue: ws.provider) {
+                provider = p
+            } else {
+                NSLog("[AppDelegate] Workspace '\(ws.name)': unknown provider '\(ws.provider)', defaulting to GitHub")
+                provider = .github
+            }
+            let key = "\(ws.name)\u{1}\(ws.alwaysInclude.joined(separator: ","))"
+            if let cached = self.workspaceRepoCache[key],
+               Date().timeIntervalSince(cached.fetchedAt) < self.workspaceRepoCacheTTL {
+                return cached.repos
+            }
+            let repos = await self.providerManager.reposForSpecs(
                 ws.alwaysInclude, provider: provider, host: ws.host
             )
+            self.workspaceRepoCache[key] = (Date(), repos)
+            return repos
         }
 
         // Hydrate mute state from config and wire toggle

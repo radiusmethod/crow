@@ -25,6 +25,8 @@ public struct JobFormView: View {
     @State private var repoOptions: [String] = []
     @State private var isLoadingRepos = false
     @State private var didLoadRepos = false
+    /// Bumped on each load so a stale slow response can't clobber a newer one.
+    @State private var loadGeneration = 0
 
     private let workspaces: [WorkspaceInfo]
     private let listRepos: (WorkspaceInfo) async -> [String]
@@ -140,14 +142,21 @@ public struct JobFormView: View {
     }
 
     /// Load the selected workspace's repo list, replacing any prior options.
+    /// Discards the result if the selection changed while loading.
     private func loadRepos() async {
         guard let ws = selectedWorkspace else {
             repoOptions = []
             return
         }
+        loadGeneration += 1
+        let generation = loadGeneration
         isLoadingRepos = true
-        defer { isLoadingRepos = false; didLoadRepos = true }
-        repoOptions = await listRepos(ws)
+        let result = await listRepos(ws)
+        // A newer load started while we were awaiting — drop this stale result.
+        guard generation == loadGeneration else { return }
+        repoOptions = result
+        isLoadingRepos = false
+        didLoadRepos = true
     }
 
     public var body: some View {
@@ -179,7 +188,7 @@ public struct JobFormView: View {
                     }
                 }
                 if didLoadRepos, !isLoadingRepos, repoOptions.isEmpty {
-                    Text("No repos found for this workspace. Set its “Always Include Repos” to e.g. \(workspace.isEmpty ? "owner" : workspace.lowercased())/* in Workspaces settings.")
+                    Text("No repos found for this workspace. Set its “Always Include Repos” to e.g. owner/* or owner/repo in Workspaces settings, and check that gh/glab is authenticated.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 

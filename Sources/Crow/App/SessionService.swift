@@ -701,13 +701,15 @@ final class SessionService {
     // MARK: - Worktree Safety Checks
     // Protected branch and main-checkout detection are centralized on SessionWorktree in CrowCore.
 
-    private func shell(_ args: String...) async throws -> String {
+    private func shell(env: [String: String] = [:], _ args: String...) async throws -> String {
         let process = Process()
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = args
-        process.environment = ShellEnvironment.shared.env
+        process.environment = env.isEmpty
+            ? ShellEnvironment.shared.env
+            : ShellEnvironment.shared.merging(env)
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
         try process.run()
@@ -1264,15 +1266,16 @@ final class SessionService {
         // an `owner/repo` slug (CROW-327): the checkout lives at
         // `{devRoot}/{workspace}/{repoFolder}` where repoFolder is the slug's
         // last component. Clone it on demand if it isn't on disk yet.
-        let repoFolder = job.repo.contains("/")
-            ? (job.repo as NSString).lastPathComponent
-            : job.repo
+        let repoFolder = Self.jobRepoFolder(for: job.repo)
         let repoPath: String
         let workspacePath: String
 
         if !job.workspace.isEmpty {
-            workspacePath = (devRoot as NSString).appendingPathComponent(job.workspace)
-            repoPath = (workspacePath as NSString).appendingPathComponent(repoFolder)
+            let layout = Self.jobWorktreeLayout(
+                devRoot: devRoot, workspace: job.workspace, repo: job.repo
+            )
+            workspacePath = layout.workspacePath
+            repoPath = layout.repoPath
             if !FileManager.default.fileExists(atPath: (repoPath as NSString).appendingPathComponent(".git")) {
                 guard await cloneJobRepo(job: job, devRoot: devRoot, into: repoPath) else {
                     NSLog("[SessionService] Job '\(job.name)': repo '\(job.repo)' is not cloned and clone-on-demand failed")
@@ -1281,8 +1284,10 @@ final class SessionService {
             }
         } else {
             // Back-compat: jobs saved before the workspace field returned store a
-            // bare repo name. Resolve by folder name among local checkouts.
-            let repos = (try? await gitManager.discoverRepos()) ?? []
+            // bare repo name. Resolve by folder name among local checkouts. Sort
+            // first so a duplicated name binds deterministically across runs.
+            let repos = ((try? await gitManager.discoverRepos()) ?? [])
+                .sorted { $0.path < $1.path }
             guard let repoInfo = repos.first(where: { $0.name == job.repo }) else {
                 NSLog("[SessionService] Job '\(job.name)': repo '\(job.repo)' not found under devRoot")
                 return nil
@@ -1349,6 +1354,25 @@ final class SessionService {
         return (session.id, preparedTerminal.id)
     }
 
+    /// The local folder name for a job's repo: the slug's last component
+    /// (`radiusmethod/api` → `api`, GitLab `group/sub/proj` → `proj`), or the
+    /// value verbatim when it isn't a slug (legacy bare-name jobs).
+    nonisolated static func jobRepoFolder(for repo: String) -> String {
+        repo.contains("/") ? (repo as NSString).lastPathComponent : repo
+    }
+
+    /// Where a workspace-scoped job's checkout and worktree parent live:
+    /// `{devRoot}/{workspace}/{repoFolder}`. Pure path math (no filesystem),
+    /// so it's unit-testable independent of clone/worktree side effects.
+    nonisolated static func jobWorktreeLayout(
+        devRoot: String, workspace: String, repo: String
+    ) -> (workspacePath: String, repoPath: String, repoFolder: String) {
+        let repoFolder = jobRepoFolder(for: repo)
+        let workspacePath = (devRoot as NSString).appendingPathComponent(workspace)
+        let repoPath = (workspacePath as NSString).appendingPathComponent(repoFolder)
+        return (workspacePath, repoPath, repoFolder)
+    }
+
     /// Clone a job's repo into `destination` on demand (the provider list can
     /// include repos not yet checked out). Needs an `owner/repo` slug; the
     /// workspace supplies the provider and (for GitLab) the host. Returns
@@ -1365,11 +1389,9 @@ final class SessionService {
         NSLog("[SessionService] Job '\(job.name)': cloning \(job.repo) into \(destination)")
         do {
             if provider == "gitlab" {
-                if let host = workspace?.host, !host.isEmpty {
-                    _ = try await shell("GITLAB_HOST=\(host)", "glab", "repo", "clone", job.repo, destination)
-                } else {
-                    _ = try await shell("glab", "repo", "clone", job.repo, destination)
-                }
+                var env: [String: String] = [:]
+                if let host = workspace?.host, !host.isEmpty { env["GITLAB_HOST"] = host }
+                _ = try await shell(env: env, "glab", "repo", "clone", job.repo, destination)
             } else {
                 _ = try await shell("gh", "repo", "clone", job.repo, destination)
             }
