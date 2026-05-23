@@ -384,13 +384,37 @@ public final class TmuxBackend {
         if confPath == nil {
             throw TmuxBackendError.bundledResourceMissing("crow-tmux.conf")
         }
+        // The cockpit session may already be live even though `controller` is
+        // nil. `TmuxController.run` blocks on `Process.waitUntilExit()`, which
+        // pumps the main run loop — so the `new-session` we're about to issue
+        // can be re-entered by another `ensureRunningServer()` caller before
+        // we cache `controller`. On launch this is the norm: every persisted
+        // terminal hydrates as its own `Task { @MainActor }` (#293) and, with
+        // multiple Manager sessions (#326), six-plus of them race here at once.
+        // Whoever wins creates `crow-cockpit`; the rest must ADOPT it, not
+        // re-create it (`new-session` errors with "duplicate session", and
+        // because that throws the loser never cached `controller` — so every
+        // subsequent call kept failing and every terminal rendered blank).
+        if ctrl.hasSession() {
+            controller = ctrl
+            return ctrl
+        }
         // The "session anchor" is a no-op long-running command — kept alive
         // so the session persists even if every window is closed by the
         // user. /usr/bin/tail -f /dev/null is the conventional choice.
-        try ctrl.newSessionDetached(
-            configPath: confPath,
-            command: "/usr/bin/tail -f /dev/null"
-        )
+        do {
+            try ctrl.newSessionDetached(
+                configPath: confPath,
+                command: "/usr/bin/tail -f /dev/null"
+            )
+        } catch {
+            // Lost the creation race after the `hasSession()` check above:
+            // a reentrant caller created the session while our `new-session`
+            // subprocess was starting. The session exists, which is exactly
+            // the post-condition we want — adopt it rather than propagating
+            // the spurious "duplicate session" failure.
+            guard ctrl.hasSession() else { throw error }
+        }
         controller = ctrl
         return ctrl
     }
