@@ -3,22 +3,17 @@ import CrowCore
 
 // MARK: - Changes Summary Board
 
-/// Full-pane changes-summary board. Lets the user pick a time window, hit
-/// Generate, and see a deterministic cross-repo commit digest grouped by repo
+/// Full-pane changes-summary board. Hit Generate to see a deterministic
+/// cross-repo commit digest for the last 24 hours, grouped by repo
 /// — the in-app counterpart to the `crow summary` CLI. Both converge on
 /// `GitManager.summarizeCommits` via `appState.onGenerateSummary`.
 public struct SummaryBoardView: View {
     @Bindable var appState: AppState
 
-    /// Preset windows. Deliberately short — more than a day or two of commits is
-    /// already too much to skim at a glance.
-    private enum Period: String, CaseIterable, Identifiable {
-        case day24 = "24 hours"
-        case day48 = "48 hours"
-        var id: String { rawValue }
-    }
-
-    @State private var period: Period = .day24
+    /// Fixed window: the last 24 hours. More than a day of commits is already
+    /// too much to skim, so there's no time-period selector — `git log --since`
+    /// does the filtering.
+    private static let sinceWindow = "24 hours ago"
 
     public init(appState: AppState) {
         self.appState = appState
@@ -28,7 +23,7 @@ public struct SummaryBoardView: View {
         VStack(spacing: 0) {
             header
             SectionHelpBanner(
-                description: "A deterministic digest of commits for the chosen window, grouped by repo. Scoped to the repos you list in Settings → General → Changes Summary — nothing is summarized until at least one is listed. Same data as `crow summary`.",
+                description: "A deterministic digest of the last 24 hours of commits, grouped by repo. Scoped to the repos you list in Settings → General → Changes Summary — nothing is summarized until at least one is listed. Same data as `crow summary`.",
                 storageKey: "helpDismissed_summary"
             )
             controls
@@ -69,55 +64,48 @@ public struct SummaryBoardView: View {
     // MARK: Controls
 
     private var controls: some View {
-        VStack(spacing: 10) {
-            Picker("Period", selection: $period) {
-                ForEach(Period.allCases) { p in
-                    Text(p.rawValue).tag(p)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-
-            HStack(spacing: 8) {
-                Spacer()
-                Button(action: summarizeWithLLM) {
-                    HStack(spacing: 4) {
-                        if appState.isSummarizingLLM {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 10))
-                        }
-                        Text("LLM Summarize")
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-                    .foregroundStyle(CorveilTheme.gold)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(CorveilTheme.goldDark.opacity(0.4), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(appState.lastSummary.isEmpty || appState.isLoadingSummary || appState.isSummarizingLLM)
-
-                Button(action: generate) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.triangle.2.circlepath")
+        HStack(spacing: 8) {
+            Text("Last 24 hours")
+                .font(.caption)
+                .foregroundStyle(CorveilTheme.textSecondary)
+            Spacer()
+            Button(action: summarizeWithLLM) {
+                HStack(spacing: 4) {
+                    if appState.isSummarizingLLM {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "sparkles")
                             .font(.system(size: 10))
-                        Text("Generate")
-                            .font(.system(size: 13, weight: .semibold))
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(CorveilTheme.gold)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    Text("LLM Summarize")
+                        .font(.system(size: 13, weight: .semibold))
                 }
-                .buttonStyle(.plain)
-                .disabled(appState.isLoadingSummary)
+                .foregroundStyle(CorveilTheme.gold)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(CorveilTheme.goldDark.opacity(0.4), lineWidth: 1)
+                )
             }
+            .buttonStyle(.plain)
+            .disabled(appState.lastSummary.isEmpty || appState.isLoadingSummary || appState.isSummarizingLLM)
+
+            Button(action: generate) {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 10))
+                    Text("Generate")
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(CorveilTheme.gold)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .disabled(appState.isLoadingSummary)
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
@@ -190,7 +178,7 @@ public struct SummaryBoardView: View {
                     .font(.headline)
                     .foregroundStyle(CorveilTheme.textSecondary)
                     .padding(.top, 8)
-                Text("List repos in Settings → General → Changes Summary, pick a window, and hit Generate to see what changed.")
+                Text("List repos in Settings → General → Changes Summary, then hit Generate to see what changed in the last 24 hours.")
                     .font(.caption)
                     .foregroundStyle(CorveilTheme.textMuted)
                     .multilineTextAlignment(.center)
@@ -270,22 +258,15 @@ public struct SummaryBoardView: View {
         appState.lastSummary.reduce(0) { $0 + $1.commits.count }
     }
 
-    /// Map the selected period to git date strings and generate.
+    /// Generate the digest for the fixed last-24-hours window.
     private func generate() {
-        let since: String
-        switch period {
-        case .day24: since = "24 hours ago"
-        case .day48: since = "48 hours ago"
-        }
-        let until: String? = nil
-
         guard let onGenerate = appState.onGenerateSummary else { return }
         appState.isLoadingSummary = true
         // The previous narrative describes a stale digest — drop it.
         appState.llmNarrative = ""
         appState.llmSummaryError = nil
         Task {
-            let result = await onGenerate(since, until)
+            let result = await onGenerate(Self.sinceWindow, nil)
             appState.lastSummary = result
             appState.isLoadingSummary = false
         }

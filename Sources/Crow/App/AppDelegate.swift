@@ -1554,7 +1554,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             },
             "get-summary": { @Sendable params in
-                let since = params["since"]?.stringValue ?? "1 week ago"
+                let since = params["since"]?.stringValue ?? "24 hours ago"
                 let until = params["until"]?.stringValue
                 let excludeDirs = await excludeDirsProvider()
                 let include = await summaryReposProvider()
