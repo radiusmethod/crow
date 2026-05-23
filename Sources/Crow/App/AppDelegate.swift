@@ -1483,6 +1483,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return await MainActor.run {
                     let state = capturedAppState.hookState(for: sessionID)
                     let stateBefore = state.claudeState
+                    // Snapshot the color-driving subset so we can persist only on a
+                    // real change (keeps sidebar colors correct after relaunch — #367).
+                    let snapshotBefore = state.persistedSnapshot
 
                     // Append to ring buffer (keep last 50 events per session)
                     state.hookEvents.append(event)
@@ -1620,6 +1623,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if hookDebug && state.claudeState != stateBefore {
                         let shortID = String(sessionIDStr.prefix(8))
                         NSLog("[hook-event] session=\(shortID) event=\(eventName) state=\(stateBefore.rawValue)→\(state.claudeState.rawValue)")
+                    }
+
+                    // Persist the color-driving state only when it actually changed,
+                    // so sidebar colors survive a quit→relaunch (#367). Excluding
+                    // lastToolActivity means frequent PostToolUse events don't write.
+                    let snapshotAfter = state.persistedSnapshot
+                    if snapshotAfter != snapshotBefore {
+                        capturedStore.mutate { data in
+                            var map = data.hookStates ?? [:]
+                            map[sessionIDStr] = snapshotAfter
+                            data.hookStates = map
+                        }
                     }
 
                     return [

@@ -56,6 +56,21 @@ final class SessionService {
             }
         }
 
+        // Restore persisted hook state so sidebar status colors reflect the true
+        // state immediately on relaunch — before any live hook event arrives.
+        // Since #330 the adopt path no longer re-runs `claude --continue`, so no
+        // SessionStart fires to repopulate this; without restore the colors sit
+        // on a stale default until the user next interacts with Claude (#367).
+        // Restore only for sessions that still exist so stale entries for
+        // deleted sessions are never resurrected.
+        if let persisted = data.hookStates {
+            let liveIDs = Set(appState.sessions.map(\.id))
+            for (key, snapshot) in persisted {
+                guard let sid = UUID(uuidString: key), liveIDs.contains(sid) else { continue }
+                appState.restoreHookState(snapshot, for: sid)
+            }
+        }
+
         for session in appState.sessions {
             appState.worktrees[session.id] = data.worktrees.filter { $0.sessionID == session.id }
             appState.links[session.id] = data.links.filter { $0.sessionID == session.id }
@@ -217,6 +232,30 @@ final class SessionService {
                 appState.autoLaunchTerminals.remove(terminal.id)
                 if appState.terminalReadiness[terminal.id] != nil {
                     appState.terminalReadiness[terminal.id] = .claudeLaunched
+                }
+                // Adoption skips launchClaude, so re-apply its two UI-affecting
+                // side effects here (#367). Gate on trackReadiness — true only for
+                // managed work terminals, exactly the set launchClaude handles —
+                // so the Manager (whose RC is seeded in hydrateState) is untouched.
+                if trackReadiness {
+                    // Re-write hook config so the adopted Claude's hooks still
+                    // route back to the correct session if the config was lost.
+                    if let crowPath = HookConfigGenerator.findCrowBinary(),
+                       let worktree = appState.primaryWorktree(for: terminal.sessionID) {
+                        do {
+                            try HookConfigGenerator.writeHookConfig(
+                                worktreePath: worktree.worktreePath,
+                                sessionID: terminal.sessionID,
+                                crowPath: crowPath
+                            )
+                        } catch {
+                            NSLog("[SessionService] adopt: hook config rewrite failed for \(terminal.sessionID): \(error.localizedDescription)")
+                        }
+                    }
+                    // Re-seed the RemoteControl badge for adopted --rc terminals.
+                    if appState.remoteControlEnabled {
+                        appState.remoteControlActiveTerminals.insert(terminal.id)
+                    }
                 }
                 return terminal  // binding unchanged → no redundant persist
             } catch {
@@ -620,6 +659,7 @@ final class SessionService {
             data.worktrees.removeAll { $0.sessionID == id }
             data.links.removeAll { $0.sessionID == id }
             data.terminals.removeAll { $0.sessionID == id }
+            data.hookStates?[id.uuidString] = nil
         }
 
         if appState.selectedSessionID == id {
@@ -1509,12 +1549,17 @@ final class SessionService {
 
     /// Sync all in-memory state back to the JSON store on disk.
     func persistState() {
+        // Snapshot color-driving hook state so a clean quit (this runs from
+        // applicationWillTerminate) captures the final state for relaunch (#367).
+        let hookSnapshots = appState.allHookStateSnapshots()
         store.mutate { data in
             data.sessions = appState.sessions
             // Flatten worktrees, links, terminals from dicts
             data.worktrees = appState.worktrees.values.flatMap { $0 }
             data.links = appState.links.values.flatMap { $0 }
             data.terminals = appState.terminals.values.flatMap { $0 }
+            data.hookStates = Dictionary(
+                uniqueKeysWithValues: hookSnapshots.map { ($0.key.uuidString, $0.value) })
         }
     }
 

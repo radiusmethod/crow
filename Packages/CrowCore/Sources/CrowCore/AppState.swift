@@ -251,6 +251,17 @@ public final class AppState {
         _sessionState.removeValue(forKey: sessionID)
     }
 
+    /// Snapshot every session's color-driving hook state for persistence (#367).
+    public func allHookStateSnapshots() -> [UUID: PersistedHookState] {
+        _sessionState.mapValues { $0.persistedSnapshot }
+    }
+
+    /// Seed a session's hook state from a persisted snapshot on launch, so the
+    /// sidebar status colors are correct before any live hook event arrives.
+    public func restoreHookState(_ snapshot: PersistedHookState, for sessionID: UUID) {
+        hookState(for: sessionID).apply(snapshot)
+    }
+
     /// Called when the user clicks the sidebar "+" to spawn a new Manager session.
     public var onCreateManager: (() -> Void)?
 
@@ -543,4 +554,47 @@ public final class SessionHookState {
     public var lastTopLevelStopAt: Date?
 
     public init() {}
+}
+
+/// Codable, value-type snapshot of the *color-driving* subset of
+/// `SessionHookState`, persisted to the store so sidebar status colors are
+/// correct immediately on relaunch — before any live hook event arrives (#367).
+///
+/// Only the fields that drive `SessionListView.statusIndicator` /
+/// `rowBackgroundColor` are persisted. `lastToolActivity` is intentionally
+/// excluded: it changes on every `PostToolUse` (very high frequency), only
+/// feeds the badge text (not colors), and would be stale after relaunch anyway.
+public struct PersistedHookState: Codable, Sendable, Equatable {
+    public var claudeState: ClaudeState
+    public var pendingNotification: HookNotification?
+    public var lastTopLevelStopAt: Date?
+
+    public init(
+        claudeState: ClaudeState = .idle,
+        pendingNotification: HookNotification? = nil,
+        lastTopLevelStopAt: Date? = nil
+    ) {
+        self.claudeState = claudeState
+        self.pendingNotification = pendingNotification
+        self.lastTopLevelStopAt = lastTopLevelStopAt
+    }
+}
+
+@MainActor
+extension SessionHookState {
+    /// Capture the persistable, color-driving subset of this state.
+    public var persistedSnapshot: PersistedHookState {
+        PersistedHookState(
+            claudeState: claudeState,
+            pendingNotification: pendingNotification,
+            lastTopLevelStopAt: lastTopLevelStopAt
+        )
+    }
+
+    /// Seed this state from a persisted snapshot (used on launch).
+    public func apply(_ snapshot: PersistedHookState) {
+        claudeState = snapshot.claudeState
+        pendingNotification = snapshot.pendingNotification
+        lastTopLevelStopAt = snapshot.lastTopLevelStopAt
+    }
 }
