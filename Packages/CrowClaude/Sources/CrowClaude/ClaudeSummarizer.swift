@@ -50,7 +50,10 @@ public struct ClaudeSummarizer: Sendable {
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["claude", "-p", prompt]
+        // `--dangerously-skip-permissions` keeps the headless run from blocking on
+        // a directory-trust / tool-permission prompt. Safe here: the prompt is
+        // pure text summarization, so Claude has no reason to invoke any tool.
+        process.arguments = ["claude", "-p", "--dangerously-skip-permissions", prompt]
         process.environment = ShellEnvironment.shared.env
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
