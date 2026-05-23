@@ -28,6 +28,9 @@ struct Scaffolder {
         let batchSkillsDir = (claudeDir as NSString).appendingPathComponent("skills/crow-batch-workspace")
         try fm.createDirectory(atPath: batchSkillsDir, withIntermediateDirectories: true)
 
+        let createTicketSkillsDir = (claudeDir as NSString).appendingPathComponent("skills/crow-create-ticket")
+        try fm.createDirectory(atPath: createTicketSkillsDir, withIntermediateDirectories: true)
+
         // Create crow-reviews directory for PR review clones
         let reviewsDir = (devRoot as NSString).appendingPathComponent("crow-reviews")
         try fm.createDirectory(atPath: reviewsDir, withIntermediateDirectories: true)
@@ -78,6 +81,11 @@ struct Scaffolder {
         let batchSkillPath = (batchSkillsDir as NSString).appendingPathComponent("SKILL.md")
         let batchSkillTemplate = Self.bundledBatchSkill()
         try batchSkillTemplate.write(toFile: batchSkillPath, atomically: true, encoding: .utf8)
+
+        // Always overwrite the create-ticket skill with the latest version
+        let createTicketSkillPath = (createTicketSkillsDir as NSString).appendingPathComponent("SKILL.md")
+        let createTicketSkillTemplate = Self.bundledCreateTicketSkill()
+        try createTicketSkillTemplate.write(toFile: createTicketSkillPath, atomically: true, encoding: .utf8)
 
         // Always overwrite settings.json (permissions for crow, gh, git commands)
         let settingsPath = (claudeDir as NSString).appendingPathComponent("settings.json")
@@ -192,6 +200,28 @@ struct Scaffolder {
         """
     }
 
+    /// The crow-create-ticket SKILL.md template bundled with the app.
+    static func bundledCreateTicketSkill() -> String {
+        if let content = loadFromRepo("skills/crow-create-ticket/SKILL.md") {
+            return content
+        }
+        if let url = Bundle.main.url(forResource: "crow-create-ticket-SKILL.md", withExtension: "template"),
+           let content = try? String(contentsOf: url) {
+            return content
+        }
+        return """
+        # Crow Create Ticket
+
+        ## Activation
+        This skill activates when user invokes `/crow-create-ticket` command.
+
+        ## Important
+        Creates a GitHub issue (`gh`) or GitLab issue (`glab`) assigned to the current
+        user and labeled `crow:auto`. All `gh`, `glab`, and `git` commands require
+        `dangerouslyDisableSandbox: true`.
+        """
+    }
+
     /// The settings.json template with pre-approved permissions.
     static func bundledSettings() -> String {
         if let content = loadFromRepo("settings.json") {
@@ -210,14 +240,20 @@ struct Scaffolder {
               "Bash(gh issue edit:*)",
               "Bash(gh api graphql:*)",
               "Bash(gh api repos:*)",
+              "Bash(gh api user:*)",
+              "Bash(gh label create:*)",
+              "Bash(gh label list:*)",
               "Bash(gh pr view:*)",
               "Bash(gh pr create:*)",
               "Bash(gh workflow list:*)",
               "Bash(gh workflow view:*)",
               "Bash(gh workflow run:*)",
               "Bash(GITLAB_HOST=* glab issue view:*)",
+              "Bash(GITLAB_HOST=* glab issue create:*)",
               "Bash(GITLAB_HOST=* glab mr view:*)",
               "Bash(GITLAB_HOST=* glab mr list:*)",
+              "Bash(GITLAB_HOST=* glab api:*)",
+              "Bash(GITLAB_HOST=* glab label create:*)",
               "Bash(git -C:*)",
               "Write(.claude/prompts/**)",
               "Bash(git fetch:*)",
