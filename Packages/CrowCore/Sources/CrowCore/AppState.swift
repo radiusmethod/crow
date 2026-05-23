@@ -43,6 +43,11 @@ public final class AppState {
     /// launch; worker sessions and CLI-spawned terminals are unaffected.
     public var managerAutoPermissionMode: Bool = true
 
+    /// `true` when the Manager's `claude` process has exited (crash, kill, OOM)
+    /// and has not yet been restarted. Drives the "Manager process exited" banner
+    /// and enables the "Restart Manager" action. Reset when the Manager relaunches.
+    public var managerProcessExited: Bool = false
+
     /// Terminal IDs whose Claude Code was launched with `--rc` — drives the
     /// per-session indicator badge. Survives toggle changes so existing sessions
     /// keep showing the badge until they're restarted.
@@ -222,6 +227,10 @@ public final class AppState {
 
     /// Called when the user clicks "Retry" on a failed terminal surface.
     public var onRetryTerminal: ((UUID) -> Void)?  // receives terminal ID
+
+    /// Called to relaunch the Manager's `claude` process after it exited, while
+    /// preserving the Manager session identity. Wired to `SessionService.restartManager`.
+    public var onRestartManager: (() -> Void)?
 
     /// Called when the user clicks "Retry" on a terminal whose tmux readiness
     /// watch timed out before the shell signaled it was interactive.

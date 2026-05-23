@@ -55,6 +55,7 @@ public final class TerminalManager {
             workingDirectory: workingDirectory,
             command: command
         )
+        view.terminalID = id
         view.onSurfaceCreated = { [weak self] in
             NSLog("[TerminalManager] onSurfaceCreated (offscreen) for \(id)")
             self?.surfaceDidCreate(id: id)
@@ -88,6 +89,7 @@ public final class TerminalManager {
         }
         NSLog("[TerminalManager] surface(for: \(id)) — creating NEW view, setting onSurfaceCreated callback")
         let view = GhosttySurfaceView(frame: .zero, workingDirectory: workingDirectory, command: command)
+        view.terminalID = id
         view.onSurfaceCreated = { [weak self] in
             NSLog("[TerminalManager] onSurfaceCreated callback fired for \(id)")
             self?.surfaceDidCreate(id: id)

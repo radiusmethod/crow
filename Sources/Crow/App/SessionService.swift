@@ -526,6 +526,36 @@ final class SessionService {
         }
     }
 
+    /// Relaunch the Manager's `claude` process in place after it has exited
+    /// (crash, kill, OOM). The Manager session row and `AppState.managerSessionID`
+    /// are preserved — only the dead terminal/surface is torn down and replaced.
+    ///
+    /// Tears down the existing Ghostty surface, drops the stale terminal row from
+    /// both memory and disk, clears the exited flag, then re-runs
+    /// `ensureManagerSession` which recreates a fresh Manager terminal (new
+    /// terminal UUID) using the current remote-control / auto-permission args.
+    func restartManager(devRoot: String) {
+        let managerID = AppState.managerSessionID
+        let terminals = appState.terminals(for: managerID)
+        // Fall back to a dead terminal's cwd if the caller's devRoot is empty.
+        let resolvedDevRoot = devRoot.isEmpty ? (terminals.first?.cwd ?? devRoot) : devRoot
+
+        for terminal in terminals {
+            TerminalRouter.destroy(terminal)
+        }
+        appState.terminals.removeValue(forKey: managerID)
+        appState.remoteControlActiveTerminals.subtract(terminals.map(\.id))
+        store.mutate { data in
+            data.terminals.removeAll { $0.sessionID == managerID }
+        }
+
+        appState.managerProcessExited = false
+        NSLog("[CrowTelemetry manager:restart]")
+
+        // Session row still exists, so this only recreates the terminal.
+        ensureManagerSession(devRoot: resolvedDevRoot)
+    }
+
     // MARK: - Delete Session
 
     /// Snapshot of one worktree's cleanup work, captured on the MainActor and
