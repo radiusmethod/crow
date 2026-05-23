@@ -366,6 +366,10 @@ public final class AppState {
         sessions.filter { $0.status == .active && $0.kind == .work }
     }
 
+    public var jobSessions: [Session] {
+        sessions.filter { $0.status == .active && $0.kind == .job }
+    }
+
     public var inReviewSessions: [Session] {
         sessions.filter { $0.status == .inReview && !$0.isManager }
     }

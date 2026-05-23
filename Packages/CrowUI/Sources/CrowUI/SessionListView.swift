@@ -105,6 +105,30 @@ public struct SessionListView: View {
                     }
             }
 
+            // Job sessions
+            if !appState.jobSessions.isEmpty {
+                SectionDivider(
+                    title: "Jobs",
+                    isSelectionMode: isSelectionMode,
+                    sectionIDs: Set(filteredSessions(appState.jobSessions).map(\.id)),
+                    selectedSessionIDs: $selectedSessionIDs
+                )
+                ForEach(filteredSessions(appState.jobSessions)) { session in
+                    SessionRow(
+                        session: session,
+                        appState: appState,
+                        isSelectionMode: isSelectionMode,
+                        selectedSessionIDs: $selectedSessionIDs
+                    )
+                    .tag(session.id)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .contextMenu {
+                        sessionContextMenu(session)
+                    }
+                }
+            }
+
             // Active sessions
             if !appState.activeSessions.isEmpty {
                 SectionDivider(
