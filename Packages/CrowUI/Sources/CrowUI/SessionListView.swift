@@ -72,8 +72,8 @@ public struct SessionListView: View {
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
 
-            // Reviews + Terminals row
-            ReviewTerminalsSidebarRow(appState: appState)
+            // Reviews + Allow List row
+            ReviewsAllowListRow(appState: appState)
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
 
@@ -82,9 +82,9 @@ public struct SessionListView: View {
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
 
-            // Manager + Allow List row
+            // Manager + New Manager (+) row
             if appState.managerSession != nil {
-                ManagerAllowListRow(appState: appState)
+                ManagerSidebarRow(appState: appState)
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
             }
@@ -382,10 +382,11 @@ struct SectionDivider: View {
     }
 }
 
-// MARK: - Manager + Allow List Row
+// MARK: - Manager Row
 
-/// Combined Manager and Allow List toggle buttons in the sidebar.
-struct ManagerAllowListRow: View {
+/// Primary Manager toggle button plus the "new Manager" (+) button, on their
+/// own sidebar row.
+struct ManagerSidebarRow: View {
     @Bindable var appState: AppState
 
     var body: some View {
@@ -401,13 +402,6 @@ struct ManagerAllowListRow: View {
                     RemoteControlBadge(compact: true)
                         .padding(4)
                 }
-            }
-
-            sidebarButton(
-                title: "Allow List",
-                isActive: appState.selectedSessionID == AppState.allowListSessionID
-            ) {
-                appState.selectedSessionID = AppState.allowListSessionID
             }
 
             Button {

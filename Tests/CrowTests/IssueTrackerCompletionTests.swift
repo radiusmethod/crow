@@ -522,7 +522,6 @@ struct IssueTrackerCompletionTests {
             AppState.ticketBoardSessionID,
             AppState.allowListSessionID,
             AppState.reviewBoardSessionID,
-            AppState.globalTerminalSessionID,
         ]
         let sessions = protectedIDs.map {
             makeSession(id: $0, status: .completed, updatedAt: hoursAgo(48))

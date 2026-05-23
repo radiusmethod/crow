@@ -338,8 +338,8 @@ struct ReviewRow: View {
 
 // MARK: - Sidebar Row
 
-/// Combined Reviews and Terminals toggle buttons in the sidebar.
-public struct ReviewTerminalsSidebarRow: View {
+/// Combined Reviews and Allow List toggle buttons in the sidebar.
+public struct ReviewsAllowListRow: View {
     @Bindable var appState: AppState
 
     public init(appState: AppState) {
@@ -349,9 +349,34 @@ public struct ReviewTerminalsSidebarRow: View {
     public var body: some View {
         HStack(spacing: 6) {
             reviewButton
-            terminalButton
+            allowListButton
         }
         .padding(.vertical, 2)
+    }
+
+    private var allowListButton: some View {
+        let isActive = appState.selectedSessionID == AppState.allowListSessionID
+        return Button {
+            appState.selectedSessionID = AppState.allowListSessionID
+        } label: {
+            Text("Allow List")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(isActive ? CorveilTheme.gold : CorveilTheme.goldDark)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isActive ? CorveilTheme.bgCard : CorveilTheme.bgSurface)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(
+                                    isActive ? CorveilTheme.goldDark.opacity(0.6) : CorveilTheme.goldDark.opacity(0.3),
+                                    lineWidth: 1
+                                )
+                        )
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private var reviewButton: some View {
@@ -391,31 +416,6 @@ public struct ReviewTerminalsSidebarRow: View {
                             )
                     )
             )
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var terminalButton: some View {
-        let isActive = appState.selectedSessionID == AppState.globalTerminalSessionID
-        return Button {
-            appState.selectedSessionID = AppState.globalTerminalSessionID
-        } label: {
-            Text("Terminals")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(isActive ? CorveilTheme.gold : CorveilTheme.goldDark)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(isActive ? CorveilTheme.bgCard : CorveilTheme.bgSurface)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .strokeBorder(
-                                    isActive ? CorveilTheme.goldDark.opacity(0.6) : CorveilTheme.goldDark.opacity(0.3),
-                                    lineWidth: 1
-                                )
-                        )
-                )
         }
         .buttonStyle(.plain)
     }

@@ -30,44 +30,51 @@ public struct TerminalSurfaceView: NSViewRepresentable {
     @MainActor
     public func makeNSView(context: Context) -> NSView {
         let container = NSView()
-        if let surface = cockpitSurface() {
-            attach(surface: surface, to: container)
-        }
-        // makeActive is fired from updateNSView — issuing it here too can
-        // double-fire `tmux select-window` on the same tab activation when
-        // SwiftUI calls update right after make on .id() recreation.
+        // Attach the shared cockpit surface on the NEXT run-loop turn, never
+        // synchronously here. Both `cockpitSurface()` (→ `ensureRunningServer`,
+        // a blocking tmux subprocess) and `ghostty_surface_new()` pump the main
+        // run loop while they wait. NSHostingView builds this representable
+        // *inside* the main window's first synchronous layout (the
+        // `window.contentView = hostingView` assignment in AppDelegate), so
+        // pumping the run loop there re-enters layout and live-locks before the
+        // window is ever ordered on-screen — the window stays 0×0/off-screen
+        // and no UI appears. Deferring lets that layout pass finish and the
+        // window show first; the surface then attaches a tick later.
+        syncSurface(into: container)
         return container
     }
 
-    /// Re-parent the surface if SwiftUI replaced the container, and acquire
-    /// first responder once the view is in a window. Also fire makeActive —
-    /// this is the "tab switched to a different tmux terminal" hook in the
-    /// shared-surface model.
+    /// Re-parent the surface if SwiftUI replaced the container, switch the
+    /// attached tmux client to this terminal's window, and take first
+    /// responder. Same deferral rationale as `makeNSView`: `makeActive` shells
+    /// out to `tmux select-window` (which pumps the run loop), and updateNSView
+    /// is itself invoked during layout, so doing this work synchronously here
+    /// re-enters layout.
     @MainActor
     public func updateNSView(_ nsView: NSView, context: Context) {
-        guard let surface = TmuxBackend.shared.existingCockpitSurface else { return }
+        syncSurface(into: nsView)
+    }
 
-        try? TmuxBackend.shared.makeActive(id: terminalID)
-
-        if surface.superview !== nsView {
-            // addSubview re-parents atomically — no need for an explicit
-            // removeFromSuperview, which would trigger an extra
-            // viewDidMoveToWindow(nil) round-trip and a redundant
-            // ghostty_surface_set_focus(false) on the shared surface.
-            attach(surface: surface, to: nsView)
-        }
-
-        // Acquire first responder after AppKit has had a chance to add the
-        // container to the window hierarchy. Scheduling via Task @MainActor
-        // hops to the next main-actor execution without an arbitrary delay,
-        // so rapid tab switches don't stack stale closures against the
-        // (shared, in tmux mode) surface.
-        Task { @MainActor [weak surface] in
-            guard let surface,
-                  let window = nsView.window,
-                  surface.superview === nsView,
-                  surface.window === window else { return }
-            window.makeFirstResponder(surface)
+    /// Create-if-needed, re-parent, activate, and focus the shared cockpit
+    /// surface — all hopped to the next run-loop turn so none of the
+    /// run-loop-pumping backend calls execute inside a SwiftUI layout pass.
+    /// Idempotent: no-ops the re-parent when the surface already lives here.
+    @MainActor
+    private func syncSurface(into container: NSView) {
+        let id = terminalID
+        DispatchQueue.main.async {
+            guard let surface = Self.cockpitSurface() else { return }
+            if surface.superview !== container {
+                // addSubview re-parents atomically — no need for an explicit
+                // removeFromSuperview, which would trigger an extra
+                // viewDidMoveToWindow(nil) round-trip and a redundant
+                // ghostty_surface_set_focus(false) on the shared surface.
+                Self.attach(surface: surface, to: container)
+            }
+            try? TmuxBackend.shared.makeActive(id: id)
+            if let window = container.window, surface.window === window {
+                window.makeFirstResponder(surface)
+            }
         }
     }
 
@@ -76,7 +83,7 @@ public struct TerminalSurfaceView: NSViewRepresentable {
     /// on autolayout to drive subsequent `setFrameSize` calls — manual
     /// `setFrameSize` here races with autolayout and is unnecessary.
     @MainActor
-    private func attach(surface: GhosttySurfaceView, to container: NSView) {
+    private static func attach(surface: GhosttySurfaceView, to container: NSView) {
         container.addSubview(surface)
         surface.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -88,7 +95,7 @@ public struct TerminalSurfaceView: NSViewRepresentable {
     }
 
     @MainActor
-    private func cockpitSurface() -> GhosttySurfaceView? {
+    private static func cockpitSurface() -> GhosttySurfaceView? {
         // The cockpit surface is created lazily on first call; subsequent
         // call sites (other tabs) get the same NSView. Returns nil when tmux
         // is unavailable so the container renders blank instead of crashing.

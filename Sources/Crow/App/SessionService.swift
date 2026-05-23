@@ -127,10 +127,14 @@ final class SessionService {
             }
         }
 
-        // Hydrate global terminals (not tied to any session)
-        let globalTerminals = data.terminals.filter { $0.sessionID == AppState.globalTerminalSessionID }
-        if !globalTerminals.isEmpty {
-            appState.terminals[AppState.globalTerminalSessionID] = globalTerminals
+        // Purge any persisted standalone-terminal rows left over from the
+        // removed global-terminals feature — multiple Manager sessions replaced
+        // it. These are never re-hydrated or rendered, so drop them from disk
+        // so they don't accumulate across launches.
+        if data.terminals.contains(where: { $0.sessionID == AppState.globalTerminalSessionID }) {
+            store.mutate { data in
+                data.terminals.removeAll { $0.sessionID == AppState.globalTerminalSessionID }
+            }
         }
 
         // Wire the readiness callback BEFORE re-registering terminals so the
@@ -160,15 +164,6 @@ final class SessionService {
             }
         }
 
-        if let globals = appState.terminals[AppState.globalTerminalSessionID] {
-            let sid = AppState.globalTerminalSessionID
-            for original in globals {
-                Task { @MainActor in
-                    let updated = self.rehydrateTerminalSurface(original, trackReadiness: false)
-                    self.applyRehydrationResult(sessionID: sid, original: original, updated: updated)
-                }
-            }
-        }
     }
 
     /// Commit the result of a per-terminal rehydration task back to
@@ -1037,46 +1032,6 @@ final class SessionService {
 
     // MARK: - Global Terminal Management
 
-    /// Add a new global terminal tab (not tied to any session).
-    func addGlobalTerminal() {
-        let sessionID = AppState.globalTerminalSessionID
-        let cwd = ConfigStore.loadDevRoot()
-            ?? FileManager.default.homeDirectoryForCurrentUser.path
-        let count = appState.terminals(for: sessionID).count
-        let raw = SessionTerminal(
-            sessionID: sessionID,
-            name: "Terminal \(count + 1)",
-            cwd: cwd,
-            isManaged: false
-        )
-        let terminal = prepareTerminal(raw, trackReadiness: false)
-        appState.terminals[sessionID, default: []].append(terminal)
-        appState.activeTerminalID[sessionID] = terminal.id
-        store.mutate { data in data.terminals.append(terminal) }
-    }
-
-    /// Close a global terminal tab.
-    func closeGlobalTerminal(terminalID: UUID) {
-        let sessionID = AppState.globalTerminalSessionID
-        let terminal = appState.terminals[sessionID]?.first(where: { $0.id == terminalID })
-        appState.terminals[sessionID]?.removeAll { $0.id == terminalID }
-
-        if appState.activeTerminalID[sessionID] == terminalID {
-            appState.activeTerminalID[sessionID] = appState.terminals[sessionID]?.first?.id
-        }
-
-        store.mutate { data in data.terminals.removeAll { $0.id == terminalID } }
-
-        // Defer the backing destroy so SwiftUI detaches the view before the
-        // underlying surface is freed (issue #282). Mirrors `closeTerminal`.
-        DispatchQueue.main.async {
-            if let terminal {
-                TerminalRouter.destroy(terminal)
-            } else {
-                TmuxBackend.shared.destroyTerminal(id: terminalID)
-            }
-        }
-    }
 
     // MARK: - Review Session
 
