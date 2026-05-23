@@ -403,12 +403,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.onRenameTerminal = { [weak service] sessionID, terminalID, name in
             service?.renameTerminal(sessionID: sessionID, terminalID: terminalID, name: name)
         }
-        appState.onAddGlobalTerminal = { [weak service] in
-            service?.addGlobalTerminal()
-        }
-        appState.onCloseGlobalTerminal = { [weak service] terminalID in
-            service?.closeGlobalTerminal(terminalID: terminalID)
-        }
 
         // Detect VS Code CLI and wire open action
         service.detectVSCode()
@@ -1159,10 +1153,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "list-terminals": { @Sendable params in
                 guard let idStr = params["session_id"]?.stringValue, let id = UUID(uuidString: idStr) else {
                     throw RPCError.invalidParams("session_id required")
-                }
-                // Global terminals are not exposed via the session CLI
-                if id == AppState.globalTerminalSessionID {
-                    return ["terminals": .array([])]
                 }
                 let terms = await MainActor.run { capturedAppState.terminals(for: id) }
                 let items: [JSONValue] = terms.map { t in

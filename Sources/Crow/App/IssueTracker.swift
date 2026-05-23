@@ -2454,7 +2454,6 @@ final class IssueTracker {
         AppState.ticketBoardSessionID,
         AppState.allowListSessionID,
         AppState.reviewBoardSessionID,
-        AppState.globalTerminalSessionID,
     ]
 
     /// Pure decision function: returns session IDs eligible for auto-cleanup.

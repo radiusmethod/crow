@@ -79,7 +79,9 @@ public final class AppState {
     /// Fixed UUID for the review board tab.
     nonisolated public static let reviewBoardSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000003")!
 
-    /// Fixed UUID for the global terminals page.
+    /// Legacy fixed UUID for the removed standalone-terminals page. Retained
+    /// only so persisted terminal rows from that feature can be identified and
+    /// purged on load (multiple Manager sessions replaced standalone terminals).
     nonisolated public static let globalTerminalSessionID = UUID(uuidString: "00000000-0000-0000-0000-000000000004")!
 
     /// Fixed UUID for the changes-summary board tab.
@@ -280,12 +282,6 @@ public final class AppState {
     /// Called to rename a terminal tab.
     public var onRenameTerminal: ((UUID, UUID, String) -> Void)?  // receives (sessionID, terminalID, newName)
 
-    /// Called to add a new global terminal tab.
-    public var onAddGlobalTerminal: (() -> Void)?
-
-    /// Called to close a global terminal tab.
-    public var onCloseGlobalTerminal: ((UUID) -> Void)?  // receives terminalID
-
     // MARK: - Closures wired by AppDelegate
 
     /// Called to delete a session and clean up its worktrees.
@@ -337,7 +333,6 @@ public final class AppState {
         guard selectedSessionID != Self.ticketBoardSessionID,
               selectedSessionID != Self.allowListSessionID,
               selectedSessionID != Self.reviewBoardSessionID,
-              selectedSessionID != Self.globalTerminalSessionID,
               selectedSessionID != Self.summaryBoardSessionID else { return nil }
         return sessions.first { $0.id == selectedSessionID }
     }
