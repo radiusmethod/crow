@@ -15,6 +15,14 @@ public struct SummaryBoardView: View {
     /// does the filtering.
     private static let sinceWindow = "24 hours ago"
 
+    /// Whether the `claude` CLI is on PATH; gates the LLM Summarize button.
+    /// Resolved once on appear (a PATH scan, not worth doing per render).
+    @State private var claudeAvailable = true
+
+    /// Bumped whenever results change (Generate) or a new LLM run starts, so an
+    /// in-flight LLM task can detect it was superseded and drop its stale result.
+    @State private var llmGeneration = 0
+
     public init(appState: AppState) {
         self.appState = appState
     }
@@ -33,6 +41,7 @@ public struct SummaryBoardView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.background)
+        .task { claudeAvailable = ShellEnvironment.shared.hasCommand("claude") }
     }
 
     // MARK: Header
@@ -89,7 +98,10 @@ public struct SummaryBoardView: View {
                 )
             }
             .buttonStyle(.plain)
-            .disabled(appState.lastSummary.isEmpty || appState.isLoadingSummary || appState.isSummarizingLLM)
+            .disabled(appState.lastSummary.isEmpty || appState.isLoadingSummary || appState.isSummarizingLLM || !claudeAvailable)
+            .help(claudeAvailable
+                  ? "Summarize the digest with Claude"
+                  : "Install the `claude` CLI to use LLM Summarize")
 
             Button(action: generate) {
                 HStack(spacing: 4) {
@@ -262,7 +274,10 @@ public struct SummaryBoardView: View {
     private func generate() {
         guard let onGenerate = appState.onGenerateSummary else { return }
         appState.isLoadingSummary = true
-        // The previous narrative describes a stale digest — drop it.
+        // Any in-flight LLM summary now targets a stale digest — invalidate it
+        // (so its late result is dropped) and clear the current narrative.
+        llmGeneration += 1
+        appState.isSummarizingLLM = false
         appState.llmNarrative = ""
         appState.llmSummaryError = nil
         Task {
@@ -277,16 +292,21 @@ public struct SummaryBoardView: View {
         guard let onSummarize = appState.onSummarizeWithLLM,
               !appState.lastSummary.isEmpty else { return }
         let digest = Self.buildDigest(appState.lastSummary)
+        llmGeneration += 1
+        let generation = llmGeneration
         appState.isSummarizingLLM = true
         appState.llmSummaryError = nil
         appState.llmNarrative = ""
         Task {
             do {
-                appState.llmNarrative = try await onSummarize(digest)
+                let narrative = try await onSummarize(digest)
+                guard generation == llmGeneration else { return }  // superseded
+                appState.llmNarrative = narrative
             } catch {
+                guard generation == llmGeneration else { return }
                 appState.llmSummaryError = error.localizedDescription
             }
-            appState.isSummarizingLLM = false
+            if generation == llmGeneration { appState.isSummarizingLLM = false }
         }
     }
 

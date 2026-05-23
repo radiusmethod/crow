@@ -319,6 +319,11 @@ public actor GitManager {
 
     /// Build the hosted-commit-page prefix for a host + slug. GitLab puts commits
     /// under `/-/commit/`; GitHub (and the default) uses `/commit/`.
+    ///
+    /// Provider detection is a substring check on the host. A self-hosted GitLab
+    /// whose hostname doesn't contain "gitlab" (e.g. `git.company.com`) falls
+    /// through to the GitHub-style `/commit/` path and would produce a wrong URL;
+    /// that's an accepted limitation short of probing the remote.
     static func commitURLPrefix(host: String, slug: String) -> String {
         let commitPath = host.lowercased().contains("gitlab") ? "/-/commit/" : "/commit/"
         return "https://\(host)/\(slug)\(commitPath)"
@@ -327,8 +332,10 @@ public actor GitManager {
     /// Extract the host ("github.com", "gitlab.example.com") from a git remote
     /// URL. Handles SSH (`git@host:org/repo`) and HTTPS (`https://host/...`).
     static func host(fromRemote url: String) -> String {
-        // SSH: git@host:org/repo
-        if let range = url.range(of: #"^[^@]+@([^:]+):"#, options: .regularExpression) {
+        // SSH: git@host:org/repo — host runs up to the first colon and excludes
+        // '/' so a path-ish remote (git@host/extra:org/repo) can't fold the path
+        // into the host (matches the HTTPS branch's intent).
+        if let range = url.range(of: #"^[^@]+@([^:/]+):"#, options: .regularExpression) {
             let match = String(url[range])
             if let at = match.firstIndex(of: "@"), let colon = match.lastIndex(of: ":") {
                 return String(match[match.index(after: at)..<colon])

@@ -155,5 +155,10 @@ struct CommitSummaryTests {
         let other = try await gm.summarizeCommits(
             since: window.since, until: window.until, includeRepos: ["other/repo"])
         #expect(other.isEmpty)
+
+        // Empty scope set → nothing (distinct from nil = include all).
+        let none = try await gm.summarizeCommits(
+            since: window.since, until: window.until, includeRepos: [])
+        #expect(none.isEmpty)
     }
 }
