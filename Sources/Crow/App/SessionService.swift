@@ -1041,7 +1041,36 @@ final class SessionService {
                 data.sessions[i].name = name
             }
         }
+        syncRemoteControlName(sessionID: sessionID, newName: name)
         return true
+    }
+
+    /// Terminals to push a Remote-Control `/rename` into for a session: those
+    /// launched with `--rc` (tracked in `remoteControlActiveTerminals`). That's
+    /// the Claude Code instance whose claude.ai panel label is fixed at launch.
+    /// Manager terminals qualify even though they aren't flagged `isManaged`.
+    /// Pure/`nonisolated` so it can be unit-tested without a live app.
+    nonisolated static func remoteControlRenameTargets(
+        terminals: [SessionTerminal],
+        rcActiveTerminals: Set<UUID>
+    ) -> [SessionTerminal] {
+        terminals.filter { rcActiveTerminals.contains($0.id) }
+    }
+
+    /// After an in-app rename, push the new name to the running Claude Code via
+    /// its `/rename` slash command so claude.ai's Remote Control panel label
+    /// (fixed at launch via `--name`) stays in sync. No-op when the session has
+    /// no `--rc` terminal, or when a terminal's surface isn't ready to receive.
+    /// The name is already validated (no control characters) by the caller, so
+    /// the trailing newline is the only Enter keypress sent.
+    private func syncRemoteControlName(sessionID: UUID, newName: String) {
+        let targets = Self.remoteControlRenameTargets(
+            terminals: appState.terminals(for: sessionID),
+            rcActiveTerminals: appState.remoteControlActiveTerminals
+        )
+        for terminal in targets where TerminalRouter.canSend(terminal) {
+            TerminalRouter.send(terminal, text: "/rename \(newName)\n")
+        }
     }
 
     // MARK: - Global Terminal Management
