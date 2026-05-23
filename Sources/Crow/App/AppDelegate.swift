@@ -958,11 +958,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let capturedService = sessionService
         let capturedTelemetryPort = sessionService.telemetryPort
         let hookDebug = ProcessInfo.processInfo.environment["CROW_HOOK_DEBUG"] == "1"
-        // Handler closures capture locals (not `self`); snapshot what the
-        // get-summary handler needs to build a GitManager.
+        // Handler closures capture locals (not `self`). `devRoot` is fixed for
+        // the server's lifetime, so it's snapshotted; but the Changes-summary
+        // scope (`summaryRepos`) and `excludeDirs` are edited live in Settings,
+        // so the get-summary handler reads them per-call via providers that hop
+        // to the main actor — keeping `crow summary` in sync with the in-app
+        // board (which reads `appConfig` at call time too).
         let capturedDevRoot = devRoot
-        let capturedExcludeDirs = appConfig?.defaults.excludeDirs ?? WorkspaceDefaults().excludeDirs
-        let capturedSummaryRepos = Set(appConfig?.defaults.summaryRepos ?? [])
+        let summaryReposProvider: @Sendable () async -> Set<String> = { [weak self] in
+            await MainActor.run { Set(self?.appConfig?.defaults.summaryRepos ?? []) }
+        }
+        let excludeDirsProvider: @Sendable () async -> [String] = { [weak self] in
+            await MainActor.run { self?.appConfig?.defaults.excludeDirs ?? WorkspaceDefaults().excludeDirs }
+        }
 
         let router = CommandRouter(handlers: [
             "new-session": { @Sendable params in
@@ -1551,12 +1559,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "get-summary": { @Sendable params in
                 let since = params["since"]?.stringValue ?? "1 week ago"
                 let until = params["until"]?.stringValue
+                let excludeDirs = await excludeDirsProvider()
+                let include = await summaryReposProvider()
                 let gm = GitManager(config: WorkspaceConfig(
                     devRoot: capturedDevRoot,
                     workspaces: [:],
-                    defaults: WorkspaceDefaults(excludeDirs: capturedExcludeDirs)
+                    defaults: WorkspaceDefaults(excludeDirs: excludeDirs)
                 ))
-                let summaries = try await gm.summarizeCommits(since: since, until: until, includeRepos: capturedSummaryRepos)
+                let summaries = try await gm.summarizeCommits(since: since, until: until, includeRepos: include)
                 let fmt = ISO8601DateFormatter()
                 let repos: [JSONValue] = summaries.map { s in
                     .object([

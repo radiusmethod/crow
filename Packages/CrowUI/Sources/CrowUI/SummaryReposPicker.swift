@@ -50,6 +50,8 @@ struct SummaryReposPicker: View {
         )
     }
 
+    // Loads once per view lifetime: a repo added to the dev root while Settings
+    // is open won't appear until the panel is closed and reopened.
     private func load() async {
         guard !didLoad else { return }
         isLoading = true
