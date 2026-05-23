@@ -103,10 +103,14 @@ public actor GitManager {
     ///   session's in-progress edits.
     /// - **Verifies HEAD is on `branch`** before rebasing, so a worktree that
     ///   was switched to another branch is left alone (`.failed`).
+    /// - **Requires the local branch to match the remote PR head** before
+    ///   rewriting — committed-but-unpushed local commits (or a stale local
+    ///   branch) yield `.outOfSyncWithRemote` so a force-push can't publish
+    ///   unpushed work or revert remote commits.
     /// - **Aborts on conflict** to restore a clean checkout, then reports
     ///   `.conflicts` so the caller can hand resolution to a Claude session.
-    /// - **`--force-with-lease`** (against the last-fetched remote head of
-    ///   `branch`) so a concurrent push to the PR branch fails the lease
+    /// - **`--force-with-lease`** (against the remote head of `branch` fetched
+    ///   at the start) so a concurrent push to the PR branch fails the lease
     ///   rather than being overwritten.
     ///
     /// Returns a `RebaseOutcome` instead of throwing: the caller branches on
@@ -130,8 +134,23 @@ public actor GitManager {
                 return .failed("worktree HEAD is '\(head)', expected '\(branch)'")
             }
 
-            // Fetch the latest base so the rebase target is current.
-            _ = try await run(["git", "-C", worktreePath, "fetch", "origin", baseBranch])
+            // Fetch both the base (rebase target) and the branch itself so the
+            // remote-tracking ref used for the in-sync check and the
+            // `--force-with-lease` baseline reflect the current remote state.
+            _ = try await run(["git", "-C", worktreePath, "fetch", "origin", baseBranch, branch])
+
+            // Refuse to rewrite a branch that isn't in sync with its remote:
+            // local commits not yet pushed (ahead) would be published
+            // unexpectedly, and a stale local branch (behind/diverged) would
+            // revert remote commits on force-push. Only proceed when the local
+            // head exactly matches the remote PR head.
+            let localSha = try await run(["git", "-C", worktreePath, "rev-parse", "HEAD"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let remoteSha = try await run(["git", "-C", worktreePath, "rev-parse", "origin/\(branch)"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard localSha == remoteSha else {
+                return .outOfSyncWithRemote
+            }
 
             // Attempt the rebase. A failure here is almost always conflicts.
             // `-c commit.gpgsign=false`: rewriting commits would otherwise try
@@ -254,6 +273,12 @@ public enum RebaseOutcome: Sendable, Equatable {
     /// The worktree had uncommitted changes; nothing was touched. Transient —
     /// retry once the tree is clean.
     case dirtyWorktree
+    /// The local branch head doesn't match the remote PR head — there are
+    /// committed-but-unpushed local commits (ahead) or the worktree is stale
+    /// relative to the remote (behind/diverged). Nothing was touched, since a
+    /// rebase + force-push would either publish unpushed work or revert remote
+    /// commits. Transient — retry once the branch is back in sync.
+    case outOfSyncWithRemote
     /// Any other failure (branch mismatch, fetch error, rejected push, …).
     case failed(String)
 }

@@ -135,6 +135,32 @@ struct RebaseTests {
         #expect(!FileManager.default.fileExists(atPath: rebaseDir))
     }
 
+    @Test func unpushedLocalCommitsAreSkipped() async throws {
+        try #require(gitAvailable())
+        guard let (root, work) = makeRepo() else { Issue.record("setup failed"); return }
+        defer { cleanup(root) }
+
+        // Advance main so the PR is genuinely behind (would otherwise rebase).
+        git(["switch", "main"], in: work)
+        write((work as NSString).appendingPathComponent("other.txt"), "other\n")
+        git(["add", "."], in: work)
+        git(["commit", "-m", "main moves on"], in: work)
+        #expect(git(["push", "origin", "main"], in: work).code == 0)
+        git(["switch", "feature"], in: work)
+
+        // A committed-but-unpushed local commit (clean tree, ahead of remote).
+        write((work as NSString).appendingPathComponent("local.txt"), "local\n")
+        git(["add", "."], in: work)
+        git(["commit", "-m", "local unpushed work"], in: work)
+
+        let outcome = await GitManager().rebaseOntoBase(
+            worktreePath: work, branch: "feature", baseBranch: "main"
+        )
+        #expect(outcome == .outOfSyncWithRemote)
+        // The unpushed commit is still HEAD — nothing was rewritten or pushed.
+        #expect(git(["log", "-1", "--format=%s"], in: work).out.contains("local unpushed work"))
+    }
+
     @Test func dirtyWorktreeIsSkipped() async throws {
         try #require(gitAvailable())
         guard let (root, work) = makeRepo() else { Issue.record("setup failed"); return }

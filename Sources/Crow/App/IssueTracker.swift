@@ -123,9 +123,21 @@ final class IssueTracker {
     /// Per-head-commit guard for auto-rebase, keyed `"<url>\n<headRefOid>"`.
     /// One rebase attempt per head state — a successful rebase rewrites the
     /// head (new key), and a delegated conflict resolution that pushes a new
-    /// head also re-arms. A `.dirtyWorktree` outcome un-sets its key so the
-    /// transient state is retried. In-memory only.
+    /// head also re-arms. Transient outcomes (`.dirtyWorktree`,
+    /// `.outOfSyncWithRemote`, and bounded `.failed` retries) un-set the key so
+    /// the next poll retries. In-memory only.
     private var autoRebaseAttempted: Set<String> = []
+
+    /// Consecutive `.failed` rebase attempts per head-key, so a transient git
+    /// failure (fetch flake, rejected lease, unreachable base) is retried a
+    /// bounded number of times rather than either stalling forever or
+    /// hot-looping on a genuinely-broken config. Cleared on any non-failure
+    /// outcome. In-memory only.
+    private var autoRebaseFailureCounts: [String: Int] = [:]
+
+    /// Max consecutive `.failed` auto-rebase attempts per head state before
+    /// the watcher gives up until the head commit changes.
+    nonisolated static let maxAutoRebaseFailureRetries = 3
 
     /// Last observed `PRStatus` per session, used to compute transitions.
     /// Populated lazily on first observation; that first poll never fires
@@ -2077,27 +2089,38 @@ final class IssueTracker {
         }
     }
 
-    /// Verify Crow authorship, locate the session's primary worktree, then
+    /// Whether a `.failed` rebase should be retried on the next poll given how
+    /// many consecutive failures this head state has already seen. Pure so the
+    /// retry policy is unit-testable without an `IssueTracker`.
+    nonisolated static func shouldRetryFailedRebase(failureCount: Int) -> Bool {
+        failureCount < maxAutoRebaseFailureRetries
+    }
+
+    /// Locate the session's primary worktree, verify Crow authorship, then
     /// rebase it onto base and force-push. On conflicts, fire
-    /// `onAutoRebaseConflicts` so the caller hands resolution to Claude. A
-    /// dirty worktree un-sets the per-head key so the next poll retries once
-    /// the tree is clean.
+    /// `onAutoRebaseConflicts` so the caller hands resolution to Claude.
+    /// Transient outcomes (dirty tree, out-of-sync branch, bounded failures)
+    /// un-set the per-head key so the next poll retries.
     private func attemptRebase(session: Session, pr: ViewerPR) async {
         let headKey = "\(pr.url)\n\(pr.headRefOid)"
         defer { autoRebaseInFlight.remove(pr.url) }
 
-        guard await prHasCrowAuthoredCommit(pr: pr) else {
-            NSLog("[Crow] auto-rebase skipped on %@ — no Crow-Session trailer matching a known session",
-                  pr.url as NSString)
-            return
-        }
-
+        // Cheap local checks first — a completed/archived session may still
+        // carry an open `.pr` link with no worktree to rebase into, and unlike
+        // auto-merge there's no label gate, so avoid spending a `gh api` call
+        // (Crow-authorship) before discovering there's nothing to do.
         let worktrees = appState.worktrees(for: session.id)
         guard let primary = worktrees.first(where: { $0.isPrimary }) ?? worktrees.first,
               !primary.isMainRepoCheckout,
               primary.branch == pr.headRefName else {
             NSLog("[Crow] auto-rebase skipped on %@ — no usable worktree or branch mismatch (expected %@)",
                   pr.url as NSString, pr.headRefName as NSString)
+            return
+        }
+
+        guard await prHasCrowAuthoredCommit(pr: pr) else {
+            NSLog("[Crow] auto-rebase skipped on %@ — no Crow-Session trailer matching a known session",
+                  pr.url as NSString)
             return
         }
 
@@ -2108,22 +2131,45 @@ final class IssueTracker {
         )
         switch outcome {
         case .rebasedAndPushed:
+            autoRebaseFailureCounts[headKey] = nil
+            let priorState = pr.mergeable == "CONFLICTING" ? "CONFLICTING" : "BEHIND"
             NSLog("[Crow] Auto-rebased & force-pushed %@ (session %@, was %@)",
-                  pr.url as NSString, session.id.uuidString as NSString,
-                  pr.mergeable == "CONFLICTING" ? "CONFLICTING" : "BEHIND" as NSString)
+                  pr.url as NSString, session.id.uuidString as NSString, priorState as NSString)
             onAutoRebasePushed?(session.id, pr.url, pr.number)
         case .conflicts:
+            autoRebaseFailureCounts[headKey] = nil
             NSLog("[Crow] Auto-rebase hit conflicts on %@ (session %@) — delegating to Claude",
                   pr.url as NSString, session.id.uuidString as NSString)
             onAutoRebaseConflicts?(session.id, pr.url, pr.number)
         case .dirtyWorktree:
             // Transient (a Claude session is mid-edit). Re-arm so the next
             // poll retries once the tree is clean.
+            autoRebaseFailureCounts[headKey] = nil
             autoRebaseAttempted.remove(headKey)
             NSLog("[Crow] Auto-rebase deferred on %@ — worktree has uncommitted changes",
                   pr.url as NSString)
+        case .outOfSyncWithRemote:
+            // Transient: local branch has unpushed commits or is stale relative
+            // to the remote. Re-arm so the next poll retries once it's in sync.
+            autoRebaseFailureCounts[headKey] = nil
+            autoRebaseAttempted.remove(headKey)
+            NSLog("[Crow] Auto-rebase deferred on %@ — local branch not in sync with origin",
+                  pr.url as NSString)
         case .failed(let msg):
-            NSLog("[Crow] Auto-rebase failed on %@: %@", pr.url as NSString, msg as NSString)
+            // Transient git failures (fetch flake, rejected lease, unreachable
+            // base) shouldn't silently stall the watcher until the head commit
+            // changes. Retry a bounded number of times, then give up for this
+            // head state to avoid hot-looping on a broken config.
+            let failures = (autoRebaseFailureCounts[headKey] ?? 0) + 1
+            autoRebaseFailureCounts[headKey] = failures
+            if Self.shouldRetryFailedRebase(failureCount: failures) {
+                autoRebaseAttempted.remove(headKey)
+                NSLog("[Crow] Auto-rebase failed on %@ (attempt %d/%d, will retry): %@",
+                      pr.url as NSString, failures, Self.maxAutoRebaseFailureRetries, msg as NSString)
+            } else {
+                NSLog("[Crow] Auto-rebase failed on %@ (attempt %d/%d, giving up until head changes): %@",
+                      pr.url as NSString, failures, Self.maxAutoRebaseFailureRetries, msg as NSString)
+            }
         }
     }
 

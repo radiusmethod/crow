@@ -164,7 +164,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     /// Notify the user that Crow rebased a PR branch onto its base and
     /// force-pushed it (the branch had fallen behind base or developed
     /// conflicts Crow could resolve mechanically).
-    func notifyAutoRebasePushed(prURL: String, number: Int, sessionID: UUID) {
+    func notifyAutoRebasePushed(number: Int, sessionID: UUID) {
         guard !settings.globalMute else { return }
         guard settings.systemNotificationsEnabled else { return }
 
@@ -181,7 +181,7 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     /// resolved mechanically. Crow asks the session's Claude terminal to
     /// resolve them; this banner ensures the user knows even if no live
     /// terminal picked it up.
-    func notifyAutoRebaseConflicts(prURL: String, number: Int, sessionID: UUID) {
+    func notifyAutoRebaseConflicts(number: Int, sessionID: UUID) {
         guard !settings.globalMute else { return }
         guard settings.systemNotificationsEnabled else { return }
 

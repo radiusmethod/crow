@@ -94,4 +94,17 @@ struct IssueTrackerAutoRebaseTests {
         let pr = makePR(state: "MERGED", mergeStateStatus: "BEHIND")
         #expect(!IssueTracker.shouldAttemptAutoRebase(pr: pr))
     }
+
+    // MARK: - Failed-rebase retry policy
+
+    @Test func retriesFailuresUnderTheCap() {
+        #expect(IssueTracker.shouldRetryFailedRebase(failureCount: 1))
+        #expect(IssueTracker.shouldRetryFailedRebase(failureCount: 2))
+    }
+
+    @Test func stopsRetryingAtTheCap() {
+        #expect(IssueTracker.maxAutoRebaseFailureRetries == 3)
+        #expect(!IssueTracker.shouldRetryFailedRebase(failureCount: 3))
+        #expect(!IssueTracker.shouldRetryFailedRebase(failureCount: 4))
+    }
 }
