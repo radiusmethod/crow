@@ -1,7 +1,7 @@
 import Foundation
 
 /// A pending notification from Claude Code that needs user attention.
-public struct HookNotification: Sendable {
+public struct HookNotification: Sendable, Codable, Equatable {
     public let message: String
     public let notificationType: String
     public let timestamp: Date

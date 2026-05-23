@@ -7,17 +7,24 @@ public struct StoreData: Codable, Sendable {
     public var worktrees: [SessionWorktree]
     public var links: [SessionLink]
     public var terminals: [SessionTerminal]
+    /// Color-driving hook state per session, keyed by session UUID string (#367).
+    /// Optional so older `store.json` files lacking the key still decode — the
+    /// synthesized `Codable` tolerates a missing optional, keeping us backward
+    /// compatible and avoiding the corrupt-store backup path.
+    public var hookStates: [String: PersistedHookState]?
 
     public init(
         sessions: [Session] = [],
         worktrees: [SessionWorktree] = [],
         links: [SessionLink] = [],
-        terminals: [SessionTerminal] = []
+        terminals: [SessionTerminal] = [],
+        hookStates: [String: PersistedHookState]? = nil
     ) {
         self.sessions = sessions
         self.worktrees = worktrees
         self.links = links
         self.terminals = terminals
+        self.hookStates = hookStates
     }
 }
 
