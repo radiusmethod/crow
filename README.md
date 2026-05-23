@@ -14,11 +14,12 @@ A native macOS application for managing AI-powered development sessions. Orchest
 
 ### Build Dependencies
 
-| Tool  | Version | Purpose                                | Install                                                                           |
-| ----- | ------- | -------------------------------------- | --------------------------------------------------------------------------------- |
-| Swift | 6.0+    | Compiler (ships with Xcode)            | `xcode-select --install`                                                          |
-| Zig   | 0.15.2  | Builds the Ghostty terminal framework  | `brew install zig` or [ziglang.org](https://ziglang.org/download/)                |
-| mise  | latest  | Task runner (optional)                 | `brew install mise`                                                               |
+| Tool             | Version | Purpose                                | Install                                                                  |
+| ---------------- | ------- | -------------------------------------- | ------------------------------------------------------------------------ |
+| Swift            | 6.0+    | Compiler (ships with Xcode)            | `xcode-select --install`                                                 |
+| Zig              | 0.15.2  | Builds the Ghostty terminal framework  | `brew install zig@0.15` or [ziglang.org](https://ziglang.org/download/)  |
+| Metal Toolchain  | bundled | Compiles Ghostty's Metal shaders       | `xcodebuild -downloadComponent MetalToolchain`                           |
+| mise             | latest  | Task runner (optional)                 | `brew install mise`                                                      |
 
 ### Runtime Dependencies
 
@@ -37,14 +38,17 @@ A native macOS application for managing AI-powered development sessions. Orchest
 git clone --recurse-submodules https://github.com/radiusmethod/crow.git
 cd crow
 
-# 2. Build (submodules + GhosttyKit + swift build in one shot)
+# 2. Install the Metal Toolchain (required to compile Ghostty's Metal shaders)
+xcodebuild -downloadComponent MetalToolchain
+
+# 3. Build (submodules + GhosttyKit + swift build in one shot)
 make build
 
-# 3. Authenticate GitHub CLI — the write `project` scope is required
+# 4. Authenticate GitHub CLI — the write `project` scope is required
 gh auth login
 gh auth refresh -s project,read:org,repo
 
-# 4. Run
+# 5. Run
 .build/debug/CrowApp
 ```
 
@@ -55,6 +59,26 @@ On first launch, a setup wizard guides you through choosing your development roo
 ```
 
 > **Note:** The required GitHub scope is the **write** `project` scope — `read:project` is insufficient because Crow updates ticket status via the `updateProjectV2ItemFieldValue` GraphQL mutation. See [docs/getting-started.md](docs/getting-started.md#3-github-authentication) for details.
+
+### Install (put `crow` on your PATH)
+
+The Manager terminal and the `/crow-workspace` skill call bare `crow ...`, so a fresh build that you can only launch by full path will break those workflows. Install the binaries so they're invokable from anywhere:
+
+```bash
+make install                       # symlinks crow + CrowApp into ~/.local/bin
+```
+
+If `~/.local/bin` isn't already on your `PATH`, add this to `~/.zshrc` (then restart your shell):
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Use a different directory with `BINDIR`, e.g. `make install BINDIR=/usr/local/bin`.
+
+`make install` creates **symlinks** into `.build/debug/`, so a later `make build` updates them in place — no need to re-run it. Re-run `make install` only when you switch to a release build (`make release && make install CONFIG=release`) or after `make clean` (which removes `.build/` and leaves the symlinks dangling until the next build). Remove the symlinks with `make uninstall`.
+
+**GUI install:** for a `.app` bundle in `/Applications` (launchable from Spotlight/Dock), run `make release && make install-app`. See [Releases](#releases) if macOS quarantines the unsigned bundle.
 
 ## Documentation
 
