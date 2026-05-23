@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sessionService: SessionService?
     private var socketServer: SocketServer?
     private var issueTracker: IssueTracker?
+    private var jobScheduler: JobScheduler?
     private var notificationManager: NotificationManager?
     private var autoRespondCoordinator: AutoRespondCoordinator?
     private var allowListService: AllowListService?
@@ -340,6 +341,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Ensure manager session exists
         service.ensureManagerSession(devRoot: devRoot)
 
+        // Detect a dead Manager process: Ghostty fires SHOW_CHILD_EXITED when a
+        // surface's child exits. If it's the Manager terminal, surface the
+        // "Manager process exited" banner so the user can restart it in place.
+        GhosttyApp.shared.onChildExited = { [weak self] terminalID, _ in
+            guard let self else { return }
+            let managerID = AppState.managerSessionID
+            if self.appState.terminals(for: managerID).contains(where: { $0.id == terminalID }) {
+                NSLog("[Crow] Manager process exited (terminal %@)", terminalID.uuidString)
+                self.appState.managerProcessExited = true
+            }
+        }
+
         // Wire closures for UI actions
         appState.onDeleteSession = { [weak self, weak service] id in
             self?.notificationManager?.clearSession(id)
@@ -364,6 +377,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         appState.onRetryTerminal = { [weak service] terminalID in
             service?.retryTerminal(terminalID: terminalID)
+        }
+
+        appState.onRestartManager = { [weak service] in
+            service?.restartManager(devRoot: devRoot)
         }
 
         appState.onRetryReadiness = { [weak service] terminalID in
@@ -406,11 +423,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.onWorkOnIssue = { [weak self] issueURL in
             guard let self, let managerTerminals = self.appState.terminals[AppState.managerSessionID],
                   let managerTerminal = managerTerminals.first else { return }
-            // Type the /crow-workspace command into the Manager terminal
-            TerminalManager.shared.send(
-                id: managerTerminal.id,
-                text: "/crow-workspace \(issueURL)\n"
-            )
+            // Type the /crow-workspace command into the Manager terminal.
+            // Route through TerminalRouter so it reaches the Manager regardless
+            // of backend (Ghostty or tmux, #314).
+            TerminalRouter.send(managerTerminal, text: "/crow-workspace \(issueURL)\n")
             // Switch to Manager tab
             self.appState.selectedSessionID = AppState.managerSessionID
         }
@@ -420,10 +436,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, let managerTerminals = self.appState.terminals[AppState.managerSessionID],
                   let managerTerminal = managerTerminals.first else { return }
             let urls = issueURLs.joined(separator: " ")
-            TerminalManager.shared.send(
-                id: managerTerminal.id,
-                text: "/crow-batch-workspace \(urls)\n"
-            )
+            // Route through TerminalRouter so it reaches the Manager regardless
+            // of backend (Ghostty or tmux, #314).
+            TerminalRouter.send(managerTerminal, text: "/crow-batch-workspace \(urls)\n")
             self.appState.selectedSessionID = AppState.managerSessionID
         }
 
@@ -534,6 +549,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         tracker.start()
         self.issueTracker = tracker
+
+        // Scheduled jobs (CROW-317): fire repo-scoped prompt sets on a schedule.
+        let scheduler = JobScheduler(appState: appState, sessionService: service)
+        scheduler.jobsProvider = { [weak self] in self?.appConfig?.jobs ?? [] }
+        scheduler.devRootProvider = { [weak self] in self?.devRoot }
+        scheduler.onJobRan = { [weak self] jobID, ranAt in
+            self?.recordJobRun(jobID: jobID, ranAt: ranAt)
+        }
+        scheduler.start()
+        self.jobScheduler = scheduler
 
         appState.onMarkInReview = { [weak tracker] id in
             Task { await tracker?.markInReview(sessionID: id) }
@@ -700,6 +725,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.target = self
         appMenu.addItem(settingsItem)
         appMenu.addItem(NSMenuItem.separator())
+        let restartManagerItem = NSMenuItem(title: "Restart Manager", action: #selector(restartManager), keyEquivalent: "")
+        restartManagerItem.target = self
+        appMenu.addItem(restartManagerItem)
+        appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Hide Crow", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthersItem = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
         hideOthersItem.keyEquivalentModifierMask = [.command, .option]
@@ -711,6 +740,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appMenuItem)
 
         NSApp.mainMenu = mainMenu
+    }
+
+    @objc private func restartManager() {
+        appState.onRestartManager?()
     }
 
     @objc private func showAbout() {
@@ -810,6 +843,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.excludeReviewRepos = config.defaults.excludeReviewRepos
         appState.excludeTicketRepos = config.defaults.excludeTicketRepos
         appState.ignoreReviewLabels = config.defaults.ignoreReviewLabels
+    }
+
+    /// Record a job's run time in the canonical `appConfig` and persist it, so
+    /// the scheduler doesn't replay the job after a restart (CROW-317). Called
+    /// by `JobScheduler.onJobRan`.
+    private func recordJobRun(jobID: UUID, ranAt: Date) {
+        guard var config = appConfig, let devRoot,
+              let idx = config.jobs.firstIndex(where: { $0.id == jobID }) else { return }
+        config.jobs[idx].lastRunAt = ranAt
+        self.appConfig = config
+        do {
+            try ConfigStore.saveConfig(config, devRoot: devRoot)
+        } catch {
+            NSLog("[Crow] Failed to persist job run time: %@", error.localizedDescription)
+        }
     }
 
     // MARK: - Socket Server
@@ -1023,13 +1071,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             && !cmd.contains("--rc")
                             && !cmd.contains("--remote-control")
                     }
-                    let trackReadiness = isManaged && sessionID != AppState.managerSessionID
-                    // Decide backend at terminal-create time. Manager terminal
-                    // stays on Ghostty for now (special case; migrating it is
-                    // its own follow-up). Everything else honors the flag.
+                    let trackReadiness = isManaged
+                    // Decide backend at terminal-create time. Every session,
+                    // including the Manager (#314), honors the flag.
                     let useTmux = FeatureFlags.tmuxBackend
                         && !TmuxBackend.shared.tmuxBinary.isEmpty
-                        && sessionID != AppState.managerSessionID
                     var terminal = SessionTerminal(
                         sessionID: sessionID,
                         name: terminalName,
@@ -1450,6 +1496,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         NSLog("[Crow] Application terminating — beginning cleanup")
         issueTracker?.stop()
+        jobScheduler?.stop()
         sessionService?.persistState()
         // Persist config in case settings changed during this session
         if let devRoot, let appConfig {

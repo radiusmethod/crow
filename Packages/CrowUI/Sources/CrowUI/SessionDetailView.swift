@@ -315,13 +315,40 @@ public struct SessionDetailView: View {
             .id(session.id)
         } else if isManager, let terminal = sessionTerminals.first {
             // Manager session: single terminal, no tab bar
-            TerminalSurfaceView(
-                terminalID: terminal.id,
-                workingDirectory: terminal.cwd,
-                command: terminal.command,
-                backend: terminal.backend
-            )
-            .id(terminal.id)
+            ZStack {
+                TerminalSurfaceView(
+                    terminalID: terminal.id,
+                    workingDirectory: terminal.cwd,
+                    command: terminal.command,
+                    backend: terminal.backend
+                )
+                .id(terminal.id)
+
+                if appState.managerProcessExited {
+                    // The Manager's claude process exited (crash, kill, OOM).
+                    // Offer an in-place restart that keeps the session identity.
+                    VStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.orange)
+                        Text("Manager process exited")
+                            .font(.headline)
+                        Text("The Manager's Claude Code process is no longer running. Restart it to continue orchestrating workspaces.")
+                            .font(.caption)
+                            .foregroundStyle(CorveilTheme.textMuted)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Restart Manager") {
+                            appState.onRestartManager?()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                    }
+                    .padding(24)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(CorveilTheme.bgDeep.opacity(0.95))
+                }
+            }
         } else {
             VStack(spacing: 0) {
                 TerminalTabBar(

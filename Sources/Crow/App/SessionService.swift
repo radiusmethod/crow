@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import CrowCore
+import CrowGit
 import CrowPersistence
 import CrowTerminal
 
@@ -404,18 +405,19 @@ final class SessionService {
         let routedTerminal: SessionTerminal? = sessionID.flatMap { sid in
             appState.terminals[sid]?.first(where: { $0.id == terminalID })
         }
-        // Review-kind sessions dispatch their `/crow-review-pr` prompt on first
-        // launch only — on subsequent app restarts, fall through to
+        // Review- and job-kind sessions dispatch their initial prompt file on
+        // first launch only — on subsequent app restarts, fall through to
         // `claude --continue` so the existing conversation resumes instead of
-        // re-running the entire review (CROW-224).
+        // re-running the prompt (CROW-224, CROW-317). `reviewPromptDispatched`
+        // is reused as the generic "initial prompt dispatched" gate.
         var reviewPromptJustDispatched = false
         let claudeText: String = {
             if let sessionID,
                let session = appState.sessions.first(where: { $0.id == sessionID }),
-               session.kind == .review,
                !session.reviewPromptDispatched,
+               let promptFile = Self.initialPromptFileName(for: session.kind),
                let worktree = appState.primaryWorktree(for: sessionID) {
-                let promptPath = (worktree.worktreePath as NSString).appendingPathComponent(".crow-review-prompt.md")
+                let promptPath = (worktree.worktreePath as NSString).appendingPathComponent(promptFile)
                 reviewPromptJustDispatched = true
                 return "\(envPrefix)\(claudePath)\(rcArgs) \"$(cat \(promptPath))\"\n"
             } else {
@@ -498,12 +500,19 @@ final class SessionService {
                 sessionName: "Manager",
                 autoPermissionMode: autoMode
             )
-            let terminal = SessionTerminal(
+            let rawTerminal = SessionTerminal(
                 sessionID: managerID,
                 name: "Manager",
                 cwd: devRoot,
                 command: managerCommand
             )
+
+            // Route through the same backend-selection path as work sessions
+            // (#314). On tmux this registers a window and pastes the `claude`
+            // command into it; on Ghostty it pre-initializes the offscreen
+            // surface. `trackReadiness: false` matches the Manager's
+            // command-launches-claude model — no readiness/launchClaude flow.
+            let terminal = prepareTerminal(rawTerminal, trackReadiness: false)
             appState.terminals[managerID] = [terminal]
 
             store.mutate { data in
@@ -515,15 +524,42 @@ final class SessionService {
             if rcEnabled {
                 appState.remoteControlActiveTerminals.insert(terminal.id)
             }
-
-            // Pre-initialize in offscreen window so Manager terminal starts immediately
-            TerminalManager.shared.preInitialize(id: terminal.id, workingDirectory: devRoot, command: managerCommand)
         }
 
         // Select Manager on launch (selectedSessionID isn't persisted)
         if appState.selectedSessionID == nil {
             appState.selectedSessionID = managerID
         }
+    }
+
+    /// Relaunch the Manager's `claude` process in place after it has exited
+    /// (crash, kill, OOM). The Manager session row and `AppState.managerSessionID`
+    /// are preserved — only the dead terminal/surface is torn down and replaced.
+    ///
+    /// Tears down the existing Ghostty surface, drops the stale terminal row from
+    /// both memory and disk, clears the exited flag, then re-runs
+    /// `ensureManagerSession` which recreates a fresh Manager terminal (new
+    /// terminal UUID) using the current remote-control / auto-permission args.
+    func restartManager(devRoot: String) {
+        let managerID = AppState.managerSessionID
+        let terminals = appState.terminals(for: managerID)
+        // Fall back to a dead terminal's cwd if the caller's devRoot is empty.
+        let resolvedDevRoot = devRoot.isEmpty ? (terminals.first?.cwd ?? devRoot) : devRoot
+
+        for terminal in terminals {
+            TerminalRouter.destroy(terminal)
+        }
+        appState.terminals.removeValue(forKey: managerID)
+        appState.remoteControlActiveTerminals.subtract(terminals.map(\.id))
+        store.mutate { data in
+            data.terminals.removeAll { $0.sessionID == managerID }
+        }
+
+        appState.managerProcessExited = false
+        NSLog("[CrowTelemetry manager:restart]")
+
+        // Session row still exists, so this only recreates the terminal.
+        ensureManagerSession(devRoot: resolvedDevRoot)
     }
 
     // MARK: - Delete Session
@@ -1246,6 +1282,128 @@ final class SessionService {
         return session.id
     }
 
+    // MARK: - Scheduled Jobs (CROW-317)
+
+    /// File name holding the initial prompt for a session kind that auto-dispatches
+    /// one on first launch. `nil` for kinds that resume with `--continue` only.
+    private static func initialPromptFileName(for kind: SessionKind) -> String? {
+        switch kind {
+        case .review: return ".crow-review-prompt.md"
+        case .job: return ".crow-job-prompt.md"
+        case .work: return nil
+        }
+    }
+
+    /// Run a scheduled job: create a fresh worktree + session + managed Claude
+    /// terminal in the job's scoped repo and arm auto-launch so the first prompt
+    /// dispatches once the shell is ready.
+    ///
+    /// Mirrors `createReviewSession`, but the worktree is a real git worktree off
+    /// the repo's default branch (via `GitManager`) rather than a clone. The
+    /// returned terminal id lets the caller (`JobScheduler`) deliver any
+    /// remaining prompts after launch. Returns `nil` if the repo is missing or
+    /// the worktree can't be created.
+    func runJob(_ job: JobConfig, devRoot: String) async -> (sessionID: UUID, terminalID: UUID)? {
+        guard let firstPrompt = job.prompts.first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            NSLog("[SessionService] Job '\(job.name)' has no prompts; skipping")
+            return nil
+        }
+
+        let workspacePath = (devRoot as NSString).appendingPathComponent(job.workspace)
+        let repoPath = (workspacePath as NSString).appendingPathComponent(job.repo)
+        let gitDir = (repoPath as NSString).appendingPathComponent(".git")
+        guard FileManager.default.fileExists(atPath: gitDir) else {
+            NSLog("[SessionService] Job '\(job.name)': repo not found at \(repoPath)")
+            return nil
+        }
+
+        let slug = Self.slugify(job.name)
+        let stamp = Self.runStamp()
+        let branch = "feature/job-\(slug)-\(stamp)"
+        let worktreePath = (workspacePath as NSString)
+            .appendingPathComponent("\(job.repo)-job-\(slug)-\(stamp)")
+
+        // Create the worktree on disk (fetch + new branch off default + retry).
+        let gitManager = GitManager(config: WorkspaceConfig(
+            devRoot: devRoot, workspaces: [:], defaults: WorkspaceDefaults()
+        ))
+        do {
+            try await gitManager.createWorktree(
+                repoPath: repoPath, worktreePath: worktreePath, branch: branch
+            )
+        } catch {
+            NSLog("[SessionService] Job '\(job.name)': createWorktree failed: \(error.localizedDescription)")
+            return nil
+        }
+
+        // Write the first prompt to the file launchClaude reads on first launch.
+        let promptPath = (worktreePath as NSString).appendingPathComponent(".crow-job-prompt.md")
+        try? firstPrompt.write(toFile: promptPath, atomically: true, encoding: .utf8)
+
+        let session = Session(
+            name: "job-\(slug)-\(stamp)",
+            kind: .job
+        )
+        let worktree = SessionWorktree(
+            sessionID: session.id,
+            repoName: job.repo,
+            repoPath: repoPath,
+            worktreePath: worktreePath,
+            branch: branch,
+            isPrimary: true
+        )
+        let terminal = SessionTerminal(
+            sessionID: session.id,
+            name: "Claude Code",
+            cwd: worktreePath,
+            isManaged: true
+        )
+
+        // Backend dispatch — starts the surface / tmux window and tracks readiness.
+        let preparedTerminal = prepareTerminal(terminal, trackReadiness: true)
+
+        appState.sessions.append(session)
+        appState.worktrees[session.id] = [worktree]
+        appState.terminals[session.id] = [preparedTerminal]
+        appState.terminalReadiness[preparedTerminal.id] = .uninitialized
+        appState.autoLaunchTerminals.insert(preparedTerminal.id)
+
+        store.mutate { data in
+            data.sessions.append(session)
+            data.worktrees.append(worktree)
+            data.terminals.append(preparedTerminal)
+        }
+
+        NSLog("[SessionService] Job '\(job.name)': created session '\(session.name)' at \(worktreePath)")
+        return (session.id, preparedTerminal.id)
+    }
+
+    /// A filesystem/branch-safe slug derived from a job name.
+    private static func slugify(_ name: String) -> String {
+        let lowered = name.lowercased()
+        var slug = ""
+        var lastWasDash = false
+        for scalar in lowered.unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                slug.unicodeScalars.append(scalar)
+                lastWasDash = false
+            } else if !lastWasDash {
+                slug.append("-")
+                lastWasDash = true
+            }
+        }
+        slug = slug.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return slug.isEmpty ? "job" : String(slug.prefix(40))
+    }
+
+    /// A compact `yyyyMMdd-HHmmss` timestamp that makes each run's branch/worktree unique.
+    private static func runStamp() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date())
+    }
+
     // MARK: - Review Prompt
 
     /// Build the initial prompt for a review session.
@@ -1367,14 +1525,14 @@ final class SessionService {
     /// Decide which backend hosts a brand-new SessionTerminal and prepare it
     /// (register a tmux window or pre-initialize a Ghostty surface). Returns
     /// the (possibly-modified) row with `backend`/`tmuxBinding` set so the
-    /// caller can persist it. The Manager terminal is force-pinned to the
-    /// Ghostty backend until that migration is done as its own follow-up.
+    /// caller can persist it. The Manager terminal goes through this same path
+    /// as every other session (#314); for it, `registerTerminal` pastes the
+    /// stored `claude` command into the tmux window directly.
     @MainActor
     private func prepareTerminal(_ terminal: SessionTerminal, trackReadiness: Bool) -> SessionTerminal {
         var t = terminal
         let useTmux = FeatureFlags.tmuxBackend
             && !TmuxBackend.shared.tmuxBinary.isEmpty
-            && t.sessionID != AppState.managerSessionID
         if useTmux {
             do {
                 let binding = try TmuxBackend.shared.registerTerminal(
