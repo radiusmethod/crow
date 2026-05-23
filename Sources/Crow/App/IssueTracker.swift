@@ -1,5 +1,6 @@
 import Foundation
 import CrowCore
+import CrowGit
 import CrowPersistence
 import CrowProvider
 
@@ -60,6 +61,25 @@ final class IssueTracker {
     /// lands in Console regardless of notification settings.)
     var onAutoMergeEnabled: ((UUID, String, Int) -> Void)?
 
+    /// Reads the latest `AppConfig.autoRebaseWatcherEnabled` snapshot on every
+    /// poll. Closure (not a stored value) so toggling the setting takes effect
+    /// on the next refresh. Defaults to a closure returning `false` so the
+    /// watcher is inert until AppDelegate wires it (CROW-318).
+    var autoRebaseWatcherEnabledProvider: () -> Bool = { false }
+
+    /// Fires after Crow rebased a PR branch and force-pushed it. Wired in
+    /// AppDelegate to post a notification.
+    var onAutoRebasePushed: ((UUID, String, Int) -> Void)?
+
+    /// Fires when an auto-rebase hit conflicts that need a human/Claude.
+    /// Wired in AppDelegate to delegate resolution to the session's Claude
+    /// terminal (the `fixConflicts` quick action) and notify.
+    var onAutoRebaseConflicts: ((UUID, String, Int) -> Void)?
+
+    /// Runs `git rebase` / force-push for the auto-rebase watcher. Owns its
+    /// own instance (no `WorkspaceConfig` needed for path-scoped operations).
+    private let gitManager = GitManager()
+
     /// Previously seen review request IDs for delta detection.
     private var previousReviewRequestIDs: Set<String> = []
     private var isFirstFetch = true
@@ -95,6 +115,17 @@ final class IssueTracker {
     /// still re-update, while a stuck/no-op head isn't hammered every poll.
     /// In-memory only; a restart re-evaluates, which is harmless.
     private var autoUpdateBranchAttempted: Set<String> = []
+
+    /// PR URLs with an auto-rebase attempt currently in flight. Cleared when
+    /// the attempt finishes so the next poll can re-evaluate.
+    private var autoRebaseInFlight: Set<String> = []
+
+    /// Per-head-commit guard for auto-rebase, keyed `"<url>\n<headRefOid>"`.
+    /// One rebase attempt per head state — a successful rebase rewrites the
+    /// head (new key), and a delegated conflict resolution that pushes a new
+    /// head also re-arms. A `.dirtyWorktree` outcome un-sets its key so the
+    /// transient state is retried. In-memory only.
+    private var autoRebaseAttempted: Set<String> = []
 
     /// Last observed `PRStatus` per session, used to compute transitions.
     /// Populated lazily on first observation; that first poll never fires
@@ -1784,6 +1815,7 @@ final class IssueTracker {
         }
 
         applyAutoMerge(viewerPRs: viewerPRs)
+        applyAutoRebase(viewerPRs: viewerPRs)
     }
 
     // MARK: - Auto-Merge Watcher (CROW-299)
@@ -1996,6 +2028,103 @@ final class IssueTracker {
             "--color", "0E8A16",
             "--description", "Crow: enable auto-merge once mergeable"
         ])
+    }
+
+    // MARK: - Auto-Rebase Watcher (CROW-318)
+
+    /// Decide whether `pr` is a candidate for auto-rebase. Pure so unit tests
+    /// can exercise it without an `IssueTracker`. Unlike `shouldAttemptAutoMerge`
+    /// there is **no label requirement** and review state is irrelevant — a
+    /// rebase doesn't need approval. Returns true when the PR is OPEN, not a
+    /// draft, and either BEHIND its base or CONFLICTING. Crow-authorship and
+    /// per-head loop-safety are enforced by the caller.
+    nonisolated static func shouldAttemptAutoRebase(pr: ViewerPR) -> Bool {
+        guard pr.state == "OPEN" else { return false }
+        guard !pr.isDraft else { return false }
+        return pr.mergeStateStatus == "BEHIND" || pr.mergeable == "CONFLICTING"
+    }
+
+    /// Per-refresh entry point for the auto-rebase watcher. Picks candidate
+    /// (session, PR) pairs and kicks off one rebase attempt per head commit.
+    /// No-op when `autoRebaseWatcherEnabled` is off.
+    private func applyAutoRebase(viewerPRs: [ViewerPR]) {
+        guard autoRebaseWatcherEnabledProvider() else { return }
+        guard !viewerPRs.isEmpty else { return }
+        let byURL = Dictionary(viewerPRs.map { ($0.url, $0) }, uniquingKeysWith: Self.mergePRRecords)
+
+        for session in appState.sessions where session.id != AppState.managerSessionID {
+            guard let prLink = appState.links(for: session.id).first(where: { $0.linkType == .pr }) else { continue }
+            guard !autoRebaseInFlight.contains(prLink.url) else { continue }
+            guard let pr = byURL[prLink.url] else { continue }
+            guard Self.shouldAttemptAutoRebase(pr: pr) else { continue }
+
+            // Precedence: when auto-merge is also enabled and this PR is a
+            // crow:merge BEHIND candidate, let auto-merge's `gh pr update-branch`
+            // own bringing it up to date so the two watchers don't fight over
+            // the same branch. Auto-rebase still owns every CONFLICTING PR and
+            // every BEHIND PR that isn't a crow:merge merge candidate.
+            if autoMergeWatcherEnabledProvider(),
+               Self.shouldUpdateBranchBeforeMerge(pr: pr, session: session) {
+                continue
+            }
+
+            let key = "\(prLink.url)\n\(pr.headRefOid)"
+            guard !autoRebaseAttempted.contains(key) else { continue }
+            autoRebaseAttempted.insert(key)
+            autoRebaseInFlight.insert(prLink.url)
+            let capturedSession = session
+            Task { await self.attemptRebase(session: capturedSession, pr: pr) }
+        }
+    }
+
+    /// Verify Crow authorship, locate the session's primary worktree, then
+    /// rebase it onto base and force-push. On conflicts, fire
+    /// `onAutoRebaseConflicts` so the caller hands resolution to Claude. A
+    /// dirty worktree un-sets the per-head key so the next poll retries once
+    /// the tree is clean.
+    private func attemptRebase(session: Session, pr: ViewerPR) async {
+        let headKey = "\(pr.url)\n\(pr.headRefOid)"
+        defer { autoRebaseInFlight.remove(pr.url) }
+
+        guard await prHasCrowAuthoredCommit(pr: pr) else {
+            NSLog("[Crow] auto-rebase skipped on %@ — no Crow-Session trailer matching a known session",
+                  pr.url as NSString)
+            return
+        }
+
+        let worktrees = appState.worktrees(for: session.id)
+        guard let primary = worktrees.first(where: { $0.isPrimary }) ?? worktrees.first,
+              !primary.isMainRepoCheckout,
+              primary.branch == pr.headRefName else {
+            NSLog("[Crow] auto-rebase skipped on %@ — no usable worktree or branch mismatch (expected %@)",
+                  pr.url as NSString, pr.headRefName as NSString)
+            return
+        }
+
+        let outcome = await gitManager.rebaseOntoBase(
+            worktreePath: primary.worktreePath,
+            branch: primary.branch,
+            baseBranch: pr.baseRefName
+        )
+        switch outcome {
+        case .rebasedAndPushed:
+            NSLog("[Crow] Auto-rebased & force-pushed %@ (session %@, was %@)",
+                  pr.url as NSString, session.id.uuidString as NSString,
+                  pr.mergeable == "CONFLICTING" ? "CONFLICTING" : "BEHIND" as NSString)
+            onAutoRebasePushed?(session.id, pr.url, pr.number)
+        case .conflicts:
+            NSLog("[Crow] Auto-rebase hit conflicts on %@ (session %@) — delegating to Claude",
+                  pr.url as NSString, session.id.uuidString as NSString)
+            onAutoRebaseConflicts?(session.id, pr.url, pr.number)
+        case .dirtyWorktree:
+            // Transient (a Claude session is mid-edit). Re-arm so the next
+            // poll retries once the tree is clean.
+            autoRebaseAttempted.remove(headKey)
+            NSLog("[Crow] Auto-rebase deferred on %@ — worktree has uncommitted changes",
+                  pr.url as NSString)
+        case .failed(let msg):
+            NSLog("[Crow] Auto-rebase failed on %@: %@", pr.url as NSString, msg as NSString)
+        }
     }
 
     private func buildPRStatus(from pr: ViewerPR) -> PRStatus {
