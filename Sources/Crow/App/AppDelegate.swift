@@ -341,6 +341,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Ensure manager session exists
         service.ensureManagerSession(devRoot: devRoot)
 
+        // Detect a dead Manager process: Ghostty fires SHOW_CHILD_EXITED when a
+        // surface's child exits. If it's the Manager terminal, surface the
+        // "Manager process exited" banner so the user can restart it in place.
+        GhosttyApp.shared.onChildExited = { [weak self] terminalID, _ in
+            guard let self else { return }
+            let managerID = AppState.managerSessionID
+            if self.appState.terminals(for: managerID).contains(where: { $0.id == terminalID }) {
+                NSLog("[Crow] Manager process exited (terminal %@)", terminalID.uuidString)
+                self.appState.managerProcessExited = true
+            }
+        }
+
         // Wire closures for UI actions
         appState.onDeleteSession = { [weak self, weak service] id in
             self?.notificationManager?.clearSession(id)
@@ -365,6 +377,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         appState.onRetryTerminal = { [weak service] terminalID in
             service?.retryTerminal(terminalID: terminalID)
+        }
+
+        appState.onRestartManager = { [weak service] in
+            service?.restartManager(devRoot: devRoot)
         }
 
         appState.onRetryReadiness = { [weak service] terminalID in
@@ -709,6 +725,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.target = self
         appMenu.addItem(settingsItem)
         appMenu.addItem(NSMenuItem.separator())
+        let restartManagerItem = NSMenuItem(title: "Restart Manager", action: #selector(restartManager), keyEquivalent: "")
+        restartManagerItem.target = self
+        appMenu.addItem(restartManagerItem)
+        appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Hide Crow", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthersItem = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
         hideOthersItem.keyEquivalentModifierMask = [.command, .option]
@@ -720,6 +740,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appMenuItem)
 
         NSApp.mainMenu = mainMenu
+    }
+
+    @objc private func restartManager() {
+        appState.onRestartManager?()
     }
 
     @objc private func showAbout() {

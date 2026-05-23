@@ -22,6 +22,11 @@ public final class GhosttySurfaceView: NSView {
     /// Called after createSurface() exhausts its retry budget without producing a surface.
     public var onSurfaceCreationFailed: (() -> Void)?
 
+    /// The terminal UUID this surface backs. Set by `TerminalManager` when the
+    /// view is created so Ghostty's child-exit action callback can map a dead
+    /// surface back to its terminal (see `GhosttyApp.handleAction`).
+    public var terminalID: UUID?
+
     /// The working directory for the shell spawned in this surface.
     public var workingDirectory: String?
 

@@ -9,6 +9,12 @@ public final class GhosttyApp {
     private(set) var app: ghostty_app_t?
     private(set) var config: ghostty_config_t?
 
+    /// Fired when a surface's child process exits (Ghostty's
+    /// `GHOSTTY_ACTION_SHOW_CHILD_EXITED`). Delivers the terminal UUID and the
+    /// child's exit code. Used to detect a dead Manager `claude` process so the
+    /// UI can offer a restart. Always invoked on the main actor.
+    public var onChildExited: ((UUID, Int32) -> Void)?
+
     private init() {}
 
     public func initialize() {
@@ -98,6 +104,21 @@ public final class GhosttyApp {
         target: ghostty_target_s,
         action: ghostty_action_s
     ) -> Bool {
+        // The child process backing a surface exited (crash, kill, normal quit).
+        // Map the surface back to its terminal UUID via the userdata pointer we
+        // set in GhosttySurfaceView.createSurface, then notify on the main actor.
+        if action.tag == GHOSTTY_ACTION_SHOW_CHILD_EXITED {
+            if target.tag == GHOSTTY_TARGET_SURFACE,
+               let userdata = ghostty_surface_userdata(target.target.surface) {
+                let exitCode = Int32(bitPattern: action.action.child_exited.exit_code)
+                DispatchQueue.main.async {
+                    let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    guard let terminalID = view.terminalID else { return }
+                    GhosttyApp.shared.onChildExited?(terminalID, exitCode)
+                }
+            }
+            return true
+        }
         if !silencedActionTags.contains(UInt32(action.tag.rawValue)) {
             NSLog("[GhosttyApp] Unhandled action: tag=\(action.tag)")
         }
