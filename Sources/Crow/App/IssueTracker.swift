@@ -349,7 +349,7 @@ final class IssueTracker {
         let ticketExcludePatterns = config.defaults.excludeTicketRepos
         let autoCreateCandidates = ticketExcludePatterns.isEmpty
             ? allIssues
-            : allIssues.filter { !repoMatchesExcludePatterns($0.repo, patterns: ticketExcludePatterns) }
+            : allIssues.filter { !repoMatchesPatterns($0.repo, patterns: ticketExcludePatterns) }
         detectAutoCreateCandidates(issues: autoCreateCandidates)
 
         if let ghResult {
@@ -391,7 +391,7 @@ final class IssueTracker {
             let allCurrentIDs = Set(reviews.map(\.id))
             let reviewExcludePatterns = config.defaults.excludeReviewRepos
             if !reviewExcludePatterns.isEmpty {
-                reviews = reviews.filter { !repoMatchesExcludePatterns($0.repo, patterns: reviewExcludePatterns) }
+                reviews = reviews.filter { !repoMatchesPatterns($0.repo, patterns: reviewExcludePatterns) }
             }
             let ignoreLabels = config.defaults.ignoreReviewLabels
             if !ignoreLabels.isEmpty {

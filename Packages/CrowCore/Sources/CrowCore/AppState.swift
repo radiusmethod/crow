@@ -1,8 +1,8 @@
 import Foundation
 
-/// Check whether a repo name matches any of the exclude patterns.
+/// Check whether a repo name matches any of the given patterns.
 /// Supports exact matches and simple glob patterns with `*` (e.g., `org/*`, `*/repo`).
-public func repoMatchesExcludePatterns(_ repo: String, patterns: [String]) -> Bool {
+public func repoMatchesPatterns(_ repo: String, patterns: [String]) -> Bool {
     let lowerRepo = repo.lowercased()
     for pattern in patterns {
         let lowerPattern = pattern.lowercased()
@@ -180,7 +180,7 @@ public final class AppState {
     public var filteredReviewRequests: [ReviewRequest] {
         var result = reviewRequests
         if !excludeReviewRepos.isEmpty {
-            result = result.filter { !repoMatchesExcludePatterns($0.repo, patterns: excludeReviewRepos) }
+            result = result.filter { !repoMatchesPatterns($0.repo, patterns: excludeReviewRepos) }
         }
         if !ignoreReviewLabels.isEmpty {
             let lowerLabels = Set(ignoreReviewLabels.map { $0.lowercased() })
@@ -417,7 +417,7 @@ public final class AppState {
     /// Issues after applying repo exclusion filter.
     public var filteredAssignedIssues: [AssignedIssue] {
         guard !excludeTicketRepos.isEmpty else { return assignedIssues }
-        return assignedIssues.filter { !repoMatchesExcludePatterns($0.repo, patterns: excludeTicketRepos) }
+        return assignedIssues.filter { !repoMatchesPatterns($0.repo, patterns: excludeTicketRepos) }
     }
 
     /// Count of issues in a given pipeline status. Treats `.unknown` as `.backlog`.
