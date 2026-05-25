@@ -573,14 +573,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var autoReviewedFingerprints: Set<String> = []
         tracker.onReviewRequestsRefreshed = { [weak self] requests in
             guard let self else { return }
-            let enabledRepos = Set((self.appConfig?.workspaces ?? [])
+            let enabledPatterns = (self.appConfig?.workspaces ?? [])
                 .flatMap(\.autoReviewRepos)
-                .map { $0.lowercased() })
-            guard !enabledRepos.isEmpty else { return }
+            guard !enabledPatterns.isEmpty else { return }
 
             var pendingURLs: [String] = []
             for request in requests {
-                guard enabledRepos.contains(request.repo.lowercased()) else { continue }
+                guard repoMatchesPatterns(request.repo, patterns: enabledPatterns) else { continue }
                 let fingerprint = "\(request.id)@\(request.headRefOid ?? "")"
                 guard !autoReviewedFingerprints.contains(fingerprint) else { continue }
 

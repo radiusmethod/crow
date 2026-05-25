@@ -286,40 +286,52 @@ import Testing
 // MARK: - Repo Exclude Pattern Matching
 
 @Test func repoExcludeExactMatch() {
-    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["org/repo"]) == true)
-    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["org/other"]) == false)
+    #expect(repoMatchesPatterns("org/repo", patterns: ["org/repo"]) == true)
+    #expect(repoMatchesPatterns("org/repo", patterns: ["org/other"]) == false)
 }
 
 @Test func repoExcludeCaseInsensitive() {
-    #expect(repoMatchesExcludePatterns("Org/Repo", patterns: ["org/repo"]) == true)
-    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["ORG/REPO"]) == true)
+    #expect(repoMatchesPatterns("Org/Repo", patterns: ["org/repo"]) == true)
+    #expect(repoMatchesPatterns("org/repo", patterns: ["ORG/REPO"]) == true)
 }
 
 @Test func repoExcludeWildcardSuffix() {
-    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["org/*"]) == true)
-    #expect(repoMatchesExcludePatterns("org/other", patterns: ["org/*"]) == true)
-    #expect(repoMatchesExcludePatterns("different/repo", patterns: ["org/*"]) == false)
+    #expect(repoMatchesPatterns("org/repo", patterns: ["org/*"]) == true)
+    #expect(repoMatchesPatterns("org/other", patterns: ["org/*"]) == true)
+    #expect(repoMatchesPatterns("different/repo", patterns: ["org/*"]) == false)
 }
 
 @Test func repoExcludeWildcardPrefix() {
-    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["*/repo"]) == true)
-    #expect(repoMatchesExcludePatterns("other/repo", patterns: ["*/repo"]) == true)
-    #expect(repoMatchesExcludePatterns("org/other", patterns: ["*/repo"]) == false)
+    #expect(repoMatchesPatterns("org/repo", patterns: ["*/repo"]) == true)
+    #expect(repoMatchesPatterns("other/repo", patterns: ["*/repo"]) == true)
+    #expect(repoMatchesPatterns("org/other", patterns: ["*/repo"]) == false)
 }
 
 @Test func repoExcludeWildcardOnly() {
-    #expect(repoMatchesExcludePatterns("org/repo", patterns: ["*"]) == true)
+    #expect(repoMatchesPatterns("org/repo", patterns: ["*"]) == true)
 }
 
 @Test func repoExcludeMultiplePatterns() {
     let patterns = ["org/specific", "other-org/*"]
-    #expect(repoMatchesExcludePatterns("org/specific", patterns: patterns) == true)
-    #expect(repoMatchesExcludePatterns("other-org/anything", patterns: patterns) == true)
-    #expect(repoMatchesExcludePatterns("org/different", patterns: patterns) == false)
+    #expect(repoMatchesPatterns("org/specific", patterns: patterns) == true)
+    #expect(repoMatchesPatterns("other-org/anything", patterns: patterns) == true)
+    #expect(repoMatchesPatterns("org/different", patterns: patterns) == false)
 }
 
 @Test func repoExcludeEmptyPatterns() {
-    #expect(repoMatchesExcludePatterns("org/repo", patterns: []) == false)
+    #expect(repoMatchesPatterns("org/repo", patterns: []) == false)
+}
+
+@Test func repoMiddleWildcard() {
+    #expect(repoMatchesPatterns("org/prefix-foo", patterns: ["org/prefix-*"]) == true)
+    #expect(repoMatchesPatterns("org/prefix-bar-baz", patterns: ["org/prefix-*"]) == true)
+    #expect(repoMatchesPatterns("org/other", patterns: ["org/prefix-*"]) == false)
+}
+
+@Test func repoSuffixWildcard() {
+    #expect(repoMatchesPatterns("org/foo-suffix", patterns: ["*-suffix"]) == true)
+    #expect(repoMatchesPatterns("org/bar-suffix", patterns: ["*-suffix"]) == true)
+    #expect(repoMatchesPatterns("org/suffix-bar", patterns: ["*-suffix"]) == false)
 }
 
 @Test func appConfigDecodesLegacyExperimentalTmuxBackendKey() throws {

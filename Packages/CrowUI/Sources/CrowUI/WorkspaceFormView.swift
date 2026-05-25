@@ -77,7 +77,7 @@ public struct WorkspaceFormView: View {
 
                 TextField("Auto-Review Repos", text: $autoReviewReposText)
                     .textFieldStyle(.roundedBorder)
-                Text("Comma-separated repos (e.g. org/repo). New review requests from these repos will automatically create a review session.")
+                Text("Comma-separated repos or patterns (e.g. org/repo, org/*). New review requests from matching repos will automatically create a review session.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
