@@ -21,6 +21,7 @@ struct OpenAICodexAgentTests {
             session: session,
             worktreePath: "/tmp/wt",
             remoteControlEnabled: false,
+            autoPermissionMode: false,
             telemetryPort: nil
         )
         #expect(cmd == "codex\n")
@@ -34,6 +35,7 @@ struct OpenAICodexAgentTests {
             session: session,
             worktreePath: "/tmp/wt",
             remoteControlEnabled: true,
+            autoPermissionMode: false,
             telemetryPort: 4318
         )
         #expect(cmd == "codex\n")
@@ -45,6 +47,7 @@ struct OpenAICodexAgentTests {
             session: session,
             worktreePath: "/tmp/wt",
             remoteControlEnabled: false,
+            autoPermissionMode: false,
             telemetryPort: nil
         )
         #expect(cmd == nil) // Codex review sessions aren't supported in MVP.

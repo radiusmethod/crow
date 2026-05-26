@@ -264,10 +264,10 @@ final class SessionService {
                 if trackReadiness {
                     // Re-write hook config so the adopted Claude's hooks still
                     // route back to the correct session if the config was lost.
-                    if let crowPath = HookConfigGenerator.findCrowBinary(),
+                    if let crowPath = ClaudeHookConfigWriter.findCrowBinary(),
                        let worktree = appState.primaryWorktree(for: terminal.sessionID) {
                         do {
-                            try HookConfigGenerator.writeHookConfig(
+                            try ClaudeHookConfigWriter().writeHookConfig(
                                 worktreePath: worktree.worktreePath,
                                 sessionID: terminal.sessionID,
                                 crowPath: crowPath
