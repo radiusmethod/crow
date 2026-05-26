@@ -85,10 +85,12 @@ ruff check . 2>&1 | head -50
 
 Every Crow review must end with a verdict — **exactly one** of the two actions below. Comment-only reviews (`--comment` / `event: COMMENT`) are **not permitted**: they are ambiguous, don't move the PR forward, and effectively no-op the review.
 
-- **Approve**: No critical or blocking issues found → use `--approve`
-- **Request Changes**: Anything the author should address before merging → use `--request-changes`
+Verdict rule — **only a review whose findings are entirely Green (or empty) may approve**. Any Yellow or Red finding forces `--request-changes`.
 
-If you have feedback but cannot confidently approve, you **must** use `--request-changes`. Never fall back to `--comment`.
+- **Approve** (`--approve`): no Red, no Yellow, only Green or no findings.
+- **Request Changes** (`--request-changes`): any Red **or** any Yellow finding.
+
+Yellow findings are "should fix" — the implementing agent will address them as soon as it sees the request-changes verdict, so rejecting on Yellow lands them in the same round trip instead of a follow-up. Comment-only reviews remain forbidden; if uncertain, request changes.
 
 Post the review using exactly one of these two flags:
 
@@ -119,13 +121,13 @@ Use this format for the review:
 - [Code quality issues]
 
 ### Summary Table
-| Priority | Issue |
-|----------|-------|
-| Red | Must fix items |
-| Yellow | Should fix items |
-| Green | Consider items |
+| Color  | Meaning      | Verdict effect            |
+|--------|--------------|---------------------------|
+| Red    | Must fix     | Request changes           |
+| Yellow | Should fix   | Request changes           |
+| Green  | Consider     | Approve allowed           |
 
-**Recommendation:** [Approve / Request Changes — with reasoning]
+**Recommendation:** [Approve | Request Changes] — driven by [N Red, M Yellow, K Green] findings.
 
 ---
 
@@ -152,7 +154,7 @@ The review body passed to `gh pr review --body` MUST end with a blank line follo
 - Include file:line references for specific issues
 - Don't include sensitive information in the review
 - If tests fail, note which ones and why
-- Use `--approve` when the PR looks good (no red/blocking items)
-- Use `--request-changes` when there are critical issues that must be fixed before merge
+- Use `--approve` only when findings are entirely Green or empty (no Red, no Yellow).
+- Use `--request-changes` when there is any Red or Yellow finding.
 - **Never** use `--comment` — a Crow review must always be a verdict. If you would have commented, request changes instead.
 - All `gh` and `git` commands require `dangerouslyDisableSandbox: true`
