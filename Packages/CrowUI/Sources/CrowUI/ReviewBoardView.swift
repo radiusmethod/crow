@@ -338,9 +338,10 @@ struct ReviewRow: View {
 
 // MARK: - Sidebar Row
 
-/// Combined Manager, Reviews, and Allowlist toggle buttons in the sidebar. The
-/// Manager toggle and its "new Manager" (+) button appear once the primary
-/// Manager has loaded; Reviews and Allowlist are always present.
+/// Combined Reviews, Allowlist, and Manager toggle buttons in the sidebar, in
+/// that order (Manager last). The Manager toggle and its "new Manager" (+)
+/// button appear once the primary Manager has loaded; Reviews and Allowlist are
+/// always present.
 public struct ManagerReviewsAllowListRow: View {
     @Bindable var appState: AppState
 
@@ -350,12 +351,12 @@ public struct ManagerReviewsAllowListRow: View {
 
     public var body: some View {
         HStack(spacing: 6) {
+            reviewButton
+            allowListButton
             if appState.managerSession != nil {
                 managerButton
                 newManagerButton
             }
-            reviewButton
-            allowListButton
         }
         .padding(.vertical, 2)
     }
