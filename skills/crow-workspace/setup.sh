@@ -39,6 +39,7 @@ PRIMARY=false
 SKIP_LAUNCH=false
 SKIP_ASSIGN=false
 SKIP_PROJECT_STATUS=false
+BASE_BRANCH=""
 
 # Runtime state
 TERMINAL_ID=""
@@ -129,6 +130,7 @@ Optional:
   --prompt-content <path>    Path to LLM-written prompt file
   --claude-binary <path>     Full path to claude binary
   --session-id <uuid>        Existing session ID (for secondary repos)
+  --base-branch <branch>     Default base branch (auto-detected from origin/HEAD if omitted)
   --primary                  Mark worktree as primary
   --skip-launch              Skip Claude Code launch
   --skip-assign              Skip auto-assign
@@ -161,6 +163,7 @@ parse_args() {
       --prompt-content)    PROMPT_CONTENT="$2"; shift 2 ;;
       --claude-binary)     CLAUDE_BINARY="$2"; shift 2 ;;
       --session-id)        SESSION_ID="$2"; shift 2 ;;
+      --base-branch)       BASE_BRANCH="$2"; shift 2 ;;
       --primary)           PRIMARY=true; shift ;;
       --skip-launch)       SKIP_LAUNCH=true; shift ;;
       --skip-assign)       SKIP_ASSIGN=true; shift ;;
@@ -201,16 +204,42 @@ preflight() {
 
 # ─── Git Worktree ────────────────────────────────────────────────────────────
 
+# Resolve BASE_BRANCH: explicit --base-branch flag wins, otherwise probe
+# origin/HEAD locally (set by `git clone` for most repos), otherwise ask the
+# remote, otherwise warn loudly and fall back to "main".
+resolve_base_branch() {
+  if [[ -n "$BASE_BRANCH" ]]; then
+    log "Using base branch from --base-branch: $BASE_BRANCH"
+    return
+  fi
+  local detected
+  detected=$(git -C "$REPO_PATH" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) || true
+  detected="${detected#origin/}"
+  if [[ -z "$detected" ]]; then
+    detected=$(git -C "$REPO_PATH" ls-remote --symref origin HEAD 2>/dev/null \
+      | awk '/^ref:/ { sub("refs/heads/", "", $2); print $2; exit }') || true
+  fi
+  if [[ -n "$detected" ]]; then
+    BASE_BRANCH="$detected"
+    log "Auto-detected base branch from origin/HEAD: $BASE_BRANCH"
+  else
+    BASE_BRANCH="main"
+    log "WARNING: could not detect default branch for $REPO_PATH; falling back to 'main'"
+  fi
+}
+
 setup_worktree() {
   log "Fetching origin..."
   if ! git -C "$REPO_PATH" fetch origin >&2 2>&1; then
     die "git_fetch" "git fetch origin failed"
   fi
 
+  resolve_base_branch
+
   # Determine which branch and tracking mode to use
   local use_branch="$BRANCH"
   local track_flag="--no-track"
-  local base_ref="origin/main"
+  local base_ref="origin/$BASE_BRANCH"
 
   if [[ -n "$PR_BRANCH" ]]; then
     # PR branch: track the remote PR branch
@@ -227,7 +256,7 @@ setup_worktree() {
       base_ref="origin/$BRANCH"
       log "Branch $BRANCH exists on remote, will track"
     else
-      log "Creating new branch $BRANCH from origin/main"
+      log "Creating new branch $BRANCH from origin/$BASE_BRANCH"
     fi
   fi
 
