@@ -366,45 +366,16 @@ public struct ManagerReviewsAllowListRow: View {
     }
 
     private var managerButton: some View {
-        let isActive = appState.selectedSessionID == AppState.managerSessionID
-        let needsAttention = managerNeedsAttention
-        return Button {
+        sidebarButton(
+            title: "Manager",
+            isActive: appState.selectedSessionID == AppState.managerSessionID,
+            needsAttention: managerNeedsAttention,
+            leading: managerNeedsAttention
+                ? AnyView(AttentionDot(color: Color.orange, accessibilityLabel: "Needs attention"))
+                : nil
+        ) {
             appState.selectedSessionID = AppState.managerSessionID
-        } label: {
-            HStack(spacing: 4) {
-                if needsAttention {
-                    Circle()
-                        .fill(.orange)
-                        .frame(width: 8, height: 8)
-                        .overlay(
-                            Circle()
-                                .stroke(.orange.opacity(0.4), lineWidth: 2)
-                                .scaleEffect(1.6)
-                        )
-                        .accessibilityLabel("Needs attention")
-                }
-                Text("Manager")
-                    .font(.system(size: 12, weight: .bold))
-            }
-            .foregroundStyle(isActive ? CorveilTheme.gold : CorveilTheme.goldDark)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(needsAttention ? Color.orange.opacity(0.12) : (isActive ? CorveilTheme.bgCard : CorveilTheme.bgSurface))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(
-                                needsAttention
-                                    ? Color.orange.opacity(0.4)
-                                    : (isActive ? CorveilTheme.goldDark.opacity(0.6) : CorveilTheme.goldDark.opacity(0.3)),
-                                lineWidth: 1
-                            )
-                    )
-            )
-            .animation(.easeInOut(duration: 0.2), value: needsAttention)
         }
-        .buttonStyle(.plain)
         .overlay(alignment: .topTrailing) {
             if appState.isRemoteControlActive(sessionID: AppState.managerSessionID) {
                 RemoteControlBadge(compact: true)
@@ -437,24 +408,42 @@ public struct ManagerReviewsAllowListRow: View {
     }
 
     /// Shared full-width pill styling for the toggle buttons in this row.
-    private func sidebarButton(title: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+    /// Supports an optional leading view (e.g. an attention dot) and an
+    /// attention-flag that swaps the fill/border to the orange palette.
+    private func sidebarButton(
+        title: String,
+        isActive: Bool,
+        needsAttention: Bool = false,
+        leading: AnyView? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
-            Text(title)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(isActive ? CorveilTheme.gold : CorveilTheme.goldDark)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(isActive ? CorveilTheme.bgCard : CorveilTheme.bgSurface)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .strokeBorder(
-                                    isActive ? CorveilTheme.goldDark.opacity(0.6) : CorveilTheme.goldDark.opacity(0.3),
-                                    lineWidth: 1
-                                )
-                        )
-                )
+            HStack(spacing: 4) {
+                if let leading {
+                    leading
+                }
+                Text(title)
+                    .font(.system(size: 12, weight: .bold))
+            }
+            .foregroundStyle(isActive ? CorveilTheme.gold : CorveilTheme.goldDark)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(needsAttention
+                        ? Color.orange.opacity(0.12)
+                        : (isActive ? CorveilTheme.bgCard : CorveilTheme.bgSurface))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(
+                                needsAttention
+                                    ? Color.orange.opacity(0.4)
+                                    : (isActive ? CorveilTheme.goldDark.opacity(0.6) : CorveilTheme.goldDark.opacity(0.3)),
+                                lineWidth: 1
+                            )
+                    )
+            )
+            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: needsAttention)
         }
         .buttonStyle(.plain)
     }

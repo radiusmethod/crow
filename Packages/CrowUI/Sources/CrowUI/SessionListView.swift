@@ -440,15 +440,7 @@ struct ManagerSessionRow: View {
         } label: {
             HStack(spacing: 6) {
                 if needsAttention {
-                    Circle()
-                        .fill(.orange)
-                        .frame(width: 8, height: 8)
-                        .overlay(
-                            Circle()
-                                .stroke(.orange.opacity(0.4), lineWidth: 2)
-                                .scaleEffect(1.6)
-                        )
-                        .accessibilityLabel("Needs attention")
+                    AttentionDot(color: Color.orange, accessibilityLabel: "Needs attention")
                 }
                 Image(systemName: "person.2.fill")
                     .font(.system(size: 11))
@@ -484,7 +476,7 @@ struct ManagerSessionRow: View {
                             .strokeBorder(borderStroke, lineWidth: 1)
                     )
             )
-            .animation(.easeInOut(duration: 0.2), value: needsAttention)
+            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: needsAttention)
             .overlay(alignment: .topTrailing) {
                 if appState.isRemoteControlActive(sessionID: session.id) {
                     RemoteControlBadge(compact: true)
@@ -706,25 +698,9 @@ struct SessionRow: View {
                     .accessibilityLabel("Shell ready")
             case .claudeLaunched:
                 if needsAttention {
-                    Circle()
-                        .fill(.orange)
-                        .frame(width: 8, height: 8)
-                        .overlay(
-                            Circle()
-                                .stroke(.orange.opacity(0.4), lineWidth: 2)
-                                .scaleEffect(1.6)
-                        )
-                        .accessibilityLabel("Needs attention")
+                    AttentionDot(color: Color.orange, accessibilityLabel: "Needs attention")
                 } else if claudeState == .working {
-                    Circle()
-                        .fill(.green)
-                        .frame(width: 8, height: 8)
-                        .overlay(
-                            Circle()
-                                .stroke(.green.opacity(0.4), lineWidth: 2)
-                                .scaleEffect(1.6)
-                        )
-                        .accessibilityLabel("Claude working")
+                    AttentionDot(color: Color.green, accessibilityLabel: "Claude working")
                 } else {
                     // done or idle — solid green
                     Circle()
