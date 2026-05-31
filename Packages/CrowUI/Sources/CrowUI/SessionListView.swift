@@ -416,12 +416,32 @@ struct ManagerSessionRow: View {
     private var isActive: Bool { appState.selectedSessionID == session.id }
     private var isDeleting: Bool { appState.isDeletingSession[session.id] == true }
     private var isEditingThis: Bool { editingSessionID == session.id }
+    private var needsAttention: Bool {
+        appState.hookState(for: session.id).pendingNotification != nil
+    }
+
+    private var backgroundFill: Color {
+        if needsAttention {
+            return Color.orange.opacity(0.12)
+        }
+        return isActive ? CorveilTheme.bgCard : CorveilTheme.bgSurface
+    }
+
+    private var borderStroke: Color {
+        if needsAttention {
+            return Color.orange.opacity(0.4)
+        }
+        return isActive ? CorveilTheme.goldDark.opacity(0.6) : CorveilTheme.goldDark.opacity(0.3)
+    }
 
     var body: some View {
         Button {
             appState.selectedSessionID = session.id
         } label: {
             HStack(spacing: 6) {
+                if needsAttention {
+                    AttentionDot(color: Color.orange, accessibilityLabel: "Needs attention")
+                }
                 Image(systemName: "person.2.fill")
                     .font(.system(size: 11))
                 if isEditingThis {
@@ -450,15 +470,13 @@ struct ManagerSessionRow: View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isActive ? CorveilTheme.bgCard : CorveilTheme.bgSurface)
+                    .fill(backgroundFill)
                     .overlay(
                         RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(
-                                isActive ? CorveilTheme.goldDark.opacity(0.6) : CorveilTheme.goldDark.opacity(0.3),
-                                lineWidth: 1
-                            )
+                            .strokeBorder(borderStroke, lineWidth: 1)
                     )
             )
+            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: needsAttention)
             .overlay(alignment: .topTrailing) {
                 if appState.isRemoteControlActive(sessionID: session.id) {
                     RemoteControlBadge(compact: true)
@@ -680,25 +698,9 @@ struct SessionRow: View {
                     .accessibilityLabel("Shell ready")
             case .claudeLaunched:
                 if needsAttention {
-                    Circle()
-                        .fill(.orange)
-                        .frame(width: 8, height: 8)
-                        .overlay(
-                            Circle()
-                                .stroke(.orange.opacity(0.4), lineWidth: 2)
-                                .scaleEffect(1.6)
-                        )
-                        .accessibilityLabel("Needs attention")
+                    AttentionDot(color: Color.orange, accessibilityLabel: "Needs attention")
                 } else if claudeState == .working {
-                    Circle()
-                        .fill(.green)
-                        .frame(width: 8, height: 8)
-                        .overlay(
-                            Circle()
-                                .stroke(.green.opacity(0.4), lineWidth: 2)
-                                .scaleEffect(1.6)
-                        )
-                        .accessibilityLabel("Claude working")
+                    AttentionDot(color: Color.green, accessibilityLabel: "Claude working")
                 } else {
                     // done or idle — solid green
                     Circle()
