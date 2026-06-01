@@ -34,7 +34,13 @@ All persistent state lives under `~/Library/Application Support/crow/` (see `Pac
       "provider": "github",
       "cli": "gh",
       "host": null,
-      "customInstructions": "Always run npm test before committing"
+      "customInstructions": "Always run npm test before committing",
+      "gateway": {
+        "baseURL": "https://corveil.io",
+        "customHeaders": {
+          "x-citadel-api-key": "op://Spotlight Prod/Citadel/api_key"
+        }
+      }
     },
     {
       "id": "uuid",
@@ -63,8 +69,59 @@ All persistent state lives under `~/Library/Application Support/crow/` (see `Pac
 - **`excludeReviewRepos`** — repos to hide from the review board (e.g., `["zarf-dev/zarf"]`). Supports `*` wildcards (e.g., `"zarf-dev/*"`). Matching reviews are filtered out from the board, sidebar badge count, and notifications. Editable in Settings → Automation → Reviews.
 - **`excludeTicketRepos`** — repos to hide from the ticket board (e.g., `["zarf-dev/zarf"]`). Supports `*` wildcards (e.g., `"zarf-dev/*"`). Matching issues are filtered out from the board, pipeline counts, and auto-create candidates. Editable in Settings → Automation → Tickets.
 - **`customInstructions`** — optional free-text instructions appended to the session prompt as a `## Custom Instructions` section. Use this for workspace-specific conventions, e.g., "Always run `npm test` before committing" or "Use the auth middleware in `src/middleware/auth.ts` as a pattern."
+- **`gateway`** — optional AI gateway for this workspace's `claude` launches. See [AI Gateway](#ai-gateway) below.
 
 For the full set of automation toggles backed by this config, see [automation.md](automation.md).
+
+## AI Gateway
+
+A workspace can route its Claude Code sessions through a proxy/gateway (e.g. an internal LLM gateway) instead of the vanilla Anthropic API, with its own API key. This replaces setting `ANTHROPIC_BASE_URL` / `ANTHROPIC_CUSTOM_HEADERS` globally in your shell — which would force *every* `claude` on the machine through one gateway — with a per-workspace setting Crow manages.
+
+```jsonc
+"gateway": {
+  "baseURL": "https://corveil.io",
+  "customHeaders": {
+    // op:// reference — resolved at launch via the 1Password CLI, never stored at rest
+    "x-citadel-api-key": "op://Spotlight Prod/Citadel/api_key"
+    // or a plaintext value (stored in config.json — see the security note)
+    // "x-citadel-api-key": "Bearer sk-citadel-…"
+  }
+}
+```
+
+- **`baseURL`** — exported as `ANTHROPIC_BASE_URL` for the workspace's `claude` launches.
+- **`customHeaders`** — a `Name: Value` map exported as `ANTHROPIC_CUSTOM_HEADERS` (newline-separated). Both fields must be set together; a `baseURL` with no headers (or vice versa) is rejected when the config is loaded.
+
+When a workspace has a `gateway`, Crow injects these vars two ways so they apply on the initial launch *and* survive manual `claude` re-runs:
+
+1. **Launch line** — the `claude` invocation is prefixed with the env-var assignments, overriding any global `~/.zshrc` export for that launch.
+2. **`settings.local.json`** — the resolved values are written to the worktree's `.claude/settings.local.json` `env` block (gitignored), which Claude Code reads on every run.
+
+When a workspace has **no** `gateway`, Crow instead prefixes the launch with `unset ANTHROPIC_BASE_URL ANTHROPIC_CUSTOM_HEADERS` so a global shell export — or a sibling workspace's gateway — can't bleed into it. Edit a workspace's gateway in **Settings → Workspaces**.
+
+### Secret storage
+
+A header value can be either:
+
+- **An `op://` reference** (recommended) — resolved at session launch via the 1Password CLI (`op read`). The secret is **never written to `config.json`**. Requires `op` installed and signed in; a failed lookup drops that header and logs a redacted warning (the gateway then rejects the request rather than silently falling back to the vanilla API).
+- **A plaintext value** — stored as-is in `config.json` (mode `0600`). Convenient for local dev, but **anyone with read access to the file can see the key**. The Settings UI shows a warning. Prefer an `op://` reference for production keys.
+
+Resolved secret values are never logged.
+
+### Manager gateway
+
+The Manager session sits at the dev root and isn't bound to a single workspace, so it has its **own** top-level gateway rather than inheriting any one workspace's:
+
+```jsonc
+{
+  "managerGateway": {
+    "baseURL": "https://corveil.io",
+    "customHeaders": { "x-citadel-api-key": "op://Spotlight Prod/Citadel/api_key" }
+  }
+}
+```
+
+Same shape, same secret-storage rules, same two-way injection (written to `{devRoot}/.claude/settings.local.json`). Configure it under **Settings → Automation → Manager AI Gateway**. Takes effect on the next app launch.
 
 ## Manager Terminal
 
@@ -72,6 +129,7 @@ The Manager tab runs Claude Code at the dev root and drives workspace orchestrat
 
 - **`managerAutoPermissionMode`** (default: `true`) — passes `--permission-mode auto` to the Manager's `claude` launch so it can run `crow`, `gh`, and `git` commands without per-call approval. Requires Claude Code **v2.1.83+**, a **Max / Team / Enterprise / API** plan, the **Anthropic** API provider (not Bedrock / Vertex / Foundry), and a supported model (**Sonnet 4.6**, **Opus 4.6**, or **Opus 4.7**). On Team/Enterprise plans an admin must enable auto mode in Claude Code admin settings. Turn this off via **Settings → Automation → Manager Terminal** if your account reports auto mode as unavailable. Worker sessions and CLI-spawned terminals are unaffected by this setting.
 - **`remoteControlEnabled`** (default: `false`) — launches new Claude Code sessions with `--rc` so you can control them from claude.ai or the Claude mobile app.
+- **`managerGateway`** — optional AI gateway for the Manager's `claude` launch, with its own API key. See [Manager gateway](#manager-gateway).
 
 Changes take effect on next app launch — the Manager's stored command is rebuilt on hydration.
 
