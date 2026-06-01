@@ -195,6 +195,33 @@ public struct WorkspaceGateway: Codable, Sendable, Equatable {
     }
 }
 
+extension WorkspaceGateway {
+    /// Parse a multiline `Name: Value` editor string into a header map. Blank
+    /// lines are ignored; each line's first `:` splits name from value. Used by
+    /// the Settings UI so a free-text editor maps to the `customHeaders` dict.
+    public static func parseHeaderLines(_ text: String) -> [String: String] {
+        var result: [String: String] = [:]
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, let colon = line.firstIndex(of: ":") else { continue }
+            let name = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+            let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { continue }
+            result[name] = value
+        }
+        return result
+    }
+
+    /// Render a header map as a multiline `Name: Value` editor string (sorted by
+    /// name for stable display).
+    public static func headerLines(from headers: [String: String]) -> String {
+        headers
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key): \($0.value)" }
+            .joined(separator: "\n")
+    }
+}
+
 /// Opt-in settings that let Crow type instructions into a session's managed
 /// Claude Code terminal when a watched PR transitions into a state that
 /// usually requires action. Both flags default off — typing into a terminal

@@ -488,3 +488,25 @@ import Testing
         _ = try JSONDecoder().decode(AppConfig.self, from: json)
     }
 }
+
+@Test func gatewayHeaderLinesRoundTrip() throws {
+    let headers = ["x-b": "two", "x-a": "Bearer one"]
+    let text = WorkspaceGateway.headerLines(from: headers)
+    #expect(text == "x-a: Bearer one\nx-b: two")  // sorted
+    #expect(WorkspaceGateway.parseHeaderLines(text) == headers)
+}
+
+@Test func gatewayParseHeaderLinesIgnoresBlankAndMalformedLines() throws {
+    let text = """
+    x-key: Bearer sk-1
+
+      x-op : op://Vault/Item/field
+    not-a-header-line
+    : missing-name
+    """
+    let parsed = WorkspaceGateway.parseHeaderLines(text)
+    #expect(parsed["x-key"] == "Bearer sk-1")
+    #expect(parsed["x-op"] == "op://Vault/Item/field")
+    #expect(parsed["not-a-header-line"] == nil)   // no colon → ignored
+    #expect(parsed.count == 2)                    // ": missing-name" has empty name → ignored
+}
