@@ -408,3 +408,83 @@ import Testing
     let config = try JSONDecoder().decode(AppConfig.self, from: json)
     #expect(config.defaults.ignoreReviewLabels.isEmpty)
 }
+
+// MARK: - AI gateway (CROW-402)
+
+@Test func workspaceGatewayRoundTrip() throws {
+    let config = AppConfig(workspaces: [
+        WorkspaceInfo(
+            name: "RadiusMethod",
+            gateway: WorkspaceGateway(
+                baseURL: "https://corveil.io",
+                customHeaders: ["x-citadel-api-key": "op://Spotlight Prod/Citadel/api_key"]
+            )
+        )
+    ])
+    let data = try JSONEncoder().encode(config)
+    let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
+    #expect(decoded.workspaces[0].gateway?.baseURL == "https://corveil.io")
+    #expect(decoded.workspaces[0].gateway?.customHeaders["x-citadel-api-key"] == "op://Spotlight Prod/Citadel/api_key")
+}
+
+@Test func workspaceGatewayDefaultsNilWhenKeyMissing() throws {
+    // Legacy configs without the key decode with a nil gateway.
+    let json = """
+    {"workspaces": [{"id": "00000000-0000-0000-0000-000000000001", "name": "Org", "provider": "github", "cli": "gh"}]}
+    """.data(using: .utf8)!
+    let config = try JSONDecoder().decode(AppConfig.self, from: json)
+    #expect(config.workspaces[0].gateway == nil)
+}
+
+@Test func managerGatewayRoundTrip() throws {
+    var config = AppConfig()
+    config.managerGateway = WorkspaceGateway(
+        baseURL: "https://corveil.io",
+        customHeaders: ["x-citadel-api-key": "Bearer sk-citadel-123"]
+    )
+    let data = try JSONEncoder().encode(config)
+    let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
+    #expect(decoded.managerGateway?.baseURL == "https://corveil.io")
+    #expect(decoded.managerGateway?.customHeaders["x-citadel-api-key"] == "Bearer sk-citadel-123")
+}
+
+@Test func managerGatewayDefaultsNilWhenKeyMissing() throws {
+    let json = "{}".data(using: .utf8)!
+    let config = try JSONDecoder().decode(AppConfig.self, from: json)
+    #expect(config.managerGateway == nil)
+}
+
+@Test func gatewayBothEmptyDecodesAsNoGateway() throws {
+    // Both fields blank/empty is allowed — it just means "no gateway".
+    let json = #"{"baseURL": "", "customHeaders": {}}"#.data(using: .utf8)!
+    let gateway = try JSONDecoder().decode(WorkspaceGateway.self, from: json)
+    #expect(gateway.isEmpty)
+}
+
+@Test func gatewayBaseURLWithoutHeadersThrows() throws {
+    // A baseURL with no headers can't authenticate — reject at parse time.
+    let json = #"{"baseURL": "https://corveil.io", "customHeaders": {}}"#.data(using: .utf8)!
+    #expect(throws: DecodingError.self) {
+        _ = try JSONDecoder().decode(WorkspaceGateway.self, from: json)
+    }
+}
+
+@Test func gatewayHeadersWithoutBaseURLThrows() throws {
+    // Headers with no baseURL have nothing to attach to — reject at parse time.
+    let json = #"{"baseURL": "", "customHeaders": {"x-key": "secret"}}"#.data(using: .utf8)!
+    #expect(throws: DecodingError.self) {
+        _ = try JSONDecoder().decode(WorkspaceGateway.self, from: json)
+    }
+}
+
+@Test func malformedWorkspaceGatewayFailsConfigDecode() throws {
+    // A malformed gateway inside a workspace propagates as a decode failure
+    // (ConfigStore.loadConfig logs it and returns nil rather than silently
+    // dropping just the bad field).
+    let json = """
+    {"workspaces": [{"id": "00000000-0000-0000-0000-000000000001", "name": "Org", "provider": "github", "cli": "gh", "gateway": {"baseURL": "https://corveil.io", "customHeaders": {}}}]}
+    """.data(using: .utf8)!
+    #expect(throws: DecodingError.self) {
+        _ = try JSONDecoder().decode(AppConfig.self, from: json)
+    }
+}
