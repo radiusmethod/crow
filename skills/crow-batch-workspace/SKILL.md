@@ -217,4 +217,5 @@ https://github.com/RadiusMethod/acme-api/issues/46
 ```
 - 5 parallel `setup.sh` calls
 - Each blocks one GCD thread in the socket server (well within the 64+ thread pool)
-- `sleep 3` calls in each script overlap — total wait is ~3s, not 15s
+- Each script's readiness poll (up to ~15s) overlaps with the others — they wait
+  concurrently, and most return as soon as the agent reports `agentLaunched`

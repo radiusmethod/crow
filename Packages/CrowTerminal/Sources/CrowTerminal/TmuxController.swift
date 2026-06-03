@@ -104,13 +104,34 @@ public struct TmuxController: Sendable {
         return out.split(separator: "\n").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
     }
 
+    /// List each window's index and the command currently running in its
+    /// active pane (`#{window_index}` + `#{pane_current_command}`). Used by the
+    /// orphan-window reaper to distinguish a window running an agent from a
+    /// bare login shell (#408).
+    public func listWindowCommands() throws -> [(index: Int, command: String)] {
+        let out = try run(["list-windows", "-t", sessionName,
+                           "-F", "#{window_index}\t#{pane_current_command}"])
+        return out.split(separator: "\n").compactMap { line in
+            let parts = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2, let idx = Int(parts[0].trimmingCharacters(in: .whitespaces)) else {
+                return nil
+            }
+            return (idx, parts[1].trimmingCharacters(in: .whitespaces))
+        }
+    }
+
     // MARK: - Windows
 
+    /// `timeout` defaults to the per-call default. Callers spawning a window
+    /// while the app is under load (many concurrent hydrations, a contended
+    /// main actor) can pass a longer budget so a slow `new-window` doesn't
+    /// SIGTERM and leave the terminal window-less (issue #408).
     public func newWindow(
         name: String? = nil,
         cwd: String? = nil,
         env: [String: String] = [:],
-        command: String? = nil
+        command: String? = nil,
+        timeout: TimeInterval = TmuxController.defaultTimeout
     ) throws -> Int {
         var args = ["new-window", "-P", "-F", "#{window_index}", "-t", sessionName]
         if let name { args.append(contentsOf: ["-n", name]) }
@@ -122,7 +143,7 @@ public struct TmuxController: Sendable {
         if let cwd, !cwd.isEmpty { args.append(contentsOf: ["-c", cwd]) }
         for (k, v) in env { args.append(contentsOf: ["-e", "\(k)=\(v)"]) }
         if let command { args.append(command) }
-        let out = try run(args)
+        let out = try run(args, timeout: timeout)
         guard let idx = Int(out.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw TmuxError.cliFailed(
                 args: args,

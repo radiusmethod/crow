@@ -491,8 +491,7 @@ If `setup.sh` returns a JSON error (`"status": "error"`):
 | `git_worktree_add` — worktree creation failed | Branch may exist; script auto-retries after cleanup |
 | `new_session` — crow new-session failed | Crow app may not be running. Inform user. |
 | `add_worktree` — crow add-worktree failed | Use full UUID from session, check paths |
-| `new_terminal` — crow new-terminal failed | Session may not exist; check session_id |
-| `send_launch` — crow send failed | Terminal may not be ready; retry |
+| `new_terminal` — crow new-terminal failed / could not create window | Session may not exist (check session_id), or tmux couldn't spawn a window under load |
 | `write_prompt` — prompt file not found | Verify prompt was written before calling setup.sh |
 
 ## crow CLI Reference
