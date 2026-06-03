@@ -50,19 +50,21 @@ public actor ProviderManager {
     /// URL-driven `TaskBackend` lookup — detect the provider from `url` and
     /// hand back the matching backend.
     public nonisolated func taskBackend(forURL url: String) -> TaskBackend {
-        let detected = detectProviderNonisolated(from: url)
+        let detected = Self.detect(url: url, additionalGitLabHosts: additionalGitLabHosts)
         return taskBackend(for: detected.provider, host: detected.host)
     }
 
-    /// Non-isolated variant of ``detectProvider(from:)`` — same logic, available
-    /// off-actor for use by the factory methods above. Kept in sync with the
-    /// actor-isolated variant on purpose; if you change one, change both.
-    nonisolated private func detectProviderNonisolated(from url: String) -> (provider: Provider, cli: String, host: String?) {
+    /// Single source of truth for URL → provider detection. The actor-isolated
+    /// ``detectProvider(from:)`` and the nonisolated factory paths both delegate
+    /// here so the matching logic can never drift.
+    nonisolated static func detect(url: String, additionalGitLabHosts: [String]) -> (provider: Provider, cli: String, host: String?) {
         if url.contains("github.com") {
             return (.github, "gh", nil)
         } else if url.contains("gitlab.com") {
             return (.gitlab, "glab", "gitlab.com")
         } else if url.contains("corveil.io") {
+            // Corveil is task-only (no embedded git, no CLI). Detected so the
+            // stub backend can be exercised end-to-end via URL. See ADR 0005.
             return (.corveil, "", nil)
         }
         for host in additionalGitLabHosts {
@@ -78,22 +80,7 @@ public actor ProviderManager {
     /// Falls back to `.github` for unrecognized hosts — the `gh` CLI call will fail clearly
     /// if the URL is actually a self-hosted GitLab instance, which is an acceptable failure mode.
     public func detectProvider(from url: String) -> (provider: Provider, cli: String, host: String?) {
-        if url.contains("github.com") {
-            return (.github, "gh", nil)
-        } else if url.contains("gitlab.com") {
-            return (.gitlab, "glab", "gitlab.com")
-        } else if url.contains("corveil.io") {
-            // Corveil is task-only (no embedded git, no CLI). Detected so the
-            // stub backend can be exercised end-to-end via URL. See ADR 0005.
-            return (.corveil, "", nil)
-        }
-        // Check user-configured GitLab hosts
-        for host in additionalGitLabHosts {
-            if url.contains(host) {
-                return (.gitlab, "glab", host)
-            }
-        }
-        return (.github, "gh", nil)
+        Self.detect(url: url, additionalGitLabHosts: additionalGitLabHosts)
     }
 
     /// Parse issue/PR number and repo from a ticket URL.

@@ -32,7 +32,10 @@ final class BackendsTests: XCTestCase {
     func testGitHubTaskBackendDeclaresCapabilities() {
         let backend = GitHubTaskBackend(shellRunner: FakeShellRunner())
         XCTAssertEqual(backend.provider, .github)
-        XCTAssertTrue(backend.capabilities.contains(.projectBoardStatus))
+        // .projectBoardStatus intentionally NOT declared until the markInReview
+        // GraphQL migration lands. Declaring it while setTaskStatus throws would
+        // lie to capability-gated callers. See ADR 0005.
+        XCTAssertFalse(backend.capabilities.contains(.projectBoardStatus))
         XCTAssertTrue(backend.capabilities.contains(.batchedQuery))
     }
 

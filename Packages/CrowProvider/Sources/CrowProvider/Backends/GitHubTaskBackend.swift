@@ -4,14 +4,19 @@ import CrowCore
 /// `TaskBackend` implementation for GitHub. Wraps the `gh` CLI.
 ///
 /// Capabilities declared:
-/// - `.projectBoardStatus` — supports GitHub Projects v2 status mutation.
 /// - `.batchedQuery` — `listAssigned`-style fetches use one GraphQL call.
+///
+/// Note: `.projectBoardStatus` is intentionally *not* declared until the
+/// `markInReview` GraphQL migration lands (see `setTaskStatus` below and
+/// IssueTracker.swift:2539). The flag is contract: declaring it means a
+/// capability-gated caller can call `setTaskStatus` and expect success.
+/// We add the flag when the implementation arrives, not before.
 ///
 /// See ADR 0005 for the protocol contract and ADR 0005's Context section for why
 /// task ops are separate from code ops.
 public struct GitHubTaskBackend: TaskBackend {
     public let provider: Provider = .github
-    public let capabilities: Set<TaskCapability> = [.projectBoardStatus, .batchedQuery]
+    public let capabilities: Set<TaskCapability> = [.batchedQuery]
 
     private let shellRunner: ShellRunner
 

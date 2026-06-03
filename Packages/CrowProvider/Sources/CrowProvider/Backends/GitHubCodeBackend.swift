@@ -40,7 +40,8 @@ public struct GitHubCodeBackend: CodeBackend {
 
     public func ensureMergeLabel(repo: String) async throws {
         // `gh label create` is idempotent-ish: it errors if the label already
-        // exists. Swallow that one error; surface anything else.
+        // exists. Swallow that one error; surface anything else with the
+        // original exit code intact.
         do {
             _ = try await shellRunner.run(
                 "gh", "label", "create", "crow:merge",
@@ -48,9 +49,8 @@ public struct GitHubCodeBackend: CodeBackend {
                 "--color", "1D76DB",
                 "--description", "Auto-merge when checks pass"
             )
-        } catch ShellRunnerError.nonZeroExit(_, let output) {
-            if output.localizedCaseInsensitiveContains("already exists") { return }
-            throw ShellRunnerError.nonZeroExit(exitCode: 1, output: output)
+        } catch ShellRunnerError.nonZeroExit(_, let output) where output.localizedCaseInsensitiveContains("already exists") {
+            return
         }
     }
 }

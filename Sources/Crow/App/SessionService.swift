@@ -1147,10 +1147,14 @@ final class SessionService {
     private func findPRLink(branch: String, repoPath: String, sessionID: UUID) async -> SessionLink? {
         guard let repoSlug = resolveRepoSlug(repoPath: repoPath) else { return nil }
         // Prefer CodeBackend.linkedPR (ADR 0005) when a manager is wired; fall
-        // back to the inline `gh pr list` shell-out for legacy call paths.
-        if let manager = providerManager,
-           let backend = manager.codeBackend(for: .github),
-           let pr = try? await backend.linkedPR(repo: repoSlug, branch: branch) {
+        // back to the inline `gh pr list` shell-out only when no manager is
+        // available — otherwise we'd issue the identical command twice on the
+        // common "no PR exists" path.
+        if let manager = providerManager {
+            guard let backend = manager.codeBackend(for: .github),
+                  let pr = try? await backend.linkedPR(repo: repoSlug, branch: branch) else {
+                return nil
+            }
             NSLog("[SessionService] Found PR #\(pr.number) for branch '\(branch)'")
             return SessionLink(sessionID: sessionID, label: "PR #\(pr.number)", url: pr.url, linkType: .pr)
         }
