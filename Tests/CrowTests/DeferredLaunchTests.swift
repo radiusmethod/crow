@@ -9,7 +9,11 @@ import CrowTerminal
 /// until the shell signals `.shellReady`, instead of blind-pasting into a
 /// not-yet-ready shell. Pure helpers are tested directly; the readiness-handler
 /// branch is exercised against a real `SessionService` with seeded state.
-@Suite("Deferred managed-terminal launch (#408)")
+// Serialized: the instance tests overwrite the singleton
+// `TmuxBackend.shared.onReadinessChanged` via `wireTerminalReadiness()` and then
+// fire it directly. Run in parallel (Swift Testing's default) one test could
+// stomp another's closure before its sentinel fires.
+@Suite("Deferred managed-terminal launch (#408)", .serialized)
 struct DeferredLaunchTests {
 
     // MARK: resolveLaunch (pure)

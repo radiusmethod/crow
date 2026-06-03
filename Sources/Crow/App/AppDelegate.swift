@@ -1306,17 +1306,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             && !cmd.contains("--remote-control")
                     }
                     let trackReadiness = isManaged
-                    // Every session, including the Manager (#314), runs on
-                    // tmux (#303). Register the tmux window now — its shell
-                    // starts immediately, so there's no offscreen pre-init.
-                    var terminal = SessionTerminal(
-                        sessionID: sessionID,
-                        name: terminalName,
-                        cwd: cwd,
-                        command: command,
-                        isManaged: isManaged,
-                        backend: .tmux
-                    )
                     // Brand-new managed terminals DEFER their agent launch until
                     // the shell signals readiness (issue #408). Pasting the launch
                     // command immediately races the shell's line editor (zle): if
@@ -1328,6 +1317,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let hasCommand = !(command?.isEmpty ?? true)
                     let deferLaunch = trackReadiness && hasCommand
                     let registerCommand = deferLaunch ? nil : command
+                    // Every session, including the Manager (#314), runs on
+                    // tmux (#303). Register the tmux window now — its shell
+                    // starts immediately, so there's no offscreen pre-init.
+                    //
+                    // Persist `registerCommand` (nil for a deferred launch), NOT
+                    // the raw launch command: the launch lives in
+                    // `pendingLaunchCommands` (in-memory) and the persisted row
+                    // must not carry it, or the hydrate-fresh fallback would
+                    // blind-paste it into a not-yet-ready shell on the recovery
+                    // path — the very race this fixes (#408). A restored managed
+                    // terminal relaunches via the autoLaunch/launchAgent path.
+                    var terminal = SessionTerminal(
+                        sessionID: sessionID,
+                        name: terminalName,
+                        cwd: cwd,
+                        command: registerCommand,
+                        isManaged: isManaged,
+                        backend: .tmux
+                    )
                     // Seed readiness + pending-launch state BEFORE registering so
                     // the sentinel's `.shellReady` (which can only fire on a later
                     // main-actor turn) always finds the pending command and the
@@ -1343,17 +1351,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     var launchFailed = false
                     do {
-                        // Bounded retry with a longer per-call `new-window` budget:
-                        // under load the tmux subprocess can exceed the 2s default
-                        // and get SIGTERM'd, leaving a window-less terminal (#408).
-                        let binding = try AppDelegate.registerWithRetry(attempts: 3) { _ in
+                        // Bounded retry with a modestly-longer per-call `new-window`
+                        // budget: under load the tmux subprocess can exceed the 2s
+                        // default and get SIGTERM'd, leaving a window-less terminal
+                        // (#408). This runs inside `MainActor.run`, so the budget is
+                        // kept tight (2 attempts × 3s) to cap worst-case main-actor
+                        // stall at ~6s rather than beachballing concurrent RPCs.
+                        let binding = try AppDelegate.registerWithRetry(attempts: 2) { _ in
                             try TmuxBackend.shared.registerTerminal(
                                 id: terminal.id,
                                 name: terminalName,
                                 cwd: cwd,
                                 command: registerCommand,
                                 trackReadiness: trackReadiness,
-                                newWindowTimeout: 4.0
+                                newWindowTimeout: 3.0
                             )
                         }
                         terminal.tmuxBinding = binding
@@ -1475,35 +1486,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                        let terminal = terminals.first(where: { $0.id == terminalID }),
                        terminal.isManaged,
                        let session = capturedAppState.sessions.first(where: { $0.id == sessionID }),
-                       let agent = AgentRegistry.shared.agent(for: session.agentKind),
-                       text.contains(agent.launchCommandToken) {
-                        if let worktree = capturedAppState.primaryWorktree(for: sessionID),
-                           let crowPath = ClaudeHookConfigWriter.findCrowBinary() {
-                            do {
-                                try agent.hookConfigWriter.writeHookConfig(
-                                    worktreePath: worktree.worktreePath,
-                                    sessionID: sessionID,
-                                    crowPath: crowPath
-                                )
-                            } catch {
-                                NSLog("[AppDelegate] Failed to write hook config for session %@: %@",
-                                      sessionID.uuidString, error.localizedDescription)
-                            }
+                       let agent = AgentRegistry.shared.agent(for: session.agentKind) {
+                        let prepared = AppDelegate.prepareAgentLaunchText(
+                            command: text,
+                            agent: agent,
+                            sessionID: sessionID,
+                            worktreePath: capturedAppState.primaryWorktree(for: sessionID)?.worktreePath,
+                            crowPath: ClaudeHookConfigWriter.findCrowBinary(),
+                            telemetryPort: capturedTelemetryPort
+                        )
+                        text = prepared.text
+                        if prepared.didLaunch {
+                            capturedAppState.terminalReadiness[terminalID] = .agentLaunched
                         }
-                        // OTEL telemetry env vars are Claude-specific —
-                        // Codex has no equivalent OTLP exporter.
-                        if agent.kind == .claudeCode, let port = capturedTelemetryPort {
-                            let vars = [
-                                "CLAUDE_CODE_ENABLE_TELEMETRY=1",
-                                "OTEL_METRICS_EXPORTER=otlp",
-                                "OTEL_LOGS_EXPORTER=otlp",
-                                "OTEL_EXPORTER_OTLP_PROTOCOL=http/json",
-                                "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:\(port)",
-                                "OTEL_RESOURCE_ATTRIBUTES=crow.session.id=\(sessionID.uuidString)",
-                            ].joined(separator: " ")
-                            text = "export \(vars) && \(text)"
-                        }
-                        capturedAppState.terminalReadiness[terminalID] = .agentLaunched
                     }
 
                     if let routedTerminal {
@@ -1794,6 +1789,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         throw lastError ?? RPCError.applicationError("registerWithRetry: no attempts run")
+    }
+
+    /// Prepare an agent-launching command for a managed terminal: write the
+    /// per-worktree hook config so the agent's hooks route back to `sessionID`,
+    /// and (for Claude) prepend the OTEL telemetry exporter env vars. Returns
+    /// the final text plus whether `command` actually launches the agent (its
+    /// `launchCommandToken` is present). Single source of truth shared by the
+    /// `send` RPC and the #408 deferred-launch paste so the two never drift.
+    nonisolated static func prepareAgentLaunchText(
+        command: String,
+        agent: any CodingAgent,
+        sessionID: UUID,
+        worktreePath: String?,
+        crowPath: String?,
+        telemetryPort: UInt16?
+    ) -> (text: String, didLaunch: Bool) {
+        guard command.contains(agent.launchCommandToken) else { return (command, false) }
+        if let worktreePath, let crowPath {
+            do {
+                try agent.hookConfigWriter.writeHookConfig(
+                    worktreePath: worktreePath,
+                    sessionID: sessionID,
+                    crowPath: crowPath
+                )
+            } catch {
+                NSLog("[AppDelegate] Failed to write hook config for session %@: %@",
+                      sessionID.uuidString, error.localizedDescription)
+            }
+        }
+        // OTEL telemetry env vars are Claude-specific — Codex has no equivalent
+        // OTLP exporter.
+        guard agent.kind == .claudeCode, let port = telemetryPort else { return (command, true) }
+        let vars = [
+            "CLAUDE_CODE_ENABLE_TELEMETRY=1",
+            "OTEL_METRICS_EXPORTER=otlp",
+            "OTEL_LOGS_EXPORTER=otlp",
+            "OTEL_EXPORTER_OTLP_PROTOCOL=http/json",
+            "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:\(port)",
+            "OTEL_RESOURCE_ATTRIBUTES=crow.session.id=\(sessionID.uuidString)",
+        ].joined(separator: " ")
+        return ("export \(vars) && \(command)", true)
     }
 
     // MARK: - Claude Binary Resolution

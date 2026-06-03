@@ -396,51 +396,23 @@ final class SessionService {
 
         // Apply the same prep the legacy `crow send` path got from the `send`
         // RPC (hook config + OTEL env vars) so hooks route back to this session
-        // and Claude telemetry is exported.
-        let text = prepareManagedLaunchText(sessionID: sessionID, command: command)
+        // and Claude telemetry is exported — via the shared helper so the two
+        // launch paths never drift.
+        var text = command
+        if let session = appState.sessions.first(where: { $0.id == sessionID }),
+           let agent = AgentRegistry.shared.agent(for: session.agentKind) {
+            text = AppDelegate.prepareAgentLaunchText(
+                command: command,
+                agent: agent,
+                sessionID: sessionID,
+                worktreePath: appState.primaryWorktree(for: sessionID)?.worktreePath,
+                crowPath: ClaudeHookConfigWriter.findCrowBinary(),
+                telemetryPort: telemetryPort
+            ).text
+        }
         // Ensure a trailing newline so TmuxBackend.sendText delivers Enter.
         TerminalRouter.send(routedTerminal, text: text.hasSuffix("\n") ? text : text + "\n")
         appState.terminalReadiness[terminalID] = .agentLaunched
-    }
-
-    /// Prepare a managed terminal's agent-launch command exactly as the `send`
-    /// RPC does for the legacy `crow send` path (#408): write the per-worktree
-    /// hook config so the agent's hooks route back to this session, and (for
-    /// Claude) prepend the OTEL telemetry exporter env vars. Returns the final
-    /// text to paste, or the command unchanged if it doesn't launch the
-    /// session's agent.
-    ///
-    /// NOTE: the OTEL env-var list is intentionally identical to the `send` RPC
-    /// handler in AppDelegate — keep the two in sync.
-    func prepareManagedLaunchText(sessionID: UUID, command: String) -> String {
-        guard let session = appState.sessions.first(where: { $0.id == sessionID }),
-              let agent = AgentRegistry.shared.agent(for: session.agentKind),
-              command.contains(agent.launchCommandToken) else {
-            return command
-        }
-        if let worktree = appState.primaryWorktree(for: sessionID),
-           let crowPath = ClaudeHookConfigWriter.findCrowBinary() {
-            do {
-                try agent.hookConfigWriter.writeHookConfig(
-                    worktreePath: worktree.worktreePath,
-                    sessionID: sessionID,
-                    crowPath: crowPath
-                )
-            } catch {
-                NSLog("[SessionService] Failed to write hook config for session %@: %@",
-                      sessionID.uuidString, error.localizedDescription)
-            }
-        }
-        guard agent.kind == .claudeCode, let port = telemetryPort else { return command }
-        let vars = [
-            "CLAUDE_CODE_ENABLE_TELEMETRY=1",
-            "OTEL_METRICS_EXPORTER=otlp",
-            "OTEL_LOGS_EXPORTER=otlp",
-            "OTEL_EXPORTER_OTLP_PROTOCOL=http/json",
-            "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:\(port)",
-            "OTEL_RESOURCE_ATTRIBUTES=crow.session.id=\(sessionID.uuidString)",
-        ].joined(separator: " ")
-        return "export \(vars) && \(command)"
     }
 
     /// Re-arm the tmux readiness watch for a terminal whose first attempt
