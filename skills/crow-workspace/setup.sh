@@ -56,6 +56,15 @@ json_val() {
   tr -d '\n' | sed 's/[[:space:]]*:[[:space:]]*/:/g' | grep -o "\"$key\":\"[^\"]*\"" | cut -d'"' -f4 | head -1
 }
 
+# Extract the `readiness` of a specific terminal id from `crow list-terminals`
+# JSON. Walks the flat per-terminal objects, finds the one carrying our id, and
+# reads its readiness field. Usage: terminal_readiness "$tid" "$json"
+terminal_readiness() {
+  local tid="$1" json="$2"
+  printf '%s' "$json" | tr -d '\n' | grep -o '{[^{}]*}' | grep "\"$tid\"" \
+    | grep -o '"readiness":"[^"]*"' | cut -d'"' -f4 | head -1
+}
+
 # POSIX single-quote an arg so it's safe to interpolate into a shell command.
 # Mirrors Swift's shellQuote() in ClaudeLaunchArgs: wraps value in '...' and
 # escapes embedded single-quotes as '\''.
@@ -550,14 +559,42 @@ launch_claude() {
     fi
   fi
 
-  # Create terminal
-  log "Creating terminal..."
+  # Build the agent launch command and hand it to crow at terminal-creation
+  # time via --command. Crow holds the command and pastes it only once the
+  # shell's line editor is live (the .shellReady sentinel), which is the
+  # race-free replacement for the old `sleep 3` + `crow send` handshake that
+  # intermittently dropped the launch into a not-yet-ready shell, leaving a
+  # bare zsh with no agent (#408).
+  #
+  # The prompt stays in its file — `"$(cat $prompt_path)"` is expanded by the
+  # TARGET shell at paste time, so the command sent over the socket is small
+  # (no ARG_MAX / payload concern).
+  local prompt_path="$DEV_ROOT/.claude/prompts/crow-prompt-$SESSION_NAME.md"
+  local rc_args=""
+  if is_remote_control_enabled; then
+    # Keep building --rc here: crow's resolveClaudeInCommand only injects
+    # remote-control flags for a bare `claude …` command, NOT a
+    # `cd … && claude …` form, so setup.sh remains the source of truth.
+    rc_args=" --rc --name $(posix_quote "$SESSION_NAME")"
+    log "Remote control enabled — launching with --rc --name '$SESSION_NAME'"
+  fi
+  local launch_cmd="cd $WORKTREE_PATH && $claude_bin --permission-mode plan$rc_args \"\$(cat $prompt_path)\""
+
+  # Create terminal with the launch command attached.
+  log "Creating terminal (deferred agent launch via --command)..."
   local term_result
   if ! term_result=$(crow new-terminal --session "$SESSION_ID" \
     --cwd "$WORKTREE_PATH" \
     --name "Claude Code" \
-    --managed 2>&1); then
+    --managed \
+    --command "$launch_cmd" 2>&1); then
     die "new_terminal" "crow new-terminal failed: $term_result"
+  fi
+
+  # The RPC reports launch_failed when the tmux window could not be created
+  # (e.g. new-window timed out under load) — don't pretend it launched.
+  if grep -qE '"launch_failed"[[:space:]]*:[[:space:]]*true' <<< "$term_result"; then
+    die "new_terminal" "crow could not create the terminal window: $term_result"
   fi
 
   TERMINAL_ID=$(json_val "terminal_id" <<< "$term_result")
@@ -570,28 +607,32 @@ launch_claude() {
   crow select-session --session "$SESSION_ID" >/dev/null 2>&1 \
     || log "Warning: select-session failed"
 
-  # Wait for the shell to initialize in the new terminal.
-  # The terminal surface is pre-initialized by crow new-terminal, but the
-  # shell process needs time to start and display its prompt.
-  log "Waiting for shell to initialize..."
-  sleep 3
-
-  # Build the prompt file path
-  local prompt_path="$DEV_ROOT/.claude/prompts/crow-prompt-$SESSION_NAME.md"
-
-  # Send launch command
-  log "Launching Claude Code..."
-  local rc_args=""
-  if is_remote_control_enabled; then
-    rc_args=" --rc --name $(posix_quote "$SESSION_NAME")"
-    log "Remote control enabled — launching with --rc --name '$SESSION_NAME'"
-  fi
-  local send_text="cd $WORKTREE_PATH && $claude_bin --permission-mode plan$rc_args \"\$(cat $prompt_path)\"\\n"
-  if ! crow send --session "$SESSION_ID" --terminal "$TERMINAL_ID" "$send_text" >/dev/null 2>&1; then
-    die "send_launch" "crow send failed"
-  fi
-
-  log "Claude Code launched"
+  # Verify the agent actually started rather than assuming success. Poll the
+  # terminal's readiness (exposed on `crow list-terminals`) until it reaches
+  # agentLaunched/shellReady. This is a warning, NOT a hard failure: the
+  # workspace (worktree/session/metadata) is already set up, and crow's UI
+  # shows a Retry affordance if the agent didn't start (#408).
+  log "Waiting for the agent to launch..."
+  local readiness="" attempt
+  for attempt in $(seq 1 15); do
+    local lt_result
+    lt_result=$(crow list-terminals --session "$SESSION_ID" 2>/dev/null) || true
+    readiness=$(terminal_readiness "$TERMINAL_ID" "$lt_result")
+    case "$readiness" in
+      agentLaunched|shellReady)
+        log "Claude Code launched (readiness=$readiness)"
+        return
+        ;;
+      failed|timedOut)
+        log "WARNING: agent did not start (readiness=$readiness). The terminal" \
+            "is up but the agent isn't running — use Retry in the Crow UI."
+        return
+        ;;
+    esac
+    sleep 1
+  done
+  log "WARNING: agent launch not confirmed after 15s (last readiness='${readiness:-unknown}')." \
+      "The workspace is set up; check the Crow terminal and use Retry if needed."
 }
 
 # ─── Result ──────────────────────────────────────────────────────────────────

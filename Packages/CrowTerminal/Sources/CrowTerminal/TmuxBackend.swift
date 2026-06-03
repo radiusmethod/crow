@@ -178,7 +178,8 @@ public final class TmuxBackend {
         name: String,
         cwd: String,
         command: String?,
-        trackReadiness: Bool
+        trackReadiness: Bool,
+        newWindowTimeout: TimeInterval = TmuxController.defaultTimeout
     ) throws -> TmuxBinding {
         precondition(!tmuxBinary.isEmpty, "TmuxBackend.configure(...) must be called first")
         let ctrl: TmuxController
@@ -219,7 +220,8 @@ public final class TmuxBackend {
             name: name,
             cwd: cwd.isEmpty ? nil : cwd,
             env: env,
-            command: wrapperPath
+            command: wrapperPath,
+            timeout: newWindowTimeout
         )
         bindings[id] = windowIndex
 
@@ -363,6 +365,56 @@ public final class TmuxBackend {
         if let logPath = wrapperLogs.removeValue(forKey: id) {
             try? FileManager.default.removeItem(atPath: logPath)
         }
+    }
+
+    /// Bare login shells we consider "orphaned" when a cockpit window is not
+    /// referenced by any terminal — i.e. a window left at a shell with no agent
+    /// running (#408). Anything else (claude/codex/node/an editor/…) is left
+    /// alone. tmux reports `pane_current_command` without the login-shell `-`
+    /// prefix, but we match both forms defensively.
+    nonisolated static let orphanLoginShells: Set<String> = [
+        "zsh", "-zsh", "bash", "-bash", "sh", "-sh",
+        "fish", "-fish", "dash", "-dash", "ksh", "tcsh", "csh", "login",
+    ]
+
+    /// Decide whether a single cockpit window should be reaped. Pure so the
+    /// policy is unit-testable: reap only when the window is NOT referenced by a
+    /// live terminal AND its pane is sitting at a bare login shell. Never reaps
+    /// a window running an agent (or any non-shell process), so an agent that
+    /// exited and left the user at a shell — but whose terminal still references
+    /// the window — is preserved (it's in `keep`).
+    nonisolated static func shouldReapWindow(index: Int, command: String, keep: Set<Int>) -> Bool {
+        if keep.contains(index) { return false }
+        return orphanLoginShells.contains(command)
+    }
+
+    /// Reap cockpit windows that no live terminal references AND that are
+    /// sitting at a bare login shell — leaked windows from a timed-out
+    /// `new-window` or a forgotten terminal (#408). `keepWindowIndices` is the
+    /// set of window indices referenced by persisted terminals; it is unioned
+    /// with the in-memory `bindings` so a window created/adopted this run is
+    /// never reaped. Best-effort; returns the count reaped.
+    @discardableResult
+    public func reapUnboundCockpitWindows(keepWindowIndices: Set<Int>) -> Int {
+        guard let ctrl = controller else { return 0 }
+        let keep = keepWindowIndices.union(bindings.values)
+        let windows: [(index: Int, command: String)]
+        do {
+            windows = try ctrl.listWindowCommands()
+        } catch {
+            reportIfTimeout(error)
+            return 0
+        }
+        var reaped = 0
+        for window in windows where Self.shouldReapWindow(index: window.index, command: window.command, keep: keep) {
+            ctrl.killWindow(index: window.index)
+            NSLog("[CrowTelemetry tmux:orphan_window_reaped index=\(window.index) command=\(window.command)]")
+            reaped += 1
+        }
+        if reaped > 0 {
+            NSLog("[Crow] Reaped \(reaped) orphaned bare-shell cockpit window(s) (#408)")
+        }
+        return reaped
     }
 
     /// Return the shared cockpit Ghostty surface, lazily creating it the

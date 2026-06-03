@@ -8,7 +8,11 @@ import Testing
 /// covered separately by the visual demo path. Skipped automatically
 /// when no tmux binary is present on the host.
 @MainActor
-@Suite("TmuxBackend integration", .enabled(if: discoveredTmuxBinary != nil))
+// Serialized: these are real-tmux integration tests that spawn login shells and
+// assert on readiness *timing* (e.g. a 0.15s watch budget). Run in parallel they
+// contend for CPU during shell startup and the tight-timing cases flake — most
+// visibly once the #408 concurrent-launch test spins up several shells at once.
+@Suite("TmuxBackend integration", .enabled(if: discoveredTmuxBinary != nil), .serialized)
 struct TmuxBackendTests {
 
     private func makeBackend() -> TmuxBackend {
@@ -372,5 +376,76 @@ struct TmuxBackendTests {
         // Give any erroneous MainActor callback hop a chance to land.
         try await Task.sleep(nanoseconds: 100_000_000)
         #expect(received.isEmpty)
+    }
+
+    // MARK: - #408 concurrent managed launch: no bare-zsh orphans
+
+    /// The #408 repro. Spawn several managed terminals at once, each deferring
+    /// its launch until `.shellReady` (registered with `command: nil`, then the
+    /// command pasted on the readiness fire — exactly what the new-terminal RPC
+    /// now does). Every window must reach readiness and run the pasted process;
+    /// none may be left at a bare login shell.
+    @Test func concurrentManagedLaunchesAllReachReadyNoBareShells() async throws {
+        let backend = makeBackend()
+        defer { backend.shutdown() }
+
+        let n = 6
+        let ids = (0..<n).map { _ in UUID() }
+        var windowIndexByID: [UUID: Int] = [:]
+        var ready = Set<UUID>()
+        var timedOut = Set<UUID>()
+
+        backend.onReadinessChanged = { id, state in
+            switch state {
+            case .shellReady:
+                guard !ready.contains(id) else { return }
+                ready.insert(id)
+                // The deferred paste: `exec` a marker process so the pane is no
+                // longer a bare login shell — proof the launch landed in a live
+                // shell rather than being dropped (the #408 failure).
+                try? backend.sendText(id: id, text: "exec sleep 97\n")
+            case .timedOut:
+                timedOut.insert(id)
+            default:
+                break
+            }
+        }
+
+        for id in ids {
+            let binding = try backend.registerTerminal(
+                id: id, name: "managed-\(id.uuidString.prefix(4))",
+                cwd: NSHomeDirectory(), command: nil, trackReadiness: true
+            )
+            windowIndexByID[id] = binding.windowIndex
+        }
+
+        // Wait (bounded) for all to report `.shellReady`. Shell startup is
+        // CPU-contended with N concurrent wrappers; 30s mirrors the backend's
+        // default readiness budget.
+        let deadline = Date().addingTimeInterval(30)
+        while ready.count < n && timedOut.isEmpty && Date() < deadline {
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        #expect(timedOut.isEmpty)
+        #expect(ready.count == n)
+
+        // Assert no managed window is left at a bare login shell. Poll briefly:
+        // the exec'd markers replace their shells asynchronously.
+        let ctrl = TmuxController(
+            tmuxBinary: discoveredTmuxBinary!, socketPath: backend.socketPath,
+            sessionName: TmuxBackend.cockpitSessionName
+        )
+        let ourIndices = Set(windowIndexByID.values)
+        var bareShells: [Int] = []
+        let checkDeadline = Date().addingTimeInterval(5)
+        repeat {
+            try await Task.sleep(nanoseconds: 200_000_000)
+            let windows = try ctrl.listWindowCommands().filter { ourIndices.contains($0.index) }
+            bareShells = windows
+                .filter { TmuxBackend.orphanLoginShells.contains($0.command) }
+                .map { $0.index }
+        } while !bareShells.isEmpty && Date() < checkDeadline
+
+        #expect(bareShells.isEmpty)
     }
 }

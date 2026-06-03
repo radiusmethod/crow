@@ -436,6 +436,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Detect orphaned worktrees (runs async, updates UI when done)
         Task { await service.detectOrphanedWorktrees() }
 
+        // Reap leaked orphan cockpit windows (bare shells that no terminal
+        // references) once rehydration's async adoptions have settled (#408).
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            service.reapOrphanedCockpitWindows()
+        }
+
         // Check for runtime dependencies (non-blocking)
         Task {
             let missing = await Task.detached {
@@ -1310,28 +1317,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         isManaged: isManaged,
                         backend: .tmux
                     )
+                    // Brand-new managed terminals DEFER their agent launch until
+                    // the shell signals readiness (issue #408). Pasting the launch
+                    // command immediately races the shell's line editor (zle): if
+                    // the prompt isn't live yet the keystrokes are dropped and the
+                    // window is left at a bare zsh with no agent. Instead hold the
+                    // command in `pendingLaunchCommands` and register the window
+                    // with `command: nil`, so the deferred paste happens in
+                    // `SessionService.wireTerminalReadiness` on `.shellReady`.
+                    let hasCommand = !(command?.isEmpty ?? true)
+                    let deferLaunch = trackReadiness && hasCommand
+                    let registerCommand = deferLaunch ? nil : command
+                    // Seed readiness + pending-launch state BEFORE registering so
+                    // the sentinel's `.shellReady` (which can only fire on a later
+                    // main-actor turn) always finds the pending command and the
+                    // autoLaunch membership populated.
+                    if trackReadiness {
+                        capturedAppState.terminalReadiness[terminal.id] = .uninitialized
+                    }
+                    if deferLaunch, let command {
+                        capturedAppState.pendingLaunchCommands[terminal.id] = command
+                        // Membership lets the existing `.timedOut` re-arm machinery
+                        // (`reArmStuckReadinessWatches`) recover a slow launch.
+                        capturedAppState.autoLaunchTerminals.insert(terminal.id)
+                    }
+                    var launchFailed = false
                     do {
-                        let binding = try TmuxBackend.shared.registerTerminal(
-                            id: terminal.id,
-                            name: terminalName,
-                            cwd: cwd,
-                            command: command,
-                            trackReadiness: trackReadiness
-                        )
+                        // Bounded retry with a longer per-call `new-window` budget:
+                        // under load the tmux subprocess can exceed the 2s default
+                        // and get SIGTERM'd, leaving a window-less terminal (#408).
+                        let binding = try AppDelegate.registerWithRetry(attempts: 3) { _ in
+                            try TmuxBackend.shared.registerTerminal(
+                                id: terminal.id,
+                                name: terminalName,
+                                cwd: cwd,
+                                command: registerCommand,
+                                trackReadiness: trackReadiness,
+                                newWindowTimeout: 4.0
+                            )
+                        }
                         terminal.tmuxBinding = binding
                     } catch {
-                        NSLog("[Crow] tmux registerTerminal failed (\(error)); terminal will not render until tmux is available")
+                        // The tmux window never materialized. Don't pretend the
+                        // launch succeeded (#408): surface it so the UI shows a
+                        // Retry affordance and the CLI caller reports honestly
+                        // instead of leaving a silent window-less terminal.
+                        NSLog("[Crow] tmux registerTerminal failed after retries (\(error)); surfacing launch failure")
+                        launchFailed = true
+                        if trackReadiness {
+                            capturedAppState.terminalReadiness[terminal.id] = .failed
+                        }
+                        capturedAppState.pendingLaunchCommands.removeValue(forKey: terminal.id)
+                        capturedAppState.autoLaunchTerminals.remove(terminal.id)
                     }
                     capturedAppState.terminals[sessionID, default: []].append(terminal)
                     capturedStore.mutate { $0.terminals.append(terminal) }
                     if trackReadiness {
-                        capturedAppState.terminalReadiness[terminal.id] = .uninitialized
                         TerminalRouter.trackReadiness(for: terminal)
                     }
                     if rcInjected {
                         capturedAppState.remoteControlActiveTerminals.insert(terminal.id)
                     }
-                    return ["terminal_id": .string(terminal.id.uuidString), "session_id": .string(idStr)]
+                    var result: [String: JSONValue] = [
+                        "terminal_id": .string(terminal.id.uuidString),
+                        "session_id": .string(idStr),
+                    ]
+                    if launchFailed { result["launch_failed"] = .bool(true) }
+                    return result
                 }
             },
             "list-terminals": { @Sendable params in
@@ -1339,8 +1391,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     throw RPCError.invalidParams("session_id required")
                 }
                 let terms = await MainActor.run { capturedAppState.terminals(for: id) }
+                let readiness = await MainActor.run { capturedAppState.terminalReadiness }
                 let items: [JSONValue] = terms.map { t in
-                    .object(["id": .string(t.id.uuidString), "name": .string(t.name), "session_id": .string(t.sessionID.uuidString), "managed": .bool(t.isManaged)])
+                    // `readiness` lets CLI callers (setup.sh) verify the agent
+                    // actually started rather than assuming a launch succeeded
+                    // (#408). Defaults to `uninitialized` for un-tracked shells.
+                    .object([
+                        "id": .string(t.id.uuidString),
+                        "name": .string(t.name),
+                        "session_id": .string(t.sessionID.uuidString),
+                        "managed": .bool(t.isManaged),
+                        "readiness": .string((readiness[t.id] ?? .uninitialized).rawValue),
+                    ])
                 }
                 return ["terminals": .array(items)]
             },
@@ -1363,6 +1425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     capturedAppState.terminals[sessionID]?.removeAll { $0.id == terminalID }
                     capturedAppState.terminalReadiness.removeValue(forKey: terminalID)
                     capturedAppState.autoLaunchTerminals.remove(terminalID)
+                    capturedAppState.pendingLaunchCommands.removeValue(forKey: terminalID)
                     if capturedAppState.activeTerminalID[sessionID] == terminalID {
                         capturedAppState.activeTerminalID[sessionID] = capturedAppState.terminals[sessionID]?.first?.id
                     }
@@ -1708,6 +1771,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TmuxBackend.shared.shutdown(killServer: false)
         GhosttyApp.shared.shutdown()
         NSLog("[Crow] Cleanup complete")
+    }
+
+    // MARK: - Terminal Registration
+
+    /// Run `create` up to `attempts` times, returning the first success or
+    /// rethrowing the last error after exhausting all attempts. Window
+    /// registration can transiently fail under load when `new-window` exceeds
+    /// its subprocess timeout (issue #408); a couple of retries turn most of
+    /// those into successes instead of silent window-less terminals. Pure over
+    /// the `create` closure so the retry policy is unit-testable without tmux.
+    nonisolated static func registerWithRetry<T>(
+        attempts: Int,
+        create: (_ attempt: Int) throws -> T
+    ) throws -> T {
+        var lastError: Error?
+        for attempt in 0..<max(1, attempts) {
+            do {
+                return try create(attempt)
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? RPCError.applicationError("registerWithRetry: no attempts run")
     }
 
     // MARK: - Claude Binary Resolution

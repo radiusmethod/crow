@@ -223,6 +223,14 @@ public final class AppState {
     /// not brand-new terminals created via the `new-terminal` RPC.
     public var autoLaunchTerminals: Set<UUID> = []
 
+    /// Pending agent launch command per terminal ID, for brand-new managed
+    /// terminals created via `new-terminal --command`. The command is NOT
+    /// pasted immediately (that races the shell's line editor — issue #408);
+    /// it is held here until the readiness sentinel fires `.shellReady`, at
+    /// which point `SessionService.wireTerminalReadiness` pastes it. In-memory
+    /// only — never persisted, so a relaunch can't re-paste a stale command.
+    public var pendingLaunchCommands: [UUID: String] = [:]
+
     // MARK: - Hook Events (per-session Observable wrappers)
 
     /// Per-session hook state. Using @Observable class wrappers so mutations to one

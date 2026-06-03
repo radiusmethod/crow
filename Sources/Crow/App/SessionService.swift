@@ -254,6 +254,10 @@ final class SessionService {
                 // didBecomeActive re-arm) and mark readiness terminal so
                 // launchClaude's `== .shellReady` guard can never fire.
                 appState.autoLaunchTerminals.remove(terminal.id)
+                // Defensive: a brand-new terminal's deferred launch must not
+                // survive into an adopt (#408). In-memory only, so normally
+                // empty at launch — clear anyway to be safe.
+                appState.pendingLaunchCommands.removeValue(forKey: terminal.id)
                 if appState.terminalReadiness[terminal.id] != nil {
                     appState.terminalReadiness[terminal.id] = .agentLaunched
                 }
@@ -333,7 +337,18 @@ final class SessionService {
             NSLog("[SessionService] tmux readiness: terminal=\(terminalID), state=\(readiness), current=\(currentState)")
             if readiness == .shellReady, currentState < .shellReady {
                 self.appState.terminalReadiness[terminalID] = .shellReady
-                self.launchAgent(terminalID: terminalID)
+                // Brand-new managed terminals created via `new-terminal --command`
+                // hold their launch in `pendingLaunchCommands` and paste it HERE,
+                // now that the shell's line editor is live — the race-free
+                // replacement for setup.sh's old `sleep 3` + `crow send` (#408).
+                // Restored/recovered terminals have no pending command and fall
+                // through to `launchAgent` (rebuild via autoLaunchCommand).
+                switch SessionService.resolveLaunch(pending: self.appState.pendingLaunchCommands[terminalID]) {
+                case .pastePending(let command):
+                    self.pasteDeferredLaunch(terminalID: terminalID, command: command)
+                case .launchAgent:
+                    self.launchAgent(terminalID: terminalID)
+                }
             } else if readiness == .timedOut, currentState < .shellReady {
                 // First-prompt watch expired. Do NOT advance to .shellReady or
                 // auto-paste — the shell may still be starting and a paste now
@@ -343,6 +358,89 @@ final class SessionService {
                 self.appState.terminalReadiness[terminalID] = .timedOut
             }
         }
+    }
+
+    /// What the `.shellReady` handler should do for a managed terminal. Pure
+    /// so the brand-new-vs-restored branch is unit-testable without tmux or a
+    /// live AppState (#408).
+    enum LaunchAction: Equatable {
+        /// Brand-new terminal launched via `new-terminal --command`: paste the
+        /// stored command now that the shell is ready.
+        case pastePending(String)
+        /// Restored/recovered terminal: rebuild the command via the agent's
+        /// `autoLaunchCommand` (the existing `launchAgent` path).
+        case launchAgent
+    }
+
+    nonisolated static func resolveLaunch(pending: String?) -> LaunchAction {
+        if let pending, !pending.isEmpty { return .pastePending(pending) }
+        return .launchAgent
+    }
+
+    /// Paste the deferred agent-launch command for a brand-new managed terminal
+    /// now that its shell's line editor is live (#408). Consumes BOTH the
+    /// pending command and the `autoLaunchTerminals` membership so `launchAgent`
+    /// can never also fire (e.g. a later spurious `.shellReady` after adopt),
+    /// preventing a double launch.
+    func pasteDeferredLaunch(terminalID: UUID, command: String) {
+        guard appState.pendingLaunchCommands.removeValue(forKey: terminalID) != nil else { return }
+        appState.autoLaunchTerminals.remove(terminalID)
+
+        guard let sessionID = appState.terminals.first(where: { _, terminals in
+            terminals.contains(where: { $0.id == terminalID })
+        })?.key,
+              let routedTerminal = appState.terminals[sessionID]?.first(where: { $0.id == terminalID }) else {
+            NSLog("[SessionService] pasteDeferredLaunch: no terminal record for \(terminalID); cannot send")
+            return
+        }
+
+        // Apply the same prep the legacy `crow send` path got from the `send`
+        // RPC (hook config + OTEL env vars) so hooks route back to this session
+        // and Claude telemetry is exported.
+        let text = prepareManagedLaunchText(sessionID: sessionID, command: command)
+        // Ensure a trailing newline so TmuxBackend.sendText delivers Enter.
+        TerminalRouter.send(routedTerminal, text: text.hasSuffix("\n") ? text : text + "\n")
+        appState.terminalReadiness[terminalID] = .agentLaunched
+    }
+
+    /// Prepare a managed terminal's agent-launch command exactly as the `send`
+    /// RPC does for the legacy `crow send` path (#408): write the per-worktree
+    /// hook config so the agent's hooks route back to this session, and (for
+    /// Claude) prepend the OTEL telemetry exporter env vars. Returns the final
+    /// text to paste, or the command unchanged if it doesn't launch the
+    /// session's agent.
+    ///
+    /// NOTE: the OTEL env-var list is intentionally identical to the `send` RPC
+    /// handler in AppDelegate — keep the two in sync.
+    func prepareManagedLaunchText(sessionID: UUID, command: String) -> String {
+        guard let session = appState.sessions.first(where: { $0.id == sessionID }),
+              let agent = AgentRegistry.shared.agent(for: session.agentKind),
+              command.contains(agent.launchCommandToken) else {
+            return command
+        }
+        if let worktree = appState.primaryWorktree(for: sessionID),
+           let crowPath = ClaudeHookConfigWriter.findCrowBinary() {
+            do {
+                try agent.hookConfigWriter.writeHookConfig(
+                    worktreePath: worktree.worktreePath,
+                    sessionID: sessionID,
+                    crowPath: crowPath
+                )
+            } catch {
+                NSLog("[SessionService] Failed to write hook config for session %@: %@",
+                      sessionID.uuidString, error.localizedDescription)
+            }
+        }
+        guard agent.kind == .claudeCode, let port = telemetryPort else { return command }
+        let vars = [
+            "CLAUDE_CODE_ENABLE_TELEMETRY=1",
+            "OTEL_METRICS_EXPORTER=otlp",
+            "OTEL_LOGS_EXPORTER=otlp",
+            "OTEL_EXPORTER_OTLP_PROTOCOL=http/json",
+            "OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:\(port)",
+            "OTEL_RESOURCE_ATTRIBUTES=crow.session.id=\(sessionID.uuidString)",
+        ].joined(separator: " ")
+        return "export \(vars) && \(command)"
     }
 
     /// Re-arm the tmux readiness watch for a terminal whose first attempt
@@ -366,6 +464,19 @@ final class SessionService {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(bundle, forType: .string)
         NSLog("[SessionService] copied tmux diagnostics for terminal=\(terminalID) bytes=\(bundle.utf8.count)")
+    }
+
+    /// Reap leaked orphan cockpit windows once at launch — bare-shell windows
+    /// that no persisted terminal references (#408). The keep-set is built from
+    /// the persisted terminals' window bindings; `reapUnboundCockpitWindows`
+    /// additionally unions the in-memory bindings, so a window adopted or freshly
+    /// registered this run is never reaped. Call AFTER the async per-terminal
+    /// rehydration has settled. Safe: never reaps a window running an agent.
+    @MainActor
+    func reapOrphanedCockpitWindows() {
+        let keep = Set(appState.terminals.values.flatMap { $0 }.compactMap { $0.tmuxBinding?.windowIndex })
+        let n = TmuxBackend.shared.reapUnboundCockpitWindows(keepWindowIndices: keep)
+        if n > 0 { NSLog("[SessionService] reaped \(n) orphaned cockpit window(s) at launch (#408)") }
     }
 
     /// Re-arm any tmux readiness watches that have stalled while the app
