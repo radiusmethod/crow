@@ -88,4 +88,17 @@ public struct OpenAICodexAgent: CodingAgent {
             prompt: prompt
         )
     }
+
+    public func managerLaunchCommand(
+        sessionName: String,
+        remoteControlEnabled: Bool,
+        autoPermissionMode: Bool,
+        telemetryPort: UInt16?
+    ) -> String {
+        // Codex's Manager is a plain TUI in the devRoot — no auto-prompt,
+        // no remote-control, no auto-permission knob (CROW-433). Terminal
+        // backend appends the submitting Enter, so we return the bare
+        // command without a trailing newline.
+        return findBinary() ?? "codex"
+    }
 }

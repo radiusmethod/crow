@@ -105,23 +105,58 @@ final class SessionService {
                     }
                 }
             } else {
-                // Manager terminal: rebuild its claude command to match the
-                // current remoteControlEnabled and managerAutoPermissionMode
-                // preferences, using this session's own name for the --name
-                // label. Unlike worker sessions the Manager launches claude
-                // directly as the shell command, so the stored string needs to
-                // be correct before preInitialize runs. Built via the shared
-                // `managerCommand` helper so the name flow has one source.
-                let rebuiltCommand = managerCommand(sessionName: session.name)
+                // Manager terminal: rebuild its agent command to match the
+                // current remoteControlEnabled / managerAutoPermissionMode
+                // preferences AND the currently-configured Manager agent
+                // (CROW-433). Unlike worker sessions the Manager launches its
+                // agent directly as the shell command, so the stored string
+                // needs to be correct before preInitialize runs. Built via
+                // the shared `managerCommand(for:)` helper so the dispatch
+                // has one source. Rebuilds any non-empty existing command so
+                // a Cursor/Codex Manager (whose command never contained
+                // "claude") still gets refreshed across restarts.
+                //
+                // Reconcile `session.agentKind` to the currently-configured
+                // Manager agent BEFORE the command rebuild. `ensureManagerSession`
+                // also performs this reconciliation, but it runs after
+                // `hydrateState` — on the reboot / dead-tmux path
+                // `rebuildAllSurfaces` registers a fresh window and pastes
+                // the just-rebuilt command, so if hydrate keyed off the
+                // stale persisted kind the change would only take effect on
+                // the second respawn (CROW-433 review).
+                let configuredKind = appState.agentKind(for: .manager)
+                var reconciled = session
+                if reconciled.agentKind != configuredKind {
+                    reconciled.agentKind = configuredKind
+                    if let idx = appState.sessions.firstIndex(where: { $0.id == session.id }) {
+                        appState.sessions[idx].agentKind = configuredKind
+                    }
+                    store.mutate { data in
+                        if let i = data.sessions.firstIndex(where: { $0.id == session.id }) {
+                            data.sessions[i].agentKind = configuredKind
+                        }
+                    }
+                }
+                let rebuiltCommand = managerCommand(for: reconciled)
+                // Remote-control bookkeeping reflects what the agent actually
+                // emitted — `supportsRemoteControl` is per-agent capability,
+                // but per-launch the Cursor Manager intentionally omits `--rc`
+                // even though Cursor reports the capability. Gate on the flag
+                // appearing in the built command so the RC badge and
+                // `/rename` injection don't fire for a Cursor Manager
+                // (CROW-433 review).
+                let rebuiltCarriesRC = rebuiltCommand.contains(" --rc")
                 for i in terminals.indices {
-                    if let cmd = terminals[i].command, cmd.contains("claude") {
+                    if terminals[i].command != nil {
                         // Mutate in place rather than reconstructing the row:
                         // the memberwise init drops tmuxBinding, which made the
                         // Manager spawn a fresh window + claude every relaunch
                         // instead of re-attaching to its live window (#374).
                         terminals[i].command = rebuiltCommand
-                        if appState.remoteControlEnabled {
+                        if rebuiltCarriesRC {
                             appState.remoteControlActiveTerminals.insert(terminals[i].id)
+                        } else {
+                            appState.remoteControlActiveTerminals.remove(terminals[i].id)
                         }
                     }
                 }
@@ -563,7 +598,12 @@ final class SessionService {
 
     func ensureManagerSession(devRoot: String) {
         let managerID = AppState.managerSessionID
-        if appState.sessions.contains(where: { $0.id == managerID }) {
+        // Configured Manager agent — used both for new sessions and to
+        // refresh an existing Manager whose agent setting changed across
+        // launches (CROW-433). The running tmux terminal is left alone; the
+        // updated `agentKind` is picked up on next Manager respawn.
+        let configuredKind = appState.agentKind(for: .manager)
+        if let existingIdx = appState.sessions.firstIndex(where: { $0.id == managerID }) {
             // Defense-in-depth: `hydrateState` already migrates a legacy `.work`
             // primary Manager before this runs, but migrate here too in case the
             // session was created/mutated via another path.
@@ -572,15 +612,22 @@ final class SessionService {
                     _ = Self.migrateLegacyManagerKind(&data.sessions)
                 }
             }
+            // Pick up agent-setting changes for next respawn.
+            if appState.sessions[existingIdx].agentKind != configuredKind {
+                appState.sessions[existingIdx].agentKind = configuredKind
+                store.mutate { data in
+                    if let i = data.sessions.firstIndex(where: { $0.id == managerID }) {
+                        data.sessions[i].agentKind = configuredKind
+                    }
+                }
+            }
         } else {
-            // Manager is pinned to Claude Code per the agent-abstraction
-            // spec — never honors AppConfig.defaultAgentKind.
             let manager = Session(
                 id: managerID,
                 name: "Manager",
                 status: .active,
                 kind: .manager,
-                agentKind: .claudeCode
+                agentKind: configuredKind
             )
             appState.sessions.insert(manager, at: 0)
 
@@ -592,8 +639,9 @@ final class SessionService {
         }
 
         // Ensure manager has a terminal
-        if appState.terminals(for: managerID).isEmpty {
-            createManagerTerminal(sessionID: managerID, sessionName: "Manager", cwd: devRoot)
+        if appState.terminals(for: managerID).isEmpty,
+           let session = appState.sessions.first(where: { $0.id == managerID }) {
+            createManagerTerminal(session: session, cwd: devRoot)
         }
 
         // Select Manager on launch (selectedSessionID isn't persisted)
@@ -659,47 +707,73 @@ final class SessionService {
         appState.activeTerminalID = savedActive
     }
 
-    /// Build the claude shell command for a Manager terminal, reflecting the
-    /// current remote-control and auto-permission-mode preferences. Managers
-    /// launch claude directly as the terminal's shell command. Used by both
+    /// Build the shell command for a Manager terminal, dispatched through
+    /// the registered agent for `session.agentKind`. Managers launch their
+    /// agent CLI directly as the terminal's shell command. Used by both
     /// fresh-terminal creation and the hydrate rebuild so the per-session
-    /// `--name` label has a single source. `internal` for unit testing.
-    func managerCommand(sessionName: String) -> String {
-        // Find the real claude binary (skip CMUX wrapper)
+    /// `--name` label (and equivalent flags on other agents) has a single
+    /// source. `internal` for unit testing (CROW-433).
+    func managerCommand(for session: Session) -> String {
+        let agentKind = session.agentKind
+        let resolved = AgentRegistry.shared.agent(for: agentKind)
+            ?? AgentRegistry.shared.defaultAgent
+        if let agent = resolved {
+            return agent.managerLaunchCommand(
+                sessionName: session.name,
+                remoteControlEnabled: appState.remoteControlEnabled,
+                autoPermissionMode: appState.managerAutoPermissionMode,
+                telemetryPort: telemetryPort
+            )
+        }
+        // No agent registered (only happens in tests that skip
+        // AgentRegistry setup). Fall back to the legacy Claude command so
+        // pre-CROW-433 tests keep producing the same output.
         let claudePath = Self.findClaudeBinary() ?? "claude"
         return claudePath + ClaudeLaunchArgs.argsSuffix(
             remoteControl: appState.remoteControlEnabled,
-            sessionName: sessionName,
+            sessionName: session.name,
             autoPermissionMode: appState.managerAutoPermissionMode
         )
     }
 
-    /// Create the single Claude-Code terminal for a Manager session and persist
+    /// Legacy entry point preserved for tests that don't have a `Session` in
+    /// hand. Builds a Claude-style command keyed only on `sessionName` and
+    /// the live remote-control / auto-permission state. New call sites
+    /// should use `managerCommand(for:)` instead so the agent is honored.
+    func managerCommand(sessionName: String) -> String {
+        let stub = Session(name: sessionName, kind: .manager, agentKind: .claudeCode)
+        return managerCommand(for: stub)
+    }
+
+    /// Create the single agent terminal for a Manager session and persist
     /// it. Routes through the same backend-selection path as work sessions
-    /// (#314): on tmux this registers a window and pastes the `claude` command
+    /// (#314): on tmux this registers a window and pastes the agent command
     /// into it; on Ghostty it pre-initializes the offscreen surface.
-    /// `trackReadiness: false` matches the Manager's command-launches-claude
+    /// `trackReadiness: false` matches the Manager's command-launches-agent
     /// model — no readiness/launchClaude flow.
     @discardableResult
-    private func createManagerTerminal(sessionID: UUID, sessionName: String, cwd: String) -> SessionTerminal {
-        let command = managerCommand(sessionName: sessionName)
+    private func createManagerTerminal(session: Session, cwd: String) -> SessionTerminal {
+        let command = managerCommand(for: session)
         let rawTerminal = SessionTerminal(
-            sessionID: sessionID,
-            name: sessionName,
+            sessionID: session.id,
+            name: session.name,
             cwd: cwd,
             command: command
         )
 
         let terminal = prepareTerminal(rawTerminal, trackReadiness: false)
-        appState.terminals[sessionID] = [terminal]
+        appState.terminals[session.id] = [terminal]
 
         store.mutate { data in
-            if !data.terminals.contains(where: { $0.sessionID == sessionID }) {
+            if !data.terminals.contains(where: { $0.sessionID == session.id }) {
                 data.terminals.append(terminal)
             }
         }
 
-        if appState.remoteControlEnabled {
+        if command.contains(" --rc") {
+            // See hydrate path: gate on what the agent actually emitted, not
+            // on the global toggle, so a Cursor Manager doesn't get a stale
+            // RC badge or a `/rename` injection (CROW-433 review).
             appState.remoteControlActiveTerminals.insert(terminal.id)
         }
         return terminal
@@ -709,10 +783,11 @@ final class SessionService {
     /// new session's id. The terminal is set up by `createManagerTerminal`.
     @discardableResult
     func createManagerSession(name: String, cwd: String) -> UUID {
-        let session = Session(name: name, status: .active, kind: .manager)
+        let agentKind = appState.agentKind(for: .manager)
+        let session = Session(name: name, status: .active, kind: .manager, agentKind: agentKind)
         appState.sessions.append(session)
         store.mutate { $0.sessions.append(session) }
-        createManagerTerminal(sessionID: session.id, sessionName: name, cwd: cwd)
+        createManagerTerminal(session: session, cwd: cwd)
         return session.id
     }
 

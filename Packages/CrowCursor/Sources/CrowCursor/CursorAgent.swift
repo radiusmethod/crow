@@ -122,4 +122,19 @@ public struct CursorAgent: CodingAgent {
             prompt: prompt
         )
     }
+
+    public func managerLaunchCommand(
+        sessionName: String,
+        remoteControlEnabled: Bool,
+        autoPermissionMode: Bool,
+        telemetryPort: UInt16?
+    ) -> String {
+        // Cursor's Manager is a plain orchestration TUI in the devRoot — no
+        // auto-prompt, no `--continue`. Cursor has no `--rc`/`--name`
+        // equivalent, so the remote-control / auto-permission knobs don't
+        // apply (CROW-433). Terminal backend appends the submitting Enter,
+        // so we return the bare command without a trailing newline to match
+        // the cross-agent convention.
+        return findBinary() ?? "agent"
+    }
 }
