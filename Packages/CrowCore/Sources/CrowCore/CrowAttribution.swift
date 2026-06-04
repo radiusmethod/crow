@@ -66,10 +66,11 @@ public enum CrowAttribution {
     /// Default ticket footer (Claude Code) — backward-compatible alias.
     public static var ticketMarkdownLink: String { ticketMarkdownLink() }
 
-    /// Substitute `{{CROW_AGENT_DISPLAY_NAME}}` and legacy `via Claude Code` segments.
+    /// Substitute `$CROW_AGENT_DISPLAY_NAME`, legacy `{{…}}` placeholder, and `via Claude Code` segments.
     public static func expandSkillBody(_ skillBody: String, agentKind: AgentKind) -> String {
         let name = agentDisplayName(for: agentKind)
         return skillBody
+            .replacingOccurrences(of: "$\(agentDisplayNameEnvironmentKey)", with: name)
             .replacingOccurrences(of: skillAgentPlaceholder, with: name)
             .replacingOccurrences(of: "via Claude Code", with: "via \(name)")
     }

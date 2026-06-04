@@ -70,7 +70,14 @@ import Testing
     #expect(entries[CrowAttribution.agentDisplayNameEnvironmentKey] == "Cursor")
 }
 
-@Test func crowAttributionExpandSkillBodySubstitutesPlaceholder() {
+@Test func crowAttributionExpandSkillBodySubstitutesEnvVar() {
+    let body = "Footer: $\(CrowAttribution.agentDisplayNameEnvironmentKey)"
+    let expanded = CrowAttribution.expandSkillBody(body, agentKind: .cursor)
+    #expect(expanded == "Footer: Cursor")
+    #expect(!expanded.contains("$" + CrowAttribution.agentDisplayNameEnvironmentKey))
+}
+
+@Test func crowAttributionExpandSkillBodySubstitutesLegacyPlaceholder() {
     let body = "Footer: \(CrowAttribution.skillAgentPlaceholder)"
     let expanded = CrowAttribution.expandSkillBody(body, agentKind: .cursor)
     #expect(expanded == "Footer: Cursor")

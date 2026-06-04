@@ -131,7 +131,7 @@ Use this format for the review:
 
 ---
 
-[🐦‍⬛ Reviewed by Crow via {{CROW_AGENT_DISPLAY_NAME}}](https://github.com/radiusmethod/crow)
+[🐦‍⬛ Reviewed by Crow via $CROW_AGENT_DISPLAY_NAME](https://github.com/radiusmethod/crow)
 ```
 
 ### Step 5b: Attribution (REQUIRED)

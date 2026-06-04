@@ -64,14 +64,14 @@ struct AttributionSkillTests {
     @Test func liveSkillReferencesAgentDisplayNameEnv() throws {
         let content = try Self.liveSkill()
         #expect(content.contains("$\(Self.agentDisplayEnvKey)"))
-        #expect(content.contains(Self.agentPlaceholder))
+        #expect(!content.contains(Self.agentPlaceholder))
         #expect(content.contains(Self.canonicalRepoURL))
     }
 
     @Test func bundledTemplateReferencesAgentDisplayNameEnv() throws {
         let content = try Self.bundledTemplate()
         #expect(content.contains("$\(Self.agentDisplayEnvKey)"))
-        #expect(content.contains(Self.agentPlaceholder))
+        #expect(!content.contains(Self.agentPlaceholder))
     }
 
     @Test func liveSkillAndBundledTemplateAreByteIdentical() throws {
