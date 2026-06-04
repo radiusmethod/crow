@@ -14,6 +14,10 @@ public protocol CodeBackend: Sendable {
     /// Which provider this backend serves.
     var provider: Provider { get }
 
+    /// CLI binary name this backend shells to (e.g. "gh", "glab"). Used by
+    /// prompt-builders that render copy-paste hints — see `AutoRespondPrompts`.
+    var cliName: String { get }
+
     /// What this backend can do, beyond the protocol's required methods.
     /// Replaces `guard session.provider == .github` style guards in call sites.
     var capabilities: Set<CodeCapability> { get }

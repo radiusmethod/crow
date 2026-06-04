@@ -1,5 +1,6 @@
 import Foundation
 import CrowCore
+import CrowProvider
 import CrowTerminal
 
 /// Handles auto-respond to PR status transitions: when CrowConfig opts in
@@ -16,13 +17,15 @@ import CrowTerminal
 @MainActor
 final class AutoRespondCoordinator {
     private let appState: AppState
+    private let providerManager: ProviderManager
     /// Closure that returns the current `AutoRespondSettings`. Closure rather
     /// than a stored value so updates from Settings UI take effect on the
     /// next transition without explicit wiring.
     private let settingsProvider: () -> AutoRespondSettings
 
-    init(appState: AppState, settingsProvider: @escaping () -> AutoRespondSettings) {
+    init(appState: AppState, providerManager: ProviderManager, settingsProvider: @escaping () -> AutoRespondSettings) {
         self.appState = appState
+        self.providerManager = providerManager
         self.settingsProvider = settingsProvider
     }
 
@@ -66,8 +69,7 @@ final class AutoRespondCoordinator {
             return
         }
 
-        let provider = appState.sessions.first(where: { $0.id == transition.sessionID })?.provider ?? .github
-        let prompt = AutoRespondPrompts.build(for: transition, provider: provider)
+        let prompt = AutoRespondPrompts.build(for: transition, codeBackend: resolveCodeBackend(forSessionID: transition.sessionID))
         NSLog("[AutoRespond] Sending %@ prompt to terminal %@ (%d chars)",
               transition.kind.rawValue, terminal.id.uuidString, prompt.count)
         TerminalRouter.send(terminal, text: prompt)
@@ -95,18 +97,31 @@ final class AutoRespondCoordinator {
             return
         }
 
-        let session = appState.sessions.first(where: { $0.id == sessionID })
-        let provider = session?.provider ?? .github
         let prNumber = QuickActionPrompts.parsePRNumber(from: prLink.url)
         let prompt = QuickActionPrompts.build(
             action: action,
-            provider: provider,
+            codeBackend: resolveCodeBackend(forSessionID: sessionID),
             prURL: prLink.url,
             prNumber: prNumber
         )
         NSLog("[QuickAction] Sending %@ prompt to terminal %@ (%d chars)",
               action.rawValue, terminal.id.uuidString, prompt.count)
         TerminalRouter.send(terminal, text: prompt)
+    }
+
+    /// Resolve the `CodeBackend` to use for a session's prompt rendering.
+    /// Uses `session.codeProvider ?? session.provider` per the convention in
+    /// `Session.swift` (ADR 0005, #420). Falls back to GitHub when no session
+    /// is found or when the resolved provider has no code surface (Corveil);
+    /// `.github` always yields a non-nil backend.
+    private func resolveCodeBackend(forSessionID sessionID: UUID) -> CodeBackend {
+        let session = appState.sessions.first(where: { $0.id == sessionID })
+        let codeProvider = session?.codeProvider ?? session?.provider ?? .github
+        if let backend = providerManager.codeBackend(for: codeProvider) {
+            return backend
+        }
+        // Corveil (or unknown) has no code surface — fall back to gh tooling.
+        return providerManager.codeBackend(for: .github)!
     }
 }
 
@@ -122,21 +137,21 @@ final class AutoRespondCoordinator {
 /// matching the proven pattern used by `crow send "/crow-workspace ...\n"`
 /// (AppDelegate.swift:203).
 enum AutoRespondPrompts {
-    static func build(for transition: PRStatusTransition, provider: Provider) -> String {
+    static func build(for transition: PRStatusTransition, codeBackend: CodeBackend) -> String {
         let prRef = transition.prNumber.map { "PR #\($0)" } ?? "the PR"
-        let cli = provider == .gitlab ? "glab" : "gh"
+        let cli = codeBackend.cliName
 
         switch transition.kind {
         case .changesRequested:
             let fetchHint: String
             let reRequestHint: String
-            if provider == .gitlab {
-                fetchHint = "Run `glab mr view \(transition.prURL) --comments` to read the review feedback."
-                reRequestHint = "After pushing, re-request review from each reviewer who requested changes by running `glab mr update \(transition.prURL) --reviewer <login>` for each one (the reviewer logins are in the review data you already fetched)."
+            if codeBackend.provider == .gitlab {
+                fetchHint = "Run `\(cli) mr view \(transition.prURL) --comments` to read the review feedback."
+                reRequestHint = "After pushing, re-request review from each reviewer who requested changes by running `\(cli) mr update \(transition.prURL) --reviewer <login>` for each one (the reviewer logins are in the review data you already fetched)."
             } else {
                 let prNumStr = transition.prNumber.map(String.init) ?? "<number>"
-                fetchHint = "Run `gh pr view \(transition.prURL) --json reviews,comments` (and `gh api repos/{owner}/{repo}/pulls/\(prNumStr)/comments` for inline comments) to read the full review feedback."
-                reRequestHint = "After pushing, re-request review from each reviewer who requested changes by running `gh pr edit \(transition.prURL) --add-reviewer <login>` for each one (the reviewer logins are in the review data you already fetched)."
+                fetchHint = "Run `\(cli) pr view \(transition.prURL) --json reviews,comments` (and `\(cli) api repos/{owner}/{repo}/pulls/\(prNumStr)/comments` for inline comments) to read the full review feedback."
+                reRequestHint = "After pushing, re-request review from each reviewer who requested changes by running `\(cli) pr edit \(transition.prURL) --add-reviewer <login>` for each one (the reviewer logins are in the review data you already fetched)."
             }
             return "Crow detected a 'changes requested' review on \(prRef) (\(transition.prURL)). \(fetchHint) Address every reviewer comment in code, commit the fix, and push so the PR updates. If a comment is unclear or you disagree, leave a reply explaining your reasoning instead of changing the code. \(reRequestHint)\n"
 
@@ -150,8 +165,8 @@ enum AutoRespondPrompts {
                 failedSummary = " Failing checks: \(names)\(extra)."
             }
             let logHint: String
-            if provider == .gitlab {
-                logHint = "Run `glab ci view` / `glab ci trace` on the failing pipeline to read the logs."
+            if codeBackend.provider == .gitlab {
+                logHint = "Run `\(cli) ci view` / `\(cli) ci trace` on the failing pipeline to read the logs."
             } else {
                 logHint = "Run `\(cli) pr checks \(transition.prURL)` to list the failing checks, then `\(cli) run view --log-failed <run-id>` to read the failure output."
             }
@@ -165,9 +180,9 @@ enum AutoRespondPrompts {
 /// `addressChanges` and `fixChecks` cases delegate to `AutoRespondPrompts`
 /// so the auto and manual paths share a single source of truth.
 enum QuickActionPrompts {
-    static func build(action: QuickAction, provider: Provider, prURL: String, prNumber: Int?) -> String {
+    static func build(action: QuickAction, codeBackend: CodeBackend, prURL: String, prNumber: Int?) -> String {
         let prRef = prNumber.map { "PR #\($0)" } ?? "the PR"
-        let cli = provider == .gitlab ? "glab" : "gh"
+        let cli = codeBackend.cliName
 
         switch action {
         case .addressChanges:
@@ -178,7 +193,7 @@ enum QuickActionPrompts {
                 prURL: prURL,
                 prNumber: prNumber
             )
-            return AutoRespondPrompts.build(for: synthetic, provider: provider)
+            return AutoRespondPrompts.build(for: synthetic, codeBackend: codeBackend)
 
         case .fixChecks:
             // Reuse the existing checks-failing prompt verbatim. We don't
@@ -190,12 +205,12 @@ enum QuickActionPrompts {
                 prURL: prURL,
                 prNumber: prNumber
             )
-            return AutoRespondPrompts.build(for: synthetic, provider: provider)
+            return AutoRespondPrompts.build(for: synthetic, codeBackend: codeBackend)
 
         case .fixConflicts:
             let rebaseHint: String
-            if provider == .gitlab {
-                rebaseHint = "Rebase your branch onto the latest target branch (`git fetch origin && git rebase origin/<target>` or `glab mr rebase`), resolve the conflicts in the affected files, run the relevant tests, then force-push with `--force-with-lease` to update the MR."
+            if codeBackend.provider == .gitlab {
+                rebaseHint = "Rebase your branch onto the latest target branch (`git fetch origin && git rebase origin/<target>` or `\(cli) mr rebase`), resolve the conflicts in the affected files, run the relevant tests, then force-push with `--force-with-lease` to update the MR."
             } else {
                 rebaseHint = "Rebase your branch onto the latest base branch (`git fetch origin && git rebase origin/<base>`), resolve the conflicts in the affected files, run the relevant tests, then force-push with `--force-with-lease` to update the PR."
             }
@@ -203,8 +218,8 @@ enum QuickActionPrompts {
 
         case .mergePR:
             let mergeHint: String
-            if provider == .gitlab {
-                mergeHint = "Run `glab mr view \(prURL)` to verify the MR is in the expected state, then `glab mr merge \(prURL)` to merge. If the project uses a different merge strategy or extra steps, adjust accordingly."
+            if codeBackend.provider == .gitlab {
+                mergeHint = "Run `\(cli) mr view \(prURL)` to verify the MR is in the expected state, then `\(cli) mr merge \(prURL)` to merge. If the project uses a different merge strategy or extra steps, adjust accordingly."
             } else {
                 mergeHint = "Run `\(cli) pr view \(prURL)` to verify the PR is in the expected state, then `cd \"$TMPDIR\" && \(cli) pr merge \(prURL) --squash --delete-branch` to merge. The `cd` keeps `gh`'s post-merge git cleanup (which runs in the CWD) from tripping when `main` is checked out in another worktree. If the repo uses a different merge strategy, adjust accordingly."
             }

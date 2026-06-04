@@ -10,6 +10,7 @@ import CrowCore
 /// See ADR 0005 for the protocol contract.
 public struct GitHubCodeBackend: CodeBackend {
     public let provider: Provider = .github
+    public let cliName: String = "gh"
     public let capabilities: Set<CodeCapability> = [.autoMergeLabel, .batchedPRStates]
 
     private let shellRunner: ShellRunner
