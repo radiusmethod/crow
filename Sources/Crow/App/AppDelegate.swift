@@ -771,6 +771,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `self.appConfig` so toggles take effect on the next transition.
         self.autoRespondCoordinator = AutoRespondCoordinator(
             appState: appState,
+            providerManager: providerManager,
             settingsProvider: { [weak self] in
                 self?.appConfig?.autoRespond ?? AutoRespondSettings()
             }

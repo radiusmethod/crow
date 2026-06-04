@@ -10,6 +10,7 @@ import CrowCore
 /// See ADR 0005.
 public struct GitLabCodeBackend: CodeBackend {
     public let provider: Provider = .gitlab
+    public let cliName: String = "glab"
     public let capabilities: Set<CodeCapability> = []
 
     private let shellRunner: ShellRunner

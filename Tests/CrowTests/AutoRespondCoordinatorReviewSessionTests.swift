@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import CrowCore
+import CrowProvider
 @testable import Crow
 
 /// Verifies the policy gate added for #311: review sessions must never
@@ -16,6 +17,7 @@ struct AutoRespondCoordinatorReviewSessionTests {
         state.sessions = sessions
         return AutoRespondCoordinator(
             appState: state,
+            providerManager: ProviderManager(),
             settingsProvider: { AutoRespondSettings(respondToChangesRequested: true, respondToFailedChecks: true) }
         )
     }
