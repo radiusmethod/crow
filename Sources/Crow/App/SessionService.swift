@@ -1844,6 +1844,22 @@ final class SessionService {
 
     // MARK: - Review Prompt
 
+    /// Filename of the initial prompt file the launcher expects for a given
+    /// session kind. `review` and `job` sessions dispatch their first prompt
+    /// by shell-substituting the file's contents into the agent's command
+    /// (CROW-439); `work` and `manager` have no initial prompt file.
+    ///
+    /// Both `CursorAgent.autoLaunchCommand` and `ClaudeCodeAgent.autoLaunchCommand`
+    /// encode the same mapping inline — this helper is the launcher's preflight
+    /// validator, not a refactor of the agents.
+    nonisolated static func initialPromptFileName(for kind: SessionKind) -> String? {
+        switch kind {
+        case .review: return ".crow-review-prompt.md"
+        case .job:    return ".crow-job-prompt.md"
+        case .work, .manager: return nil
+        }
+    }
+
     /// Build the initial prompt for a review session.
     ///
     /// Claude Code resolves `/crow-review-pr <URL>` via its slash-command /
@@ -1861,22 +1877,6 @@ final class SessionService {
     /// `Scaffolder.bundledReviewSkill()` (which falls back to a trivial stub
     /// in test environments where the repo path can't be resolved from
     /// `ProcessInfo.processInfo.arguments[0]`).
-    /// Filename of the initial prompt file the launcher expects for a given
-    /// session kind. `review` and `job` sessions dispatch their first prompt
-    /// by shell-substituting the file's contents into the agent's command
-    /// (CROW-439); `work` and `manager` have no initial prompt file.
-    ///
-    /// Both `CursorAgent.autoLaunchCommand` and `ClaudeCodeAgent.autoLaunchCommand`
-    /// encode the same mapping inline — this helper is the launcher's preflight
-    /// validator, not a refactor of the agents.
-    nonisolated static func initialPromptFileName(for kind: SessionKind) -> String? {
-        switch kind {
-        case .review: return ".crow-review-prompt.md"
-        case .job:    return ".crow-job-prompt.md"
-        case .work, .manager: return nil
-        }
-    }
-
     nonisolated static func buildReviewPrompt(prURL: String, prTitle: String, repoSlug: String, prNumber: Int, agentKind: AgentKind) -> String {
         switch agentKind {
         case .cursor:
