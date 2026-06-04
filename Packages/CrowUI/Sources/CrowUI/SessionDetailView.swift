@@ -368,6 +368,7 @@ public struct SessionDetailView: View {
             VStack(spacing: 0) {
                 TerminalTabBar(
                     terminals: sessionTerminals,
+                    managedAgentIcon: session.agentKind.iconSystemName,
                     activeID: appState.activeTerminalID[session.id] ?? sessionTerminals[0].id,
                     onSelect: { id in appState.activeTerminalID[session.id] = id },
                     onClose: { id in appState.onCloseTerminal?(session.id, id) },
@@ -425,11 +426,34 @@ struct DetailLabel: View {
 
 public struct TerminalTabBar: View {
     let terminals: [SessionTerminal]
+    /// SF Symbol shown on managed tabs (e.g. `"sparkles"` for Claude Code,
+    /// `"cursorarrow.rays"` for Cursor). Set by the parent from
+    /// `session.agentKind.iconSystemName` so the glyph tracks the agent
+    /// actually launched (CROW-427).
+    let managedAgentIcon: String
     let activeID: UUID
     let onSelect: (UUID) -> Void
     let onClose: (UUID) -> Void
     let onRename: (UUID, String) -> Void
     let onAdd: () -> Void
+
+    public init(
+        terminals: [SessionTerminal],
+        managedAgentIcon: String = "sparkles",
+        activeID: UUID,
+        onSelect: @escaping (UUID) -> Void,
+        onClose: @escaping (UUID) -> Void,
+        onRename: @escaping (UUID, String) -> Void,
+        onAdd: @escaping () -> Void
+    ) {
+        self.terminals = terminals
+        self.managedAgentIcon = managedAgentIcon
+        self.activeID = activeID
+        self.onSelect = onSelect
+        self.onClose = onClose
+        self.onRename = onRename
+        self.onAdd = onAdd
+    }
 
     @State private var editingTerminalID: UUID?
     @State private var editingName: String = ""
@@ -440,7 +464,7 @@ public struct TerminalTabBar: View {
             ForEach(terminals) { terminal in
                 Button { onSelect(terminal.id) } label: {
                     HStack(spacing: 4) {
-                        Image(systemName: terminal.isManaged ? "sparkles" : "terminal")
+                        Image(systemName: terminal.isManaged ? managedAgentIcon : "terminal")
                             .font(.system(size: 9))
                         if editingTerminalID == terminal.id {
                             TextField("Name", text: $editingName)
