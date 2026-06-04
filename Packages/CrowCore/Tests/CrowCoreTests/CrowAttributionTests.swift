@@ -97,6 +97,16 @@ import Testing
     #expect(!expanded.contains("via Claude Code"))
 }
 
+/// Normalize footer text so a trailing source-file newline does not fail the drift
+/// guard when the Swift multiline literal omits the closing-delimiter newline.
+private func normalizedFooterText(_ text: String) -> String {
+    var trimmed = text
+    while trimmed.hasSuffix("\n") || trimmed.hasSuffix("\r") {
+        trimmed.removeLast()
+    }
+    return trimmed + "\n"
+}
+
 @Test func crowAttributionSharedFooterMatchesRepoFooterFile() throws {
     var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     var found: URL?
@@ -112,7 +122,7 @@ import Testing
     let file = try String(contentsOf: footerURL, encoding: .utf8)
     let swift = CrowAttribution.sharedFooterInstructions
     #expect(
-        file == swift,
-        "skills/crow-attribution/FOOTER.md (\(file.count) bytes at \(footerURL.path)) must match CrowAttribution.sharedFooterInstructions (\(swift.count) bytes)"
+        normalizedFooterText(file) == normalizedFooterText(swift),
+        "skills/crow-attribution/FOOTER.md at \(footerURL.path) must match CrowAttribution.sharedFooterInstructions"
     )
 }

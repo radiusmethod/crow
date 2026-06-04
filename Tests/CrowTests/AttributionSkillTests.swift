@@ -168,7 +168,12 @@ struct AttributionSkillTests {
 
     @Test func liveAttributionFooterMatchesSwiftConstant() throws {
         let live = try Self.liveAttributionFooter()
-        #expect(live == CrowAttribution.sharedFooterInstructions,
+        let swift = CrowAttribution.sharedFooterInstructions
+        var trimmed = live
+        while trimmed.hasSuffix("\n") || trimmed.hasSuffix("\r") { trimmed.removeLast() }
+        var swiftTrimmed = swift
+        while swiftTrimmed.hasSuffix("\n") || swiftTrimmed.hasSuffix("\r") { swiftTrimmed.removeLast() }
+        #expect(trimmed + "\n" == swiftTrimmed + "\n",
                 "skills/crow-attribution/FOOTER.md must match CrowAttribution.sharedFooterInstructions — the constant is Scaffolder's final fallback.")
     }
 }
