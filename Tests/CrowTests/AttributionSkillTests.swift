@@ -1,11 +1,11 @@
+import CrowCore
 import Foundation
 import Testing
 @testable import Crow
 
 /// Snapshot tests for Crow skill attribution instructions (issue #443).
 ///
-/// Skills reference `$CROW_AGENT_DISPLAY_NAME` (and review templates use
-/// `{{CROW_AGENT_DISPLAY_NAME}}` for Cursor inline expansion). The unit tests in
+/// Skills reference `$CROW_AGENT_DISPLAY_NAME`. The unit tests in
 /// `Packages/CrowCore/Tests/CrowCoreTests/CrowAttributionTests.swift` verify the
 /// Swift helpers and default Claude Code footers.
 @Suite("Review attribution snapshot")
@@ -58,6 +58,12 @@ struct AttributionSkillTests {
     private static func liveAttributionFooter() throws -> String {
         let url = repoRoot()
             .appendingPathComponent("skills/crow-attribution/FOOTER.md")
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    private static func bundledAttributionTemplate() throws -> String {
+        let url = repoRoot()
+            .appendingPathComponent("Resources/crow-attribution-FOOTER.md.template")
         return try String(contentsOf: url, encoding: .utf8)
     }
 
@@ -151,5 +157,18 @@ struct AttributionSkillTests {
         #expect(footer.contains("CROW_AGENT_KIND"))
         #expect(footer.contains("CROW_AGENT_DISPLAY_NAME"))
         #expect(footer.contains(Self.canonicalRepoURL))
+    }
+
+    @Test func liveAttributionFooterAndBundledTemplateAreByteIdentical() throws {
+        let live = try Self.liveAttributionFooter()
+        let bundled = try Self.bundledAttributionTemplate()
+        #expect(live == bundled,
+                "skills/crow-attribution/FOOTER.md and Resources/crow-attribution-FOOTER.md.template must stay in sync — Scaffolder.bundledAttributionFooter() loads the template in release builds.")
+    }
+
+    @Test func liveAttributionFooterMatchesSwiftConstant() throws {
+        let live = try Self.liveAttributionFooter()
+        #expect(live == CrowAttribution.sharedFooterInstructions,
+                "skills/crow-attribution/FOOTER.md must match CrowAttribution.sharedFooterInstructions — the constant is Scaffolder's final fallback.")
     }
 }

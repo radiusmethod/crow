@@ -90,3 +90,23 @@ import Testing
     #expect(expanded.contains("via OpenAI Codex"))
     #expect(!expanded.contains("via Claude Code"))
 }
+
+@Test func crowAttributionSharedFooterMatchesRepoFooterFile() throws {
+    var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    var found: URL?
+    for _ in 0..<10 {
+        let candidate = dir.appendingPathComponent("skills/crow-attribution/FOOTER.md")
+        if FileManager.default.fileExists(atPath: candidate.path) {
+            found = candidate
+            break
+        }
+        dir = dir.deletingLastPathComponent()
+    }
+    let footerURL = try #require(found)
+    let file = try String(contentsOf: footerURL, encoding: .utf8)
+    let swift = CrowAttribution.sharedFooterInstructions
+    #expect(
+        file == swift,
+        "skills/crow-attribution/FOOTER.md (\(file.count) bytes at \(footerURL.path)) must match CrowAttribution.sharedFooterInstructions (\(swift.count) bytes)"
+    )
+}

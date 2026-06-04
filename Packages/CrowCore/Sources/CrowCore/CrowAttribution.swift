@@ -16,6 +16,8 @@ public enum CrowAttribution {
     /// Placeholder in bundled SKILL bodies expanded by `expandSkillBody(_:agentKind:)`.
     public static let skillAgentPlaceholder = "{{CROW_AGENT_DISPLAY_NAME}}"
 
+    /// Intentional second source of truth: `AgentRegistry` is not populated in
+    /// CrowCore-only unit tests, so known kinds resolve here before the registry.
     private static let knownDisplayNames: [String: String] = [
         AgentKind.claudeCode.rawValue: "Claude Code",
         AgentKind.cursor.rawValue: "Cursor",
@@ -95,5 +97,6 @@ public enum CrowAttribution {
     | Reviewed | `[🐦‍⬛ Reviewed by Crow via <agent>](https://github.com/radiusmethod/crow)` |
 
     Replace `<agent>` with `$CROW_AGENT_DISPLAY_NAME` (or `Claude Code` if unset). Do not change the URL or wrap the line in extra formatting.
+
     """
 }

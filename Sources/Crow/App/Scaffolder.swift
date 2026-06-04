@@ -235,6 +235,10 @@ struct Scaffolder {
         if let content = loadFromRepo("skills/crow-attribution/FOOTER.md") {
             return content
         }
+        if let url = Bundle.main.url(forResource: "crow-attribution-FOOTER.md", withExtension: "template"),
+           let content = try? String(contentsOf: url) {
+            return content
+        }
         return CrowAttribution.sharedFooterInstructions
     }
 
