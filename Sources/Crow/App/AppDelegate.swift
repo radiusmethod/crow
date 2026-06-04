@@ -3,6 +3,7 @@ import SwiftUI
 import CrowClaude
 import CrowCodex
 import CrowCore
+import CrowCursor
 import CrowGit
 import CrowProvider
 import CrowUI
@@ -334,6 +335,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("[Crow] OpenAI Codex agent registered")
         }
 
+        // Conditionally register the Cursor agent on the same gate. The
+        // Cursor CLI installs the binary as `agent` (not `cursor`); when
+        // it's absent the picker silently stays at the two prior agents.
+        let cursorAgent = CursorAgent()
+        if cursorAgent.findBinary() != nil {
+            AgentRegistry.shared.register(cursorAgent)
+            NSLog("[Crow] Cursor agent registered")
+        }
+
         // Initialize libghostty
         NSLog("[Crow] Initializing Ghostty")
         GhosttyApp.shared.initialize()
@@ -411,6 +421,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // Cursor-specific dev-root and global config — only when Cursor
+        // is registered. AGENTS.md is the same file Codex writes; both
+        // scaffolders are idempotent and preserve the user-edited
+        // `## Known Issues / Corrections` section, so co-existence is
+        // safe. hooks.json goes into ~/.cursor (or $CURSOR_CONFIG_DIR).
+        if AgentRegistry.shared.agent(for: .cursor) != nil {
+            do {
+                try CursorScaffolder.scaffold(devRoot: devRoot)
+            } catch {
+                NSLog("[Crow] Cursor scaffold failed: %@", error.localizedDescription)
+            }
+            if let crowPath = ClaudeHookConfigWriter.findCrowBinary() {
+                let cursorHome = ProcessInfo.processInfo.environment["CURSOR_CONFIG_DIR"]
+                    ?? NSString(string: "~/.cursor").expandingTildeInPath
+                do {
+                    try CursorHookConfigWriter.installGlobalConfig(cursorHome: cursorHome, crowPath: crowPath)
+                } catch {
+                    NSLog("[Crow] Cursor global config install failed: %@", error.localizedDescription)
+                }
+            }
+        }
+
         // Initialize persistence
         let store = JSONStore()
         self.store = store
@@ -446,7 +478,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Check for runtime dependencies (non-blocking)
         Task {
             let missing = await Task.detached {
-                let tools = ["gh", "git", "claude", "codex", "glab", "code"]
+                let tools = ["gh", "git", "claude", "codex", "agent", "glab", "code"]
                 return tools.filter { !ShellEnvironment.shared.hasCommand($0) }
             }.value
             if !missing.isEmpty {
@@ -1813,7 +1845,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         crowPath: String?,
         telemetryPort: UInt16?
     ) -> (text: String, didLaunch: Bool) {
-        guard command.contains(agent.launchCommandToken) else { return (command, false) }
+        guard commandLaunchesToken(command, token: agent.launchCommandToken) else { return (command, false) }
         if let worktreePath, let crowPath {
             do {
                 try agent.hookConfigWriter.writeHookConfig(
@@ -1838,6 +1870,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "OTEL_RESOURCE_ATTRIBUTES=crow.session.id=\(sessionID.uuidString)",
         ].joined(separator: " ")
         return ("export \(vars) && \(command)", true)
+    }
+
+    /// Whether `command` invokes `token` as a shell command rather than an
+    /// incidental substring. Anchored at start-of-string, after a shell
+    /// command separator (`;`, `&&`, `||`, `|`, possibly with whitespace),
+    /// or at a path separator (`/`) — the last covers binaries that have
+    /// already been path-resolved (e.g. `resolveClaudeInCommand` rewrites
+    /// bare `claude` to `/opt/homebrew/bin/claude` before this guard runs
+    /// on the deferred-launch path, so without the `/` boundary the guard
+    /// returns early and we'd silently skip per-worktree hook-config writes
+    /// and Claude's OTEL env injection). Bounded on the right by whitespace,
+    /// end-of-string, or a quote.
+    ///
+    /// Plain `command.contains(token)` was fine for Claude (`"claude"`) and
+    /// Codex (`"codex"`), which rarely appear incidentally — but Cursor's
+    /// token is `"agent"`, a common English word that can show up in any
+    /// `crow send` text (e.g. *"refactor the agent registry"*). Without
+    /// anchoring we would flip `terminalReadiness = .agentLaunched` on
+    /// arbitrary prose and `list-terminals` would report the agent had
+    /// started when it hadn't.
+    nonisolated static func commandLaunchesToken(_ command: String, token: String) -> Bool {
+        let escaped = NSRegularExpression.escapedPattern(for: token)
+        let pattern = "(?:^|[;&|]\\s*|/)\(escaped)(?=\\s|$|[\"'])"
+        return command.range(of: pattern, options: .regularExpression) != nil
     }
 
     // MARK: - Claude Binary Resolution
