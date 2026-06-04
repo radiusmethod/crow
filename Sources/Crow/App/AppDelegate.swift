@@ -1338,8 +1338,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 let rawCommand = params["command"]?.stringValue
                 let isManaged = params["managed"]?.boolValue ?? false
-                let defaultName = isManaged ? "Claude Code" : "Shell"
-                let terminalName = params["name"]?.stringValue ?? defaultName
                 return await MainActor.run {
                     // Resolve claude binary path if command references claude; also
                     // inject --rc --name when remote control is enabled so the session
@@ -1347,9 +1345,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     // session name.
                     var command = rawCommand
                     var rcInjected = false
+                    let session = capturedAppState.sessions.first(where: { $0.id == sessionID })
+                    let sessionName = session?.name
+                    // The default managed-terminal name is the configured agent's
+                    // displayName (CROW-427) — Cursor sessions read "Cursor",
+                    // Codex sessions read "OpenAI Codex", etc. When the session
+                    // can't be found yet, fall back to the AppState default kind.
+                    let agentKind = session?.agentKind ?? capturedAppState.defaultAgentKind
+                    let defaultName = isManaged ? agentKind.displayName : "Shell"
+                    let terminalName = params["name"]?.stringValue ?? defaultName
                     if let cmd = rawCommand, cmd.contains("claude") {
                         let rcEnabled = capturedAppState.remoteControlEnabled
-                        let sessionName = capturedAppState.sessions.first(where: { $0.id == sessionID })?.name
                         command = AppDelegate.resolveClaudeInCommand(
                             cmd,
                             remoteControl: rcEnabled,

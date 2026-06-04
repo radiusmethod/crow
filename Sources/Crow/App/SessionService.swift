@@ -1207,7 +1207,7 @@ final class SessionService {
 
         let rawTerminal = SessionTerminal(
             sessionID: session.id,
-            name: "Claude Code",
+            name: session.agentKind.displayName,
             cwd: worktreePath,
             isManaged: true
         )
@@ -1434,7 +1434,7 @@ final class SessionService {
 
         let terminal = SessionTerminal(
             sessionID: session.id,
-            name: "Claude Code",
+            name: session.agentKind.displayName,
             cwd: prep.clonePath,
             isManaged: true
         )
@@ -1661,7 +1661,7 @@ final class SessionService {
         )
         let terminal = SessionTerminal(
             sessionID: session.id,
-            name: "Claude Code",
+            name: session.agentKind.displayName,
             cwd: worktreePath,
             isManaged: true
         )
