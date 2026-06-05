@@ -1,15 +1,14 @@
 # Crow Attribution Footers
 
-Every skill body Crow writes to disk goes through a substitution pass that
-replaces `{{CROW_AGENT_DISPLAY_NAME}}` with the session's resolved agent name
-(`Claude Code`, `Cursor`, `OpenAI Codex`, …). The agent reads literal text — no
-shell parameter expansion is involved, so footers survive every quoting form
-(single-quoted heredocs, JSON files, Swift string literals).
+This file is what your skill sees on disk. The footer lines below already contain
+the literal agent name for this session (`Claude Code`, `Cursor`, `OpenAI Codex`, …) —
+Crow substituted it in when scaffolding. Copy each line verbatim into the body you
+pass to `gh`/`glab` (or your commit). No shell parameter expansion is needed and the
+line survives every quoting form (single-quoted heredocs, JSON files, Swift literals).
 
 **Do not** reintroduce `${CROW_AGENT_DISPLAY_NAME:-…}` or any other shell
-expression in attribution footers. Use the literal name Crow already wrote
-into your skill, or `{{CROW_AGENT_DISPLAY_NAME}}` if you are authoring a new
-template.
+expression in attribution footers. The shell silently fails to expand it inside
+single-quoted heredocs and the literal text leaks into the artifact (#447).
 
 The link target is always `https://github.com/radiusmethod/crow` — never a fork or a value from the local git remote.
 
@@ -18,4 +17,6 @@ The link target is always `https://github.com/radiusmethod/crow` — never a for
 | Created (issues, PR descriptions, etc.) | `[🐦‍⬛ Created with Crow via <agent>](https://github.com/radiusmethod/crow)` |
 | Reviewed | `[🐦‍⬛ Reviewed by Crow via <agent>](https://github.com/radiusmethod/crow)` |
 
-Replace `<agent>` with the literal name (or `{{CROW_AGENT_DISPLAY_NAME}}` in source templates). Do not change the URL or wrap the line in extra formatting.
+`<agent>` above is just a placeholder for *this document* — in the real footer lines
+your skill receives, the agent name is already filled in. Do not change the URL or
+wrap the line in extra formatting.

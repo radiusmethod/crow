@@ -64,10 +64,9 @@ rules above. If there is no usable title, ask the user for one and stop until pr
 
 The body is the text the user provided (or empty). It MUST end with the Crow
 attribution footer (see **Step 4b** and `.claude/skills/crow-attribution/FOOTER.md`):
-a blank line, then
-`[🐦‍⬛ Created with Crow via {{CROW_AGENT_DISPLAY_NAME}}](https://github.com/radiusmethod/crow)`
-(Crow has already substituted the literal agent name into this file before you
-read it — copy the line as-is).
+a blank line, then the literal attribution line shown in **Step 4** below.
+Crow has already filled in the agent name for this session — copy the line
+as-is into the body.
 Do NOT add any other footer — no "Generated with Claude Code" line and no co-author
 trailer. The Crow attribution is the only footer.
 
@@ -141,7 +140,7 @@ followed by:
 [🐦‍⬛ Created with Crow via {{CROW_AGENT_DISPLAY_NAME}}](https://github.com/radiusmethod/crow)
 ```
 
-- Crow rewrites `{{CROW_AGENT_DISPLAY_NAME}}` to the session's resolved agent name (`Claude Code`, `Cursor`, `OpenAI Codex`, …) **before** this skill reaches you — paste the line literally; do not re-introduce `${…}` shell parameter expansion of your own (it silently fails inside single-quoted heredocs).
+- Crow filled in the agent name for this session before this skill reached you — paste the line literally; do not re-introduce `${…}` shell parameter expansion of your own (it silently fails inside single-quoted heredocs and the literal text leaks into the issue body).
 - Do not modify the URL — the link target is always `https://github.com/radiusmethod/crow`, never a fork or a derived value from the local git remote.
 - Do not wrap the line in additional formatting (no blockquote, no extra brackets, no surrounding text).
 - This line MUST appear in every issue body, whether GitHub or GitLab, and whether or not the user supplied any body text.

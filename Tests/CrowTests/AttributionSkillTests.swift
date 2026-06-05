@@ -164,10 +164,16 @@ struct AttributionSkillTests {
 
     @Test func sharedFooterDocumentsSubstitutionAndCanonicalURL() throws {
         let footer = try Self.liveAttributionFooter()
-        // #447: FOOTER documents the substitution model — the sentinel must be
-        // named and the canonical URL must be present.
-        #expect(footer.contains(Self.agentPlaceholder))
+        // #447 review: FOOTER prose must read sensibly post-substitution, so it
+        // deliberately does NOT spell `{{CROW_AGENT_DISPLAY_NAME}}` literally
+        // (`expandSkillBody` would otherwise rewrite the explanatory sentences
+        // and produce self-contradictory deployed docs). Guard the canonical
+        // URL and the no-sentinel constraint together.
         #expect(footer.contains(Self.canonicalRepoURL))
+        #expect(!footer.contains(Self.agentPlaceholder),
+                "FOOTER.md prose must not contain {{CROW_AGENT_DISPLAY_NAME}} — expandSkillBody runs over this file and would rewrite the explanation. Describe the model without naming the sentinel literally.")
+        #expect(!footer.contains("$\(CrowAttribution.agentDisplayNameEnvironmentKey)"),
+                "FOOTER.md prose must not contain a bare $CROW_AGENT_DISPLAY_NAME token — expandSkillBody would rewrite it too.")
     }
 
     @Test func liveAttributionFooterAndBundledTemplateAreByteIdentical() throws {
@@ -189,6 +195,32 @@ struct AttributionSkillTests {
     }
 
     // MARK: - Substitution behavior (#447)
+
+    /// Regression guard for the #447 review feedback: the prose explaining the
+    /// substitution model must not contain a literal `{{CROW_AGENT_DISPLAY_NAME}}`
+    /// token, because `expandSkillBody` will rewrite the explanation along with
+    /// the real footer and produce self-contradictory deployed docs (e.g.
+    /// "replaces `Cursor` with the session's resolved agent name"). The only
+    /// valid home for the sentinel is the operative footer line itself, which
+    /// is recognizable by also containing the canonical repo URL.
+    private static func assertSentinelOnlyInFooterLines(_ body: String, file: StaticString = #file) {
+        for line in body.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.contains(Self.agentPlaceholder) {
+                #expect(
+                    line.contains(Self.canonicalRepoURL),
+                    "Line contains `{{CROW_AGENT_DISPLAY_NAME}}` outside an attribution footer (no canonical URL on the line). `expandSkillBody` will rewrite this and likely produce self-contradictory prose post-scaffold. Reword to describe the model without spelling the sentinel.\nLine: \(line)"
+                )
+            }
+        }
+    }
+
+    @Test func liveReviewSkillKeepsSentinelOnlyInFooterLines() throws {
+        try Self.assertSentinelOnlyInFooterLines(Self.liveSkill())
+    }
+
+    @Test func liveTicketSkillKeepsSentinelOnlyInFooterLines() throws {
+        try Self.assertSentinelOnlyInFooterLines(Self.liveTicketSkill())
+    }
 
     /// Confirm the substitution pass walks every footer occurrence in a real
     /// skill body. Reads the live SKILL.md directly (rather than going through
