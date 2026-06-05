@@ -6,7 +6,11 @@ struct Scaffolder {
     let devRoot: String
 
     /// Create the full workspace scaffold.
-    func scaffold(workspaceNames: [String]) throws {
+    ///
+    /// `managerAgentKind` drives `{{CROW_AGENT_DISPLAY_NAME}}` substitution in the
+    /// dev-root skill bodies (issue #447). The Manager session is the consumer of
+    /// these files, so its agent kind is the right one to bake in.
+    func scaffold(workspaceNames: [String], managerAgentKind: AgentKind = .claudeCode) throws {
         let fm = FileManager.default
 
         // Create devRoot
@@ -68,7 +72,8 @@ struct Scaffolder {
         // Always overwrite the skill with the latest version from the app
         let skillPath = (skillsDir as NSString).appendingPathComponent("SKILL.md")
         let skillTemplate = Self.bundledSkill()
-        try skillTemplate.write(toFile: skillPath, atomically: true, encoding: .utf8)
+        try CrowAttribution.expandSkillBody(skillTemplate, agentKind: managerAgentKind)
+            .write(toFile: skillPath, atomically: true, encoding: .utf8)
 
         // Always overwrite setup.sh with the latest version and make executable
         let setupScriptPath = (skillsDir as NSString).appendingPathComponent("setup.sh")
@@ -79,21 +84,26 @@ struct Scaffolder {
         // Always overwrite the review-pr skill with the latest version
         let reviewSkillPath = (reviewSkillsDir as NSString).appendingPathComponent("SKILL.md")
         let reviewSkillTemplate = Self.bundledReviewSkill()
-        try reviewSkillTemplate.write(toFile: reviewSkillPath, atomically: true, encoding: .utf8)
+        try CrowAttribution.expandSkillBody(reviewSkillTemplate, agentKind: managerAgentKind)
+            .write(toFile: reviewSkillPath, atomically: true, encoding: .utf8)
 
         // Always overwrite the batch-workspace skill with the latest version
         let batchSkillPath = (batchSkillsDir as NSString).appendingPathComponent("SKILL.md")
         let batchSkillTemplate = Self.bundledBatchSkill()
-        try batchSkillTemplate.write(toFile: batchSkillPath, atomically: true, encoding: .utf8)
+        try CrowAttribution.expandSkillBody(batchSkillTemplate, agentKind: managerAgentKind)
+            .write(toFile: batchSkillPath, atomically: true, encoding: .utf8)
 
         // Always overwrite the create-ticket skill with the latest version
         let createTicketSkillPath = (createTicketSkillsDir as NSString).appendingPathComponent("SKILL.md")
         let createTicketSkillTemplate = Self.bundledCreateTicketSkill()
-        try createTicketSkillTemplate.write(toFile: createTicketSkillPath, atomically: true, encoding: .utf8)
+        try CrowAttribution.expandSkillBody(createTicketSkillTemplate, agentKind: managerAgentKind)
+            .write(toFile: createTicketSkillPath, atomically: true, encoding: .utf8)
 
         // Shared attribution footer rules (issue #443)
         let attributionFooterPath = (attributionSkillsDir as NSString).appendingPathComponent("FOOTER.md")
-        try Self.bundledAttributionFooter().write(toFile: attributionFooterPath, atomically: true, encoding: .utf8)
+        let attributionFooter = Self.bundledAttributionFooter()
+        try CrowAttribution.expandSkillBody(attributionFooter, agentKind: managerAgentKind)
+            .write(toFile: attributionFooterPath, atomically: true, encoding: .utf8)
 
         // Always overwrite settings.json (permissions for crow, gh, git commands)
         let settingsPath = (claudeDir as NSString).appendingPathComponent("settings.json")

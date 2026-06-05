@@ -300,7 +300,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Scaffold directory structure
             let scaffolder = Scaffolder(devRoot: devRoot)
-            try scaffolder.scaffold(workspaceNames: config.workspaces.map(\.name))
+            try scaffolder.scaffold(
+                workspaceNames: config.workspaces.map(\.name),
+                managerAgentKind: config.agentKind(for: .manager)
+            )
 
             // Save config
             try ConfigStore.saveConfig(config, devRoot: devRoot)
@@ -395,7 +398,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Update skills and CLAUDE.md on every launch
         let scaffolder = Scaffolder(devRoot: devRoot)
         do {
-            try scaffolder.scaffold(workspaceNames: config.workspaces.map(\.name))
+            try scaffolder.scaffold(
+                workspaceNames: config.workspaces.map(\.name),
+                managerAgentKind: config.agentKind(for: .manager)
+            )
         } catch {
             NSLog("[Crow] Scaffold update failed: %@", error.localizedDescription)
         }
@@ -1045,7 +1051,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             onRescaffold: { [weak self] devRoot in
                 let scaffolder = Scaffolder(devRoot: devRoot)
-                try? scaffolder.scaffold(workspaceNames: self?.appConfig?.workspaces.map(\.name) ?? [])
+                let cfg = self?.appConfig
+                try? scaffolder.scaffold(
+                    workspaceNames: cfg?.workspaces.map(\.name) ?? [],
+                    managerAgentKind: cfg?.agentKind(for: .manager) ?? .claudeCode
+                )
             }
         )
 

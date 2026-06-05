@@ -1688,11 +1688,15 @@ final class SessionService {
             )
         }
 
-        // Copy the crow-review-pr skill into the clone's .claude/skills/ so Claude Code can find it
+        // Copy the crow-review-pr skill into the clone's .claude/skills/ so Claude Code can find it.
+        // Substitute `{{CROW_AGENT_DISPLAY_NAME}}` before writing so the attribution footer is a
+        // literal string regardless of how the agent quotes the body (issue #447 — single-quoted
+        // heredocs in gh/glab calls don't expand shell variables).
         let cloneSkillsDir = (clonePath as NSString).appendingPathComponent(".claude/skills/crow-review-pr")
         try? fm.createDirectory(atPath: cloneSkillsDir, withIntermediateDirectories: true)
         let skillContent = Scaffolder.bundledReviewSkill()
-        try? skillContent.write(
+        let resolvedSkillContent = CrowAttribution.expandSkillBody(skillContent, agentKind: reviewAgentKind)
+        try? resolvedSkillContent.write(
             toFile: (cloneSkillsDir as NSString).appendingPathComponent("SKILL.md"),
             atomically: true, encoding: .utf8
         )

@@ -83,16 +83,24 @@ public enum CrowAttribution {
     }
 
     /// Shared attribution rules copied into `.claude/skills/crow-attribution/FOOTER.md`.
+    ///
+    /// Crow runs this body through `expandSkillBody` before writing it to disk, so
+    /// the prose must read sensibly **after** every `{{CROW_AGENT_DISPLAY_NAME}}` /
+    /// `$CROW_AGENT_DISPLAY_NAME` / `via Claude Code` occurrence has been rewritten
+    /// to the resolved agent name (#447 review). Describe the substitution model
+    /// at a higher level than naming the sentinel literally.
     public static let sharedFooterInstructions: String = """
     # Crow Attribution Footers
 
-    Crow injects these environment variables into every managed terminal:
+    This file is what your skill sees on disk. The footer lines below already contain
+    the literal agent name for this session (`Claude Code`, `Cursor`, `OpenAI Codex`, …) —
+    Crow substituted it in when scaffolding. Copy each line verbatim into the body you
+    pass to `gh`/`glab` (or your commit). No shell parameter expansion is needed and the
+    line survives every quoting form (single-quoted heredocs, JSON files, Swift literals).
 
-    - `CROW_AGENT_KIND` — raw agent id (`claude-code`, `cursor`, `codex`, …)
-    - `CROW_AGENT_DISPLAY_NAME` — human label (`Claude Code`, `Cursor`, `OpenAI Codex`, …)
-
-    **Always** use `${CROW_AGENT_DISPLAY_NAME:-Claude Code}` in attribution footers inside
-    double-quoted `gh`/`glab` arguments so the shell applies the default when unset.
+    **Do not** reintroduce `${CROW_AGENT_DISPLAY_NAME:-…}` or any other shell
+    expression in attribution footers. The shell silently fails to expand it inside
+    single-quoted heredocs and the literal text leaks into the artifact (#447).
 
     The link target is always `https://github.com/radiusmethod/crow` — never a fork or a value from the local git remote.
 
@@ -101,6 +109,8 @@ public enum CrowAttribution {
     | Created (issues, PR descriptions, etc.) | `[🐦‍⬛ Created with Crow via <agent>](https://github.com/radiusmethod/crow)` |
     | Reviewed | `[🐦‍⬛ Reviewed by Crow via <agent>](https://github.com/radiusmethod/crow)` |
 
-    Replace `<agent>` with `${CROW_AGENT_DISPLAY_NAME:-Claude Code}`. Do not change the URL or wrap the line in extra formatting.
+    `<agent>` above is just a placeholder for *this document* — in the real footer lines
+    your skill receives, the agent name is already filled in. Do not change the URL or
+    wrap the line in extra formatting.
     """
 }
