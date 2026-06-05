@@ -127,6 +127,20 @@ read_agent_kind_from_config() {
   echo "${def:-claude-code}"
 }
 
+# Map an AGENT_KIND raw value to its human-readable display name. Mirrors
+# CrowAttribution.knownDisplayNames in Packages/CrowCore. Used by
+# write_settings_local to bake the resolved name into `attribution.commit`
+# as a literal string — Claude Code's settings.local.json is JSON, not a
+# shell context, so shell parameter expansion never fires there (#447).
+agent_display_name() {
+  case "${1:-claude-code}" in
+    claude-code) echo "Claude Code" ;;
+    cursor)      echo "Cursor" ;;
+    codex)       echo "OpenAI Codex" ;;
+    *)           echo "Claude Code" ;;
+  esac
+}
+
 die() {
   local step="$1" msg="$2"
   local partial=""
@@ -428,16 +442,29 @@ write_settings_local() {
   local settings_path="$settings_dir/settings.local.json"
   mkdir -p "$settings_dir"
 
+  # Resolve the agent display name so it lands in the JSON as a literal string.
+  # Claude Code's settings.local.json is parsed as JSON, not by a shell, so any
+  # ${VAR:-default} expression would survive verbatim and leak into commits
+  # (#447). Fall back to read_agent_kind_from_config when --agent-kind wasn't
+  # provided, matching launch_agent's resolution order.
+  local resolved_kind="$AGENT_KIND"
+  if [[ -z "$resolved_kind" ]]; then
+    resolved_kind=$(read_agent_kind_from_config "work")
+  fi
+  local display_name
+  display_name=$(agent_display_name "$resolved_kind")
+
   # The newlines inside the "commit" string are literal \n escapes in JSON;
   # the heredoc passes them through to the file as the two-character sequence.
+  # Heredoc is unquoted so bash expands $display_name and $SESSION_ID.
   cat > "$settings_path" <<EOF
 {
   "attribution": {
-    "commit": "🐦‍⬛ Generated with Claude Code, orchestrated by Crow\\n\\nCo-Authored-By: Claude <noreply@anthropic.com>\\nCrow-Session: $SESSION_ID"
+    "commit": "🐦‍⬛ Generated with $display_name, orchestrated by Crow\\n\\nCo-Authored-By: Claude <noreply@anthropic.com>\\nCrow-Session: $SESSION_ID"
   }
 }
 EOF
-  log "Wrote attribution settings to $settings_path"
+  log "Wrote attribution settings to $settings_path (agent: $display_name)"
 
   # Belt-and-suspenders: add the file to the per-worktree git exclude so it
   # is never accidentally committed even if the repo's .gitignore does not

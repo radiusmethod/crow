@@ -86,13 +86,16 @@ public enum CrowAttribution {
     public static let sharedFooterInstructions: String = """
     # Crow Attribution Footers
 
-    Crow injects these environment variables into every managed terminal:
+    Every skill body Crow writes to disk goes through a substitution pass that
+    replaces `{{CROW_AGENT_DISPLAY_NAME}}` with the session's resolved agent name
+    (`Claude Code`, `Cursor`, `OpenAI Codex`, …). The agent reads literal text — no
+    shell parameter expansion is involved, so footers survive every quoting form
+    (single-quoted heredocs, JSON files, Swift string literals).
 
-    - `CROW_AGENT_KIND` — raw agent id (`claude-code`, `cursor`, `codex`, …)
-    - `CROW_AGENT_DISPLAY_NAME` — human label (`Claude Code`, `Cursor`, `OpenAI Codex`, …)
-
-    **Always** use `${CROW_AGENT_DISPLAY_NAME:-Claude Code}` in attribution footers inside
-    double-quoted `gh`/`glab` arguments so the shell applies the default when unset.
+    **Do not** reintroduce `${CROW_AGENT_DISPLAY_NAME:-…}` or any other shell
+    expression in attribution footers. Use the literal name Crow already wrote
+    into your skill, or `{{CROW_AGENT_DISPLAY_NAME}}` if you are authoring a new
+    template.
 
     The link target is always `https://github.com/radiusmethod/crow` — never a fork or a value from the local git remote.
 
@@ -101,6 +104,6 @@ public enum CrowAttribution {
     | Created (issues, PR descriptions, etc.) | `[🐦‍⬛ Created with Crow via <agent>](https://github.com/radiusmethod/crow)` |
     | Reviewed | `[🐦‍⬛ Reviewed by Crow via <agent>](https://github.com/radiusmethod/crow)` |
 
-    Replace `<agent>` with `${CROW_AGENT_DISPLAY_NAME:-Claude Code}`. Do not change the URL or wrap the line in extra formatting.
+    Replace `<agent>` with the literal name (or `{{CROW_AGENT_DISPLAY_NAME}}` in source templates). Do not change the URL or wrap the line in extra formatting.
     """
 }

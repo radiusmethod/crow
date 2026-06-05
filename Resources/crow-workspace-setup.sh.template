@@ -41,6 +41,7 @@ PRIMARY=false
 SKIP_LAUNCH=false
 SKIP_ASSIGN=false
 SKIP_PROJECT_STATUS=false
+BASE_BRANCH=""
 
 # Runtime state
 TERMINAL_ID=""
@@ -57,17 +58,45 @@ json_val() {
   tr -d '\n' | sed 's/[[:space:]]*:[[:space:]]*/:/g' | grep -o "\"$key\":\"[^\"]*\"" | cut -d'"' -f4 | head -1
 }
 
-die() {
-  local step="$1" msg="$2"
-  local partial=""
-  if [[ -n "$SESSION_ID" ]]; then
-    partial=", \"partial\": {\"session_id\": \"$SESSION_ID\"}"
+# Extract the `readiness` of a specific terminal id from `crow list-terminals`
+# JSON. Walks the flat per-terminal objects, finds the one carrying our id, and
+# reads its readiness field. Usage: terminal_readiness "$tid" "$json"
+terminal_readiness() {
+  local tid="$1" json="$2"
+  printf '%s' "$json" | tr -d '\n' | grep -o '{[^{}]*}' | grep "\"$tid\"" \
+    | grep -o '"readiness":"[^"]*"' | cut -d'"' -f4 | head -1
+}
+
+# POSIX single-quote an arg so it's safe to interpolate into a shell command.
+# Mirrors Swift's shellQuote() in ClaudeLaunchArgs: wraps value in '...' and
+# escapes embedded single-quotes as '\''.
+posix_quote() {
+  local s=${1//\'/\'\\\'\'}
+  printf "'%s'" "$s"
+}
+
+# Read the global remoteControlEnabled flag from {devRoot}/.claude/config.json.
+# Returns 0 if true, 1 otherwise. Missing file / malformed JSON / missing
+# key all default to 1 (off), matching AppConfig's decodeIfPresent behavior.
+is_remote_control_enabled() {
+  local config_path="$DEV_ROOT/.claude/config.json"
+  [[ -f "$config_path" ]] || return 1
+  tr -d '\n' < "$config_path" \
+    | grep -qE '"remoteControlEnabled"[[:space:]]*:[[:space:]]*true'
+}
+
+# Read the attributionTrailers flag from {devRoot}/.claude/config.json.
+# Defaults to 0 (on) when the file is missing, malformed, or the key is
+# absent — matches AppConfig's decodeIfPresent default. Returns 1 only
+# when the key is explicitly set to false.
+is_attribution_trailers_enabled() {
+  local config_path="$DEV_ROOT/.claude/config.json"
+  [[ -f "$config_path" ]] || return 0
+  if tr -d '\n' < "$config_path" \
+    | grep -qE '"attributionTrailers"[[:space:]]*:[[:space:]]*false'; then
+    return 1
   fi
-  printf '{"status":"error","step":"%s","message":"%s"%s}\n' \
-    "$step" \
-    "$(echo "$msg" | sed 's/"/\\"/g' | tr '\n' ' ')" \
-    "$partial"
-  exit 1
+  return 0
 }
 
 # Resolve the agent kind for a given SessionKind raw value, mirroring
@@ -82,6 +111,7 @@ read_agent_kind_from_config() {
   local flat
   flat=$(tr -d '\n' < "$cfg")
 
+  # agentsByKind["<kind>"]: find the agentsByKind object body, then the key.
   local override
   override=$(printf '%s' "$flat" \
     | grep -oE "\"agentsByKind\"[[:space:]]*:[[:space:]]*\{[^}]*\}" \
@@ -89,11 +119,39 @@ read_agent_kind_from_config() {
     | head -1 | sed -E 's/.*"([^"]+)"$/\1/')
   if [[ -n "$override" ]]; then echo "$override"; return; fi
 
+  # Fall back to defaultAgentKind.
   local def
   def=$(printf '%s' "$flat" \
     | grep -oE "\"defaultAgentKind\"[[:space:]]*:[[:space:]]*\"[^\"]+\"" \
     | head -1 | sed -E 's/.*"([^"]+)"$/\1/')
   echo "${def:-claude-code}"
+}
+
+# Map an AGENT_KIND raw value to its human-readable display name. Mirrors
+# CrowAttribution.knownDisplayNames in Packages/CrowCore. Used by
+# write_settings_local to bake the resolved name into `attribution.commit`
+# as a literal string — Claude Code's settings.local.json is JSON, not a
+# shell context, so shell parameter expansion never fires there (#447).
+agent_display_name() {
+  case "${1:-claude-code}" in
+    claude-code) echo "Claude Code" ;;
+    cursor)      echo "Cursor" ;;
+    codex)       echo "OpenAI Codex" ;;
+    *)           echo "Claude Code" ;;
+  esac
+}
+
+die() {
+  local step="$1" msg="$2"
+  local partial=""
+  if [[ -n "$SESSION_ID" ]]; then
+    partial=", \"partial\": {\"session_id\": \"$SESSION_ID\"}"
+  fi
+  printf '{"status":"error","step":"%s","message":"%s"%s}\n' \
+    "$step" \
+    "$(echo "$msg" | sed 's/"/\\"/g' | tr '\n' ' ')" \
+    "$partial"
+  exit 1
 }
 
 # ─── Argument Parsing ────────────────────────────────────────────────────────
@@ -131,6 +189,7 @@ Optional:
   --claude-binary <path>     [deprecated alias] Same as --agent-binary; only
                              honored when the resolved agent is claude-code.
   --session-id <uuid>        Existing session ID (for secondary repos)
+  --base-branch <branch>     Default base branch (auto-detected from origin/HEAD if omitted)
   --primary                  Mark worktree as primary
   --skip-launch              Skip agent launch
   --skip-assign              Skip auto-assign
@@ -165,6 +224,7 @@ parse_args() {
       --agent-binary)      AGENT_BINARY="$2"; shift 2 ;;
       --claude-binary)     CLAUDE_BINARY="$2"; shift 2 ;;
       --session-id)        SESSION_ID="$2"; shift 2 ;;
+      --base-branch)       BASE_BRANCH="$2"; shift 2 ;;
       --primary)           PRIMARY=true; shift ;;
       --skip-launch)       SKIP_LAUNCH=true; shift ;;
       --skip-assign)       SKIP_ASSIGN=true; shift ;;
@@ -213,16 +273,42 @@ preflight() {
 
 # ─── Git Worktree ────────────────────────────────────────────────────────────
 
+# Resolve BASE_BRANCH: explicit --base-branch flag wins, otherwise probe
+# origin/HEAD locally (set by `git clone` for most repos), otherwise ask the
+# remote, otherwise warn loudly and fall back to "main".
+resolve_base_branch() {
+  if [[ -n "$BASE_BRANCH" ]]; then
+    log "Using base branch from --base-branch: $BASE_BRANCH"
+    return
+  fi
+  local detected
+  detected=$(git -C "$REPO_PATH" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) || true
+  detected="${detected#origin/}"
+  if [[ -z "$detected" ]]; then
+    detected=$(git -C "$REPO_PATH" ls-remote --symref origin HEAD 2>/dev/null \
+      | awk '/^ref:/ { sub("refs/heads/", "", $2); print $2; exit }') || true
+  fi
+  if [[ -n "$detected" ]]; then
+    BASE_BRANCH="$detected"
+    log "Auto-detected base branch from origin/HEAD: $BASE_BRANCH"
+  else
+    BASE_BRANCH="main"
+    log "WARNING: could not detect default branch for $REPO_PATH; falling back to 'main'"
+  fi
+}
+
 setup_worktree() {
   log "Fetching origin..."
   if ! git -C "$REPO_PATH" fetch origin >&2 2>&1; then
     die "git_fetch" "git fetch origin failed"
   fi
 
+  resolve_base_branch
+
   # Determine which branch and tracking mode to use
   local use_branch="$BRANCH"
   local track_flag="--no-track"
-  local base_ref="origin/main"
+  local base_ref="origin/$BASE_BRANCH"
 
   if [[ -n "$PR_BRANCH" ]]; then
     # PR branch: track the remote PR branch
@@ -239,7 +325,7 @@ setup_worktree() {
       base_ref="origin/$BRANCH"
       log "Branch $BRANCH exists on remote, will track"
     else
-      log "Creating new branch $BRANCH from origin/main"
+      log "Creating new branch $BRANCH from origin/$BASE_BRANCH"
     fi
   fi
 
@@ -331,6 +417,66 @@ create_session() {
       --url "$PR_URL" \
       --type pr >/dev/null 2>&1 \
       || log "Warning: add-link (PR) failed"
+  fi
+}
+
+# ─── Per-Worktree Settings (attribution trailer) ─────────────────────────────
+
+# Write a per-worktree .claude/settings.local.json that overrides Claude Code's
+# attribution.commit so commits include a `Crow-Session: <uuid>` trailer
+# alongside the standard `Co-Authored-By: Claude` line. Runs for every
+# worktree (primary and secondary) regardless of --skip-launch, so any worktree
+# the user later opens with Claude Code picks up the override.
+write_settings_local() {
+  if ! is_attribution_trailers_enabled; then
+    log "Attribution trailers disabled via config; skipping settings.local.json"
+    return
+  fi
+
+  if [[ -z "$SESSION_ID" ]]; then
+    log "Warning: SESSION_ID not set, skipping settings.local.json"
+    return
+  fi
+
+  local settings_dir="$WORKTREE_PATH/.claude"
+  local settings_path="$settings_dir/settings.local.json"
+  mkdir -p "$settings_dir"
+
+  # Resolve the agent display name so it lands in the JSON as a literal string.
+  # Claude Code's settings.local.json is parsed as JSON, not by a shell, so any
+  # ${VAR:-default} expression would survive verbatim and leak into commits
+  # (#447). Fall back to read_agent_kind_from_config when --agent-kind wasn't
+  # provided, matching launch_agent's resolution order.
+  local resolved_kind="$AGENT_KIND"
+  if [[ -z "$resolved_kind" ]]; then
+    resolved_kind=$(read_agent_kind_from_config "work")
+  fi
+  local display_name
+  display_name=$(agent_display_name "$resolved_kind")
+
+  # The newlines inside the "commit" string are literal \n escapes in JSON;
+  # the heredoc passes them through to the file as the two-character sequence.
+  # Heredoc is unquoted so bash expands $display_name and $SESSION_ID.
+  cat > "$settings_path" <<EOF
+{
+  "attribution": {
+    "commit": "🐦‍⬛ Generated with $display_name, orchestrated by Crow\\n\\nCo-Authored-By: Claude <noreply@anthropic.com>\\nCrow-Session: $SESSION_ID"
+  }
+}
+EOF
+  log "Wrote attribution settings to $settings_path (agent: $display_name)"
+
+  # Belt-and-suspenders: add the file to the per-worktree git exclude so it
+  # is never accidentally committed even if the repo's .gitignore does not
+  # already cover .claude/settings.local.json. For worktrees, this lives at
+  # .git/worktrees/<name>/info/exclude — `git rev-parse --git-path` resolves it.
+  local exclude_file
+  exclude_file="$(git -C "$WORKTREE_PATH" rev-parse --git-path info/exclude 2>/dev/null)" || return 0
+  [[ -n "$exclude_file" ]] || return 0
+  mkdir -p "$(dirname "$exclude_file")"
+  touch "$exclude_file"
+  if ! grep -qxF '.claude/settings.local.json' "$exclude_file" 2>/dev/null; then
+    printf '\n# Added by crow setup.sh\n.claude/settings.local.json\n' >> "$exclude_file"
   fi
 }
 
@@ -471,11 +617,16 @@ write_prompt() {
 
 # ─── Launch Agent ───────────────────────────────────────────────────────────
 #
-# Dispatcher + per-agent launchers. Each sub-launcher knows its own binary,
-# flags, and terminal name; the shared create_agent_terminal helper creates
-# the terminal, waits for the shell, and pastes the launch command. Mirrors
-# the corresponding Swift CodingAgent.autoLaunchCommand for each kind.
+# Dispatcher + per-agent launchers. The dispatcher resolves the agent kind
+# (--agent-kind flag, then config.json, then claude-code default), invokes the
+# matching launch_<kind> sub-launcher to build the --command string and create
+# the terminal, then polls readiness centrally. Each sub-launcher mirrors the
+# corresponding Swift `CodingAgent.autoLaunchCommand` in Packages/Crow{Claude,
+# Cursor,Codex} so the skill and the in-app launch paths stay in agreement.
 
+# Search a list of candidate paths and PATH for the first executable matching
+# $token (or full path). Echoes the resolved path, or empty on failure.
+# Usage: resolve_binary <token> <candidate1> [candidate2 ...]
 resolve_binary() {
   local token="$1"; shift
   local p
@@ -487,44 +638,9 @@ resolve_binary() {
   return 1
 }
 
-# Shared terminal creation + send-launch path. Sets TERMINAL_ID.
-create_agent_terminal() {
-  local terminal_name="$1"
-  local send_text="$2"
-
-  log "Creating terminal '$terminal_name'..."
-  local term_result
-  if ! term_result=$(crow new-terminal --session "$SESSION_ID" \
-    --cwd "$WORKTREE_PATH" \
-    --name "$terminal_name" \
-    --managed 2>&1); then
-    die "new_terminal" "crow new-terminal failed: $term_result"
-  fi
-
-  TERMINAL_ID=$(json_val "terminal_id" <<< "$term_result")
-  if [[ -z "$TERMINAL_ID" ]]; then
-    die "new_terminal" "Could not parse terminal_id from: $term_result"
-  fi
-  log "Terminal created: $TERMINAL_ID"
-
-  # Select session
-  crow select-session --session "$SESSION_ID" >/dev/null 2>&1 \
-    || log "Warning: select-session failed"
-
-  # Wait for the shell to initialize in the new terminal.
-  log "Waiting for shell to initialize..."
-  sleep 3
-
-  log "Launching $terminal_name..."
-  if ! crow send --session "$SESSION_ID" --terminal "$TERMINAL_ID" "$send_text" >/dev/null 2>&1; then
-    die "send_launch" "crow send failed"
-  fi
-  log "$terminal_name launched"
-}
-
 launch_claude_code() {
   local prompt_path="$1"
-  local override_bin="$2"
+  local override_bin="$2"   # from --agent-binary or legacy --claude-binary
   local bin
   if [[ -n "$override_bin" ]]; then
     bin="$override_bin"
@@ -536,8 +652,27 @@ launch_claude_code() {
       die "launch_agent" "claude binary not found at PATH or known locations; provide --agent-binary"
   fi
   log "Resolved claude-code binary: $bin"
-  local send_text="cd $WORKTREE_PATH && $bin --permission-mode plan \"\$(cat $prompt_path)\"\\n"
-  create_agent_terminal "Claude Code" "$send_text"
+
+  # Build the agent launch command and hand it to crow at terminal-creation
+  # time via --command. Crow holds the command and pastes it only once the
+  # shell's line editor is live (the .shellReady sentinel), which is the
+  # race-free replacement for the old `sleep 3` + `crow send` handshake that
+  # intermittently dropped the launch into a not-yet-ready shell, leaving a
+  # bare zsh with no agent (#408).
+  #
+  # The prompt stays in its file — `"$(cat $prompt_path)"` is expanded by the
+  # TARGET shell at paste time, so the command sent over the socket is small
+  # (no ARG_MAX / payload concern).
+  local rc_args=""
+  if is_remote_control_enabled; then
+    # Keep building --rc here: crow's resolveClaudeInCommand only injects
+    # remote-control flags for a bare `claude …` command, NOT a
+    # `cd … && claude …` form, so setup.sh remains the source of truth.
+    rc_args=" --rc --name $(posix_quote "$SESSION_NAME")"
+    log "Remote control enabled — launching with --rc --name '$SESSION_NAME'"
+  fi
+  local launch_cmd="cd $WORKTREE_PATH && $bin --permission-mode plan$rc_args \"\$(cat $prompt_path)\""
+  create_agent_terminal "Claude Code" "$launch_cmd"
 }
 
 launch_cursor() {
@@ -547,7 +682,8 @@ launch_cursor() {
   if [[ -n "$override_bin" ]]; then
     bin="$override_bin"
   else
-    # Cursor's CLI binary is named `agent`, not `cursor`.
+    # Cursor's CLI binary is named `agent`, not `cursor`. Candidate paths
+    # mirror CursorAgent.cursorBinaryCandidates in CrowCursor.
     bin=$(resolve_binary "agent" \
       "/opt/homebrew/bin/agent" \
       "/usr/local/bin/agent" \
@@ -555,8 +691,13 @@ launch_cursor() {
       die "launch_agent" "cursor binary not found at PATH or known locations; provide --agent-binary"
   fi
   log "Resolved cursor binary: $bin"
-  local send_text="cd $WORKTREE_PATH && $bin \"\$(cat $prompt_path)\"\\n"
-  create_agent_terminal "Cursor" "$send_text"
+  # Cursor: no --permission-mode, no --rc; pass the prompt as argv.
+  # This intentionally uses CursorAgent's .job/.review first-launch argv
+  # form (NOT the .work bare-`agent` form) so the unattended skill flow
+  # feeds the prompt at launch — same divergence-from-Swift-.work
+  # rationale that launch_claude_code uses for its prompt-argv form.
+  local launch_cmd="cd $WORKTREE_PATH && $bin \"\$(cat $prompt_path)\""
+  create_agent_terminal "Cursor" "$launch_cmd"
 }
 
 launch_codex() {
@@ -573,9 +714,72 @@ launch_codex() {
       die "launch_agent" "codex binary not found at PATH or known locations; provide --agent-binary"
   fi
   log "Resolved codex binary: $bin"
+  # Codex has no prompt-argv form (matches OpenAICodexAgent.autoLaunchCommand
+  # — bare `codex` only). The prompt file is still written; the user can
+  # paste from it into the TUI.
   log "Note: Codex has no prompt-argv form; prompt file is at $prompt_path (paste manually if needed)."
-  local send_text="cd $WORKTREE_PATH && $bin\\n"
-  create_agent_terminal "OpenAI Codex" "$send_text"
+  local launch_cmd="cd $WORKTREE_PATH && $bin"
+  create_agent_terminal "OpenAI Codex" "$launch_cmd"
+}
+
+# Shared terminal creation + readiness polling, used by every launch_<kind>.
+# Sets TERMINAL_ID on success. Polls `crow list-terminals` for up to 15s.
+create_agent_terminal() {
+  local terminal_name="$1"
+  local launch_cmd="$2"
+
+  log "Creating terminal '$terminal_name' (deferred agent launch via --command)..."
+  local term_result
+  if ! term_result=$(crow new-terminal --session "$SESSION_ID" \
+    --cwd "$WORKTREE_PATH" \
+    --name "$terminal_name" \
+    --managed \
+    --command "$launch_cmd" 2>&1); then
+    die "new_terminal" "crow new-terminal failed: $term_result"
+  fi
+
+  # The RPC reports launch_failed when the tmux window could not be created
+  # (e.g. new-window timed out under load) — don't pretend it launched.
+  if grep -qE '"launch_failed"[[:space:]]*:[[:space:]]*true' <<< "$term_result"; then
+    die "new_terminal" "crow could not create the terminal window: $term_result"
+  fi
+
+  TERMINAL_ID=$(json_val "terminal_id" <<< "$term_result")
+  if [[ -z "$TERMINAL_ID" ]]; then
+    die "new_terminal" "Could not parse terminal_id from: $term_result"
+  fi
+  log "Terminal created: $TERMINAL_ID"
+
+  # Select session
+  crow select-session --session "$SESSION_ID" >/dev/null 2>&1 \
+    || log "Warning: select-session failed"
+
+  # Verify the agent actually started rather than assuming success. Poll the
+  # terminal's readiness (exposed on `crow list-terminals`) until it reaches
+  # agentLaunched/shellReady. This is a warning, NOT a hard failure: the
+  # workspace (worktree/session/metadata) is already set up, and crow's UI
+  # shows a Retry affordance if the agent didn't start (#408).
+  log "Waiting for the agent to launch..."
+  local readiness="" attempt
+  for attempt in $(seq 1 15); do
+    local lt_result
+    lt_result=$(crow list-terminals --session "$SESSION_ID" 2>/dev/null) || true
+    readiness=$(terminal_readiness "$TERMINAL_ID" "$lt_result")
+    case "$readiness" in
+      agentLaunched|shellReady)
+        log "$terminal_name launched (readiness=$readiness)"
+        return
+        ;;
+      failed|timedOut)
+        log "WARNING: agent did not start (readiness=$readiness). The terminal" \
+            "is up but the agent isn't running — use Retry in the Crow UI."
+        return
+        ;;
+    esac
+    sleep 1
+  done
+  log "WARNING: agent launch not confirmed after 15s (last readiness='${readiness:-unknown}')." \
+      "The workspace is set up; check the Crow terminal and use Retry if needed."
 }
 
 launch_agent() {
@@ -584,7 +788,8 @@ launch_agent() {
     return
   fi
 
-  # Resolve agent kind: --agent-kind > config > claude-code fallback.
+  # Resolve agent kind: explicit flag > config.json (agentsByKind["work"]
+  # then defaultAgentKind) > claude-code fallback.
   local kind="$AGENT_KIND"
   if [[ -z "$kind" ]]; then
     kind=$(read_agent_kind_from_config "work")
@@ -593,6 +798,8 @@ launch_agent() {
     log "Using agent kind from --agent-kind flag: $kind"
   fi
 
+  # Pick the binary override. --agent-binary applies to any kind. The legacy
+  # --claude-binary alias only applies when the resolved kind is claude-code.
   local override_bin="$AGENT_BINARY"
   if [[ -z "$override_bin" && "$kind" == "claude-code" && -n "$CLAUDE_BINARY" ]]; then
     override_bin="$CLAUDE_BINARY"
@@ -631,6 +838,7 @@ main() {
 
   setup_worktree
   create_session
+  write_settings_local
   github_ops
   write_prompt
   launch_agent
