@@ -41,12 +41,19 @@ struct BundledResourcesTests {
         #expect(body.contains("status off"))
     }
 
-    @Test func tmuxConfDisablesMouse() throws {
-        // tmux mouse on enables terminal mouse reporting, which makes
-        // libghostty clear selection on mouse-up (#445).
+    @Test func tmuxConfEnablesMouseWithCopyPipeNoClear() throws {
+        // Mouse must be on so the wheel drives tmux pane scrollback (#452 —
+        // turning mouse off to fix the #445 selection-clear killed wheel
+        // scrollback under tmux). Selection-clear is instead handled by
+        // overriding MouseDragEnd1Pane in both copy-mode tables to use
+        // `copy-pipe-no-clear`, which copies to the macOS pasteboard
+        // without exiting copy mode (the default `copy-pipe-and-cancel`
+        // is what wiped the highlight).
         let url = try #require(BundledResources.tmuxConfURL)
         let body = try String(contentsOf: url, encoding: .utf8)
-        #expect(body.contains("set -gs mouse off"))
-        #expect(!body.contains("set -gs mouse on"))
+        #expect(body.contains("set -gs mouse on"))
+        #expect(!body.contains("set -gs mouse off"))
+        #expect(body.contains(#"bind -T copy-mode    MouseDragEnd1Pane send-keys -X copy-pipe-no-clear "pbcopy""#))
+        #expect(body.contains(#"bind -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-pipe-no-clear "pbcopy""#))
     }
 }
