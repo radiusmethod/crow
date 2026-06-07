@@ -45,11 +45,15 @@ public struct GitLabTaskBackend: TaskBackend {
         )
     }
 
-    public func listAssigned() async throws -> AssignedListing {
-        // GitLab has no consolidated batched endpoint. Two REST calls: open + closed.
-        // Use `glab api` rather than `glab issue list` — the latter shells out to
-        // `git` even when no repo is involved and aborts with "fatal: not a git
-        // repository" when cwd isn't a git working tree.
+    public func listAssigned(includeClosed: Bool) async throws -> AssignedListing {
+        // GitLab has no consolidated batched endpoint. One REST call for open;
+        // a second only when `includeClosed` is true (the GitHub-driven
+        // closed-issue diff in IssueTracker doesn't consume the GitLab half,
+        // so the default GitLab caller passes false to skip the wasted
+        // round-trip every poll).
+        // Use `glab api` rather than `glab issue list` — the latter shells out
+        // to `git` even when no repo is involved and aborts with "fatal: not
+        // a git repository" when cwd isn't a git working tree.
         let openOut: String
         do {
             openOut = try await shellRunner.run(
@@ -62,6 +66,10 @@ public struct GitLabTaskBackend: TaskBackend {
             return AssignedListing(open: [], closed: [])
         }
         let open = Self.parseIssues(openOut, host: host ?? "", projectStatusOverride: nil)
+
+        guard includeClosed else {
+            return AssignedListing(open: open, closed: [])
+        }
 
         let updatedAfter = Self.updatedAfterString()
         let closedOut: String

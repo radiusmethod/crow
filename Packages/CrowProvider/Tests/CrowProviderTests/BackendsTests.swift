@@ -390,6 +390,20 @@ final class BackendsTests: XCTestCase {
         XCTAssertEqual(fake.calls.count, 2)
     }
 
+    func testGitLabTaskBackendListAssignedSkipsClosedCallWhenNotRequested() async throws {
+        // Regression guard: passing includeClosed: false must skip the second
+        // REST round-trip. The IssueTracker GitLab path uses this to avoid a
+        // wasted call every 60s — the closed-diff logic is GitHub-only.
+        let fake = FakeShellRunner()
+        let openJSON = #"[{"iid":7,"title":"Open","web_url":"https://gl/g/p/-/issues/7","state":"opened","labels":[],"references":{"full":"g/p#7"}}]"#
+        fake.responses = [.success(openJSON)]
+        let backend = GitLabTaskBackend(shellRunner: fake, host: "gitlab.example.com")
+        let listing = try await backend.listAssigned(includeClosed: false)
+        XCTAssertEqual(listing.open.count, 1)
+        XCTAssertEqual(listing.closed.count, 0)
+        XCTAssertEqual(fake.calls.count, 1)
+    }
+
     func testGitLabTaskBackendAssignInvokesGlabIssueUpdate() async throws {
         let fake = FakeShellRunner()
         let backend = GitLabTaskBackend(shellRunner: fake, host: "gitlab.example.com")

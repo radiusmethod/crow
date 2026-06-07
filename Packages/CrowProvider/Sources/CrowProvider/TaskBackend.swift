@@ -27,7 +27,11 @@ public protocol TaskBackend: Sendable {
     /// Returning both halves in one call lets callers diff the new closed set
     /// against the prior open set to flush issues that fell off the user's
     /// queue.
-    func listAssigned() async throws -> AssignedListing
+    /// - Parameter includeClosed: When false, the backend skips the closed
+    ///   half. GitHub still issues one batched GraphQL call either way; GitLab
+    ///   avoids a second REST round-trip. The returned `AssignedListing.closed`
+    ///   is empty when false.
+    func listAssigned(includeClosed: Bool) async throws -> AssignedListing
 
     /// Add and/or remove labels on a task by URL.
     /// - Parameters:
@@ -51,6 +55,14 @@ public protocol TaskBackend: Sendable {
     /// ticket's identity (number, URL, etc.) so callers can link the new
     /// session to the new ticket immediately.
     func createTask(repo: String, title: String, body: String, labels: [String]) async throws -> TicketInfo
+}
+
+extension TaskBackend {
+    /// Convenience: fetch both open and recently-closed assigned issues.
+    /// Equivalent to `listAssigned(includeClosed: true)`.
+    public func listAssigned() async throws -> AssignedListing {
+        try await listAssigned(includeClosed: true)
+    }
 }
 
 /// Optional capabilities a `TaskBackend` may declare.

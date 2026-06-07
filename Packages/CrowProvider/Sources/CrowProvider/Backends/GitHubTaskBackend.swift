@@ -44,32 +44,41 @@ public struct GitHubTaskBackend: TaskBackend {
         )
     }
 
-    public func listAssigned() async throws -> AssignedListing {
+    public func listAssigned(includeClosed: Bool) async throws -> AssignedListing {
         let openQuery = "assignee:@me state:open type:issue"
         let closedQuery = "assignee:@me state:closed closed:>=\(Self.closedSinceString()) type:issue"
 
-        // First attempt: full query including projectItems for status. On
-        // INSUFFICIENT_SCOPES, retry without projectItems so the assigned-issue
-        // panel still renders (the status badge degrades to .unknown) and
-        // surface a `missingScope` marker on the result so callers can keep
-        // their scope-warning UI lit instead of clearing it on the next
-        // poll. On RATE_LIMITED, surface as ProviderError.rateLimited so
-        // callers can skip the cycle.
+        // GitHub batches open + closed into one GraphQL call regardless of
+        // `includeClosed` — there's no per-half network cost to save. When
+        // `includeClosed` is false we drop the closedIssues from the parsed
+        // result. The retry-without-projectItems path mirrors the same
+        // shape so the missing-scope semantics stay consistent.
         do {
             let output = try await runIssuesQuery(
                 query: Self.consolidatedIssuesQuery,
                 openQuery: openQuery,
                 closedQuery: closedQuery
             )
-            return try Self.parseIssuesResponse(output, missingScope: nil)
+            let listing = try Self.parseIssuesResponse(output, missingScope: nil)
+            return includeClosed ? listing : Self.stripClosed(listing)
         } catch ProviderError.insufficientScope(let scope) {
             let output = try await runIssuesQuery(
                 query: Self.consolidatedIssuesQueryNoProjects,
                 openQuery: openQuery,
                 closedQuery: closedQuery
             )
-            return try Self.parseIssuesResponse(output, missingScope: scope)
+            let listing = try Self.parseIssuesResponse(output, missingScope: scope)
+            return includeClosed ? listing : Self.stripClosed(listing)
         }
+    }
+
+    private static func stripClosed(_ listing: AssignedListing) -> AssignedListing {
+        AssignedListing(
+            open: listing.open,
+            closed: [],
+            rateLimit: listing.rateLimit,
+            missingScope: listing.missingScope
+        )
     }
 
     public func setLabels(url: String, add: [String], remove: [String]) async throws {

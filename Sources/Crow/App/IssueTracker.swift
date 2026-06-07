@@ -169,10 +169,6 @@ final class IssueTracker {
     /// Below this many remaining GraphQL points we proactively skip a cycle.
     private let rateLimitThreshold = 50
 
-    /// gh invocations made during the current `refresh()`. Incremented by the
-    /// shell helpers, reset at the start of each refresh.
-    private var currentRefreshGhCalls = 0
-
     init(appState: AppState, providerManager: ProviderManager) {
         self.appState = appState
         self.providerManager = providerManager
@@ -307,7 +303,6 @@ final class IssueTracker {
         appState.isLoadingIssues = true
         defer { appState.isLoadingIssues = false }
 
-        currentRefreshGhCalls = 0
         let startedAt = Date()
 
         guard let devRoot = ConfigStore.loadDevRoot(),
@@ -523,9 +518,9 @@ final class IssueTracker {
         let elapsedStr = String(format: "%.2fs", elapsed)
         if let rl = appState.githubRateLimit {
             let mins = Int(max(0, rl.resetAt.timeIntervalSinceNow / 60))
-            print("[IssueTracker] refresh: \(currentRefreshGhCalls) gh calls in \(elapsedStr), GraphQL \(rl.remaining)/\(rl.limit) remaining, resets in \(mins)m")
+            print("[IssueTracker] refresh: \(elapsedStr), GraphQL \(rl.remaining)/\(rl.limit) remaining, resets in \(mins)m")
         } else {
-            print("[IssueTracker] refresh: \(currentRefreshGhCalls) gh calls in \(elapsedStr)")
+            print("[IssueTracker] refresh: \(elapsedStr)")
         }
     }
 
@@ -1971,9 +1966,10 @@ final class IssueTracker {
     private func fetchGitLabIssues(host: String) async -> [AssignedIssue] {
         let backend = providerManager.taskBackend(for: .gitlab, host: host)
         do {
-            let listing = try await backend.listAssigned()
-            // Only open issues, to match the prior single-call semantics
-            // (refresh() consumes closed-issues via the GitHub path today).
+            // Pass includeClosed: false so we don't fire a wasted closed-issues
+            // REST call every 60s — only the open list is consumed by refresh()
+            // for the GitLab path (the closed-diff logic is GitHub-only today).
+            let listing = try await backend.listAssigned(includeClosed: false)
             return listing.open
         } catch {
             print("[IssueTracker] fetchGitLabIssues(host: \(host)) failed: \(error)")
@@ -2028,93 +2024,5 @@ final class IssueTracker {
 
         // Update local session status to .inReview
         appState.onSetSessionInReview?(sessionID)
-    }
-
-    // MARK: - Shell
-
-    private func shell(env: [String: String] = [:], cwd: String? = nil, _ args: String...) async throws -> String {
-        return try await shell(env: env, cwd: cwd, args: args)
-    }
-
-    private func shell(env: [String: String] = [:], cwd: String? = nil, args: [String]) async throws -> String {
-        currentRefreshGhCalls += 1
-        let args = args
-        let env = env
-        let cwd = cwd
-        return try await Task.detached {
-            let process = Process()
-            let outPipe = Pipe()
-            let errPipe = Pipe()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = args
-            process.environment = env.isEmpty
-                ? ShellEnvironment.shared.env
-                : ShellEnvironment.shared.merging(env)
-            if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
-            process.standardOutput = outPipe
-            process.standardError = errPipe
-            try process.run()
-            // Read pipes BEFORE waitUntilExit to avoid deadlock when
-            // output exceeds the 64 KB pipe buffer (consolidated GraphQL
-            // responses routinely reach ~86 KB).
-            let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else {
-                let stderr = (String(data: errData, encoding: .utf8) ?? "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                let cmd = args.joined(separator: " ")
-                let desc = "`\(cmd)` exited \(process.terminationStatus)"
-                    + (stderr.isEmpty ? "" : ": \(stderr)")
-                throw NSError(
-                    domain: "IssueTracker",
-                    code: Int(process.terminationStatus),
-                    userInfo: [NSLocalizedDescriptionKey: desc]
-                )
-            }
-            return String(data: outData, encoding: .utf8) ?? ""
-        }.value
-    }
-
-    private struct ShellResult: Sendable {
-        let stdout: String
-        let stderr: String
-        let exitCode: Int32
-    }
-
-    private func shellWithStatus(_ args: String...) async -> ShellResult {
-        return await shellWithStatus(args: args)
-    }
-
-    private func shellWithStatus(args: [String]) async -> ShellResult {
-        return await shellWithStatus(env: [:], args: args)
-    }
-
-    private func shellWithStatus(env: [String: String], args: [String]) async -> ShellResult {
-        currentRefreshGhCalls += 1
-        let args = args
-        let env = env
-        return await Task.detached {
-            let process = Process()
-            let outPipe = Pipe()
-            let errPipe = Pipe()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = args
-            process.environment = env.isEmpty
-                ? ShellEnvironment.shared.env
-                : ShellEnvironment.shared.merging(env)
-            process.standardOutput = outPipe
-            process.standardError = errPipe
-            do { try process.run() } catch { return ShellResult(stdout: "", stderr: error.localizedDescription, exitCode: -1) }
-            // Read pipes BEFORE waitUntilExit to avoid pipe-buffer deadlock.
-            let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            return ShellResult(
-                stdout: String(data: outData, encoding: .utf8) ?? "",
-                stderr: String(data: errData, encoding: .utf8) ?? "",
-                exitCode: process.terminationStatus
-            )
-        }.value
     }
 }

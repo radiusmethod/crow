@@ -19,7 +19,7 @@ public struct StubCorveilTaskBackend: TaskBackend {
         throw ProviderError.unimplemented("StubCorveilTaskBackend.fetchTask")
     }
 
-    public func listAssigned() async throws -> AssignedListing {
+    public func listAssigned(includeClosed: Bool) async throws -> AssignedListing {
         throw ProviderError.unimplemented("StubCorveilTaskBackend.listAssigned")
     }
 
