@@ -50,23 +50,25 @@ public struct GitHubTaskBackend: TaskBackend {
 
         // First attempt: full query including projectItems for status. On
         // INSUFFICIENT_SCOPES, retry without projectItems so the assigned-issue
-        // panel still renders (the status badge degrades to .unknown). On
-        // RATE_LIMITED, surface as ProviderError.rateLimited so callers can
-        // skip the cycle.
+        // panel still renders (the status badge degrades to .unknown) and
+        // surface a `missingScope` marker on the result so callers can keep
+        // their scope-warning UI lit instead of clearing it on the next
+        // poll. On RATE_LIMITED, surface as ProviderError.rateLimited so
+        // callers can skip the cycle.
         do {
             let output = try await runIssuesQuery(
                 query: Self.consolidatedIssuesQuery,
                 openQuery: openQuery,
                 closedQuery: closedQuery
             )
-            return try Self.parseIssuesResponse(output)
-        } catch ProviderError.insufficientScope {
+            return try Self.parseIssuesResponse(output, missingScope: nil)
+        } catch ProviderError.insufficientScope(let scope) {
             let output = try await runIssuesQuery(
                 query: Self.consolidatedIssuesQueryNoProjects,
                 openQuery: openQuery,
                 closedQuery: closedQuery
             )
-            return try Self.parseIssuesResponse(output)
+            return try Self.parseIssuesResponse(output, missingScope: scope)
         }
     }
 
@@ -341,7 +343,7 @@ public struct GitHubTaskBackend: TaskBackend {
     }
     """
 
-    static func parseIssuesResponse(_ output: String) throws -> AssignedListing {
+    static func parseIssuesResponse(_ output: String, missingScope: String?) throws -> AssignedListing {
         guard let data = output.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let dataObj = json["data"] as? [String: Any] else {
@@ -361,7 +363,7 @@ public struct GitHubTaskBackend: TaskBackend {
             projectStatusOverride: .done
         )
         let rate = parseRateLimit(dataObj["rateLimit"] as? [String: Any])
-        return AssignedListing(open: open, closed: closed, rateLimit: rate)
+        return AssignedListing(open: open, closed: closed, rateLimit: rate, missingScope: missingScope)
     }
 
     static func parseIssueNodes(

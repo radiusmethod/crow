@@ -128,6 +128,8 @@ final class BackendsTests: XCTestCase {
         XCTAssertEqual(listing.open.count, 0)
         // The retry call used the no-projects query — query body differs.
         XCTAssertEqual(fake.calls.count, 2)
+        // Missing-scope is surfaced so callers can keep their warning UI lit.
+        XCTAssertEqual(listing.missingScope, "read:project")
     }
 
     func testGitHubTaskBackendSetTaskStatusRunsMutation() async throws {
@@ -240,9 +242,10 @@ final class BackendsTests: XCTestCase {
         """
         fake.responses = [.success(json)]
         let backend = GitHubCodeBackend(shellRunner: fake)
-        let states = try await backend.prStates(refs: [PRRef(owner: "a", repo: "b", number: 1)])
+        let ref = PRRef(owner: "a", repo: "b", number: 1)
+        let states = try await backend.prStates(refs: [ref])
         XCTAssertEqual(states.count, 1)
-        XCTAssertEqual(states["https://github.com/a/b/pull/1"]?.state, "MERGED")
+        XCTAssertEqual(states[ref]?.state, "MERGED")
         // One batched call, not per-ref.
         XCTAssertEqual(fake.calls.count, 1)
         let args = fake.calls[0].args
@@ -275,9 +278,12 @@ final class BackendsTests: XCTestCase {
         let backend = GitHubCodeBackend(shellRunner: fake)
         try await backend.enableAutoMerge(prURL: "https://github.com/a/b/pull/1")
         XCTAssertEqual(fake.calls.count, 1)
-        // Uses sh -c with the cd $TMPDIR && gh pr merge ... incantation.
-        XCTAssertEqual(fake.calls[0].args[0], "sh")
-        XCTAssertTrue(fake.calls[0].args.contains { $0.contains("gh pr merge") && $0.contains("--auto") })
+        // Direct argv (not sh -c) into NSTemporaryDirectory — no shell
+        // interpolation surface around prURL.
+        XCTAssertEqual(fake.calls[0].args.prefix(3), ArraySlice(["gh", "pr", "merge"]))
+        XCTAssertTrue(fake.calls[0].args.contains("--auto"))
+        XCTAssertTrue(fake.calls[0].args.contains("https://github.com/a/b/pull/1"))
+        XCTAssertEqual(fake.calls[0].cwd, NSTemporaryDirectory())
     }
 
     func testGitHubCodeBackendUpdateBranchRunsGhPrUpdateBranch() async throws {
@@ -285,8 +291,8 @@ final class BackendsTests: XCTestCase {
         let backend = GitHubCodeBackend(shellRunner: fake)
         try await backend.updateBranch(prURL: "https://github.com/a/b/pull/1")
         XCTAssertEqual(fake.calls.count, 1)
-        XCTAssertEqual(fake.calls[0].args[0], "sh")
-        XCTAssertTrue(fake.calls[0].args.contains { $0.contains("gh pr update-branch") })
+        XCTAssertEqual(fake.calls[0].args, ["gh", "pr", "update-branch", "https://github.com/a/b/pull/1"])
+        XCTAssertEqual(fake.calls[0].cwd, NSTemporaryDirectory())
     }
 
     func testGitHubCodeBackendFetchPRMetadataParses() async throws {
@@ -424,9 +430,10 @@ final class BackendsTests: XCTestCase {
         let json = #"{"iid":3,"web_url":"https://gitlab.example.com/g/p/-/merge_requests/3","state":"merged","source_branch":"f","target_branch":"main","sha":"abc"}"#
         fake.responses = [.success(json)]
         let backend = GitLabCodeBackend(shellRunner: fake, host: "gitlab.example.com")
-        let states = try await backend.prStates(refs: [PRRef(owner: "g", repo: "p", number: 3)])
+        let ref = PRRef(owner: "g", repo: "p", number: 3)
+        let states = try await backend.prStates(refs: [ref])
         XCTAssertEqual(states.count, 1)
-        XCTAssertEqual(states["https://gitlab.example.com/g/p/-/merge_requests/3"]?.state, "MERGED")
+        XCTAssertEqual(states[ref]?.state, "MERGED")
         XCTAssertEqual(fake.calls.count, 1)
     }
 

@@ -605,38 +605,36 @@ final class IssueTracker {
         let taskBackend = providerManager.taskBackend(for: .github)
         let codeBackend = providerManager.codeBackend(for: .github)!
 
-        async let assignedTask = Task { () -> Result<AssignedListing, Error> in
-            do { return .success(try await taskBackend.listAssigned()) }
-            catch { return .failure(error) }
-        }.value
-        async let monitoredTask = Task { () -> Result<MonitoredPRListing, Error> in
-            do { return .success(try await codeBackend.listMonitoredPRs()) }
-            catch { return .failure(error) }
-        }.value
+        async let assignedAsync = taskBackend.listAssigned()
+        async let monitoredAsync = codeBackend.listMonitoredPRs()
 
-        let assignedResult = await assignedTask
-        let monitoredResult = await monitoredTask
-
-        switch assignedResult {
-        case .failure(let err):
-            handleGitHubBackendError(err, operation: "listAssigned")
+        let assigned: AssignedListing
+        let monitored: MonitoredPRListing
+        do {
+            assigned = try await assignedAsync
+        } catch {
+            handleGitHubBackendError(error, operation: "listAssigned")
+            // Drain the second task so we don't leak an unawaited future.
+            _ = try? await monitoredAsync
             return nil
-        case .success:
-            break
         }
-        switch monitoredResult {
-        case .failure(let err):
-            handleGitHubBackendError(err, operation: "listMonitoredPRs")
-            return nil
-        case .success:
-            break
-        }
-        guard case .success(let assigned) = assignedResult,
-              case .success(let monitored) = monitoredResult else {
+        do {
+            monitored = try await monitoredAsync
+        } catch {
+            handleGitHubBackendError(error, operation: "listMonitoredPRs")
             return nil
         }
 
-        clearScopeWarning()
+        if let scope = assigned.missingScope {
+            // listAssigned silently degrades on INSUFFICIENT_SCOPES (drops
+            // projectItems) and reports the scope here so the warning UI
+            // stays lit instead of getting cleared on the next poll. This
+            // preserves the prior `reportScopeWarning("read:project")`
+            // behavior the consolidated query had inline.
+            reportScopeWarning(scope)
+        } else {
+            clearScopeWarning()
+        }
         return ConsolidatedGitHubResponse(
             openIssues: assigned.open,
             closedIssues: assigned.closed,
@@ -739,8 +737,15 @@ final class IssueTracker {
             let backend = providerManager.codeBackend(for: .github)!
             do {
                 let states = try await backend.prStates(refs: githubRefs)
+                // Keying by PRRef means we don't lose records when the API
+                // returns a canonical URL different from the stored one.
+                // Fall back to the stored URL when the API didn't provide
+                // one (defensive — usually populated).
                 for ref in githubRefs {
-                    guard let url = githubURLByRef[ref], let rec = states[url] else { continue }
+                    guard var rec = states[ref] else { continue }
+                    if rec.url.isEmpty, let stored = githubURLByRef[ref] {
+                        rec = Self.withURL(rec, url: stored)
+                    }
                     prs.append(rec)
                 }
             } catch {
@@ -754,7 +759,10 @@ final class IssueTracker {
             do {
                 let states = try await backend.prStates(refs: refs)
                 for ref in refs {
-                    guard let url = gitlabURLByRef[ref], let rec = states[url] else { continue }
+                    guard var rec = states[ref] else { continue }
+                    if rec.url.isEmpty, let stored = gitlabURLByRef[ref] {
+                        rec = Self.withURL(rec, url: stored)
+                    }
                     prs.append(rec)
                 }
             } catch {
@@ -764,6 +772,32 @@ final class IssueTracker {
         }
 
         return StalePRFetchResult(prs: prs, complete: complete)
+    }
+
+    /// Copy `pr` with a different `url`. Used by the stale-PR follow-up to
+    /// substitute the session-link URL when the backend returned an empty
+    /// `web_url` (defensive — GitLab's REST shape always populates it, but
+    /// we'd rather preserve the link than lose the record).
+    nonisolated static func withURL(_ pr: ViewerPR, url: String) -> ViewerPR {
+        PRRecord(
+            number: pr.number,
+            url: url,
+            state: pr.state,
+            mergeable: pr.mergeable,
+            mergeStateStatus: pr.mergeStateStatus,
+            reviewDecision: pr.reviewDecision,
+            isDraft: pr.isDraft,
+            headRefName: pr.headRefName,
+            headRefOid: pr.headRefOid,
+            baseRefName: pr.baseRefName,
+            repoNameWithOwner: pr.repoNameWithOwner,
+            labels: pr.labels,
+            linkedIssueReferences: pr.linkedIssueReferences,
+            checksState: pr.checksState,
+            failedCheckNames: pr.failedCheckNames,
+            latestReviewStates: pr.latestReviewStates,
+            updatedAt: pr.updatedAt
+        )
     }
 
     /// Parse a GitLab MR URL into (host, slug, number). Robust to nested
@@ -785,6 +819,26 @@ final class IssueTracker {
         let trailParts = trailing.split(separator: "/").map(String.init)
         guard let first = trailParts.first, let number = Int(first) else { return nil }
         return (host, slug, number)
+    }
+
+    /// Thin alias so test code keeps working through the migration. The real
+    /// normalization lives on `GitLabCodeBackend` (CrowProvider).
+    nonisolated static func normalizeGitLabPRState(_ raw: String) -> String {
+        GitLabCodeBackend.normalizeState(raw)
+    }
+
+    /// Thin alias so test code keeps working through the migration. The real
+    /// parsing lives on `GitLabCodeBackend` (CrowProvider).
+    nonisolated static func parseGitLabStaleMRResponse(
+        _ output: String,
+        fallbackURL: String,
+        fallbackSlug: String
+    ) -> ViewerPR? {
+        GitLabCodeBackend.parseStaleMRResponse(
+            output,
+            fallbackURL: fallbackURL,
+            fallbackSlug: fallbackSlug
+        )
     }
 
     // Consolidated GraphQL parsing now lives in CrowProvider's GitHubTaskBackend

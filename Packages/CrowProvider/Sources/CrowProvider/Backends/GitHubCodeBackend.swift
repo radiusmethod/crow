@@ -80,7 +80,7 @@ public struct GitHubCodeBackend: CodeBackend {
 
     // MARK: - prStates
 
-    public func prStates(refs: [PRRef]) async throws -> [String: PRRecord] {
+    public func prStates(refs: [PRRef]) async throws -> [PRRef: PRRecord] {
         guard !refs.isEmpty else { return [:] }
         var queryParts: [String] = []
         var args: [String] = ["gh", "api", "graphql"]
@@ -105,7 +105,6 @@ public struct GitHubCodeBackend: CodeBackend {
         let query = """
         query(\(varDecls.joined(separator: ", "))) {
         \(queryParts.joined(separator: "\n"))
-          rateLimit { remaining limit resetAt cost }
         }
         """
         args.insert(contentsOf: ["-f", "query=\(query)"], at: 3)
@@ -116,7 +115,7 @@ public struct GitHubCodeBackend: CodeBackend {
         } catch ShellRunnerError.nonZeroExit(_, let stderr) {
             throw GitHubTaskBackend.classifyGraphQLError(stderr)
         }
-        return Self.parseStalePRResponse(output, count: refs.count)
+        return Self.parseStalePRResponse(output, refs: refs)
     }
 
     // MARK: - fetchCrowAuthoredCommits
@@ -168,7 +167,6 @@ public struct GitHubCodeBackend: CodeBackend {
         let query = """
         query(\(varDecls.joined(separator: ", "))) {
         \(queryParts.joined(separator: "\n"))
-          rateLimit { remaining limit resetAt cost }
         }
         """
         args.insert(contentsOf: ["-f", "query=\(query)"], at: 3)
@@ -186,14 +184,21 @@ public struct GitHubCodeBackend: CodeBackend {
 
     public func enableAutoMerge(prURL: String) async throws {
         // Run inside $TMPDIR so gh doesn't pick up the cwd's git config when
-        // detecting the repo. Sub-shells let us hand gh the URL directly.
-        let cmd = #"cd "$TMPDIR" && gh pr merge \#(prURL) --auto --squash --delete-branch"#
-        _ = try await shellRunner.run(args: ["sh", "-c", cmd], env: [:], cwd: nil)
+        // detecting the repo. Direct argv (not `sh -c`) eliminates any shell
+        // interpolation surface around `prURL`.
+        _ = try await shellRunner.run(
+            args: ["gh", "pr", "merge", prURL, "--auto", "--squash", "--delete-branch"],
+            env: [:],
+            cwd: NSTemporaryDirectory()
+        )
     }
 
     public func updateBranch(prURL: String) async throws {
-        let cmd = #"cd "$TMPDIR" && gh pr update-branch \#(prURL)"#
-        _ = try await shellRunner.run(args: ["sh", "-c", cmd], env: [:], cwd: nil)
+        _ = try await shellRunner.run(
+            args: ["gh", "pr", "update-branch", prURL],
+            env: [:],
+            cwd: NSTemporaryDirectory()
+        )
     }
 
     // MARK: - fetchPRMetadata
@@ -403,17 +408,16 @@ public struct GitHubCodeBackend: CodeBackend {
         return requests.sorted { ($0.requestedAt ?? .distantPast) > ($1.requestedAt ?? .distantPast) }
     }
 
-    static func parseStalePRResponse(_ output: String, count: Int) -> [String: PRRecord] {
+    static func parseStalePRResponse(_ output: String, refs: [PRRef]) -> [PRRef: PRRecord] {
         guard let data = output.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let dataObj = json["data"] as? [String: Any] else { return [:] }
-        var out: [String: PRRecord] = [:]
-        for i in 0..<count {
+        var out: [PRRef: PRRecord] = [:]
+        for (i, ref) in refs.enumerated() {
             guard let repoObj = dataObj["pr\(i)"] as? [String: Any],
                   let prObj = repoObj["pullRequest"] as? [String: Any],
-                  let url = prObj["url"] as? String,
                   let rec = parsePRNode(prObj) else { continue }
-            out[url] = rec
+            out[ref] = rec
         }
         return out
     }

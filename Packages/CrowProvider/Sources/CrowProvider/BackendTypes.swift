@@ -168,11 +168,23 @@ public struct AssignedListing: Sendable {
     public let closed: [AssignedIssue]
     /// GitHub-only; nil for GitLab.
     public let rateLimit: GitHubRateLimit?
+    /// When non-nil, the backend completed the call but had to degrade the
+    /// response because the OAuth token was missing this scope (e.g.
+    /// `read:project` on GitHub). Callers should surface a UI warning so the
+    /// user knows to refresh their token. The successful path returns the
+    /// best-effort data alongside the scope marker; no error is thrown.
+    public let missingScope: String?
 
-    public init(open: [AssignedIssue], closed: [AssignedIssue], rateLimit: GitHubRateLimit? = nil) {
+    public init(
+        open: [AssignedIssue],
+        closed: [AssignedIssue],
+        rateLimit: GitHubRateLimit? = nil,
+        missingScope: String? = nil
+    ) {
         self.open = open
         self.closed = closed
         self.rateLimit = rateLimit
+        self.missingScope = missingScope
     }
 }
 

@@ -41,15 +41,14 @@ public protocol CodeBackend: Sendable {
     func listMonitoredPRs() async throws -> MonitoredPRListing
 
     /// Batched state fetch for a set of PRs. Backends with `.batchedPRStates`
-    /// issue one call; others fall back to per-PR. Returned keyed by URL so
-    /// callers can merge with other PR-by-URL maps via the standard dedup
-    /// logic.
-    func prStates(refs: [PRRef]) async throws -> [String: PRRecord]
+    /// issue one call; others fall back to per-PR. Returned keyed by `PRRef`
+    /// (not URL) so callers don't have to round-trip through the API's
+    /// canonical URL form to look up their result.
+    func prStates(refs: [PRRef]) async throws -> [PRRef: PRRecord]
 
-    /// Fetch every commit on the PR identified by `prURL` and `repoSlug` whose
-    /// commit message carries a `Crow-Session:` trailer — these are the commits
-    /// Crow authored on the branch. Used to gate auto-merge/auto-rebase to PRs
-    /// Crow actually contributed to.
+    /// Fetch every commit on the PR identified by `prURL` and `repoSlug`.
+    /// Returns the full commit list; the caller filters for the
+    /// `Crow-Session:` trailer to identify Crow-authored commits.
     func fetchCrowAuthoredCommits(prURL: String, repoSlug: String, prNumber: Int) async throws -> [CommitInfo]
 
     /// For each `(repoSlug, branch)` candidate, fetch up to 5 recently-updated

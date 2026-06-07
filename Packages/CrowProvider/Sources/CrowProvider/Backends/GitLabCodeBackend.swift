@@ -68,9 +68,9 @@ public struct GitLabCodeBackend: CodeBackend {
         return MonitoredPRListing(viewerPRs: [], reviewRequests: reviewRequests, viewerLogin: "")
     }
 
-    public func prStates(refs: [PRRef]) async throws -> [String: PRRecord] {
+    public func prStates(refs: [PRRef]) async throws -> [PRRef: PRRecord] {
         // GitLab REST has no batching; one call per MR.
-        var out: [String: PRRecord] = [:]
+        var out: [PRRef: PRRecord] = [:]
         for ref in refs {
             let slug = ref.slug
             let encodedSlug = slug.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? slug
@@ -85,28 +85,45 @@ public struct GitLabCodeBackend: CodeBackend {
             } catch {
                 continue
             }
-            guard let data = output.data(using: .utf8),
-                  let item = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let number = item["iid"] as? Int else { continue }
-            let url = (item["web_url"] as? String) ?? ""
-            let rawState = (item["state"] as? String) ?? ""
-            let state = Self.normalizeState(rawState)
-            let headRefName = (item["source_branch"] as? String) ?? ""
-            let baseRefName = (item["target_branch"] as? String) ?? ""
-            let headRefOid = (item["sha"] as? String) ?? ""
-            let isDraft = (item["draft"] as? Bool) ?? (item["work_in_progress"] as? Bool) ?? false
-            out[url] = PRRecord(
-                number: number,
-                url: url,
-                state: state,
-                isDraft: isDraft,
-                headRefName: headRefName,
-                headRefOid: headRefOid,
-                baseRefName: baseRefName,
-                repoNameWithOwner: slug
-            )
+            guard let rec = Self.parseStaleMRResponse(
+                output,
+                fallbackURL: "",
+                fallbackSlug: slug
+            ) else { continue }
+            out[ref] = rec
         }
         return out
+    }
+
+    /// Parse a single `projects/{slug}/merge_requests/{iid}` REST response
+    /// into a `PRRecord`. State is normalized to GitHub's
+    /// `OPEN|MERGED|CLOSED` vocabulary so downstream code stays
+    /// provider-agnostic. Returns nil if the JSON shape doesn't match.
+    public static func parseStaleMRResponse(
+        _ output: String,
+        fallbackURL: String,
+        fallbackSlug: String
+    ) -> PRRecord? {
+        guard let data = output.data(using: .utf8),
+              let item = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let number = item["iid"] as? Int else { return nil }
+        let url = (item["web_url"] as? String) ?? fallbackURL
+        let rawState = (item["state"] as? String) ?? ""
+        let state = normalizeState(rawState)
+        let headRefName = (item["source_branch"] as? String) ?? ""
+        let baseRefName = (item["target_branch"] as? String) ?? ""
+        let headRefOid = (item["sha"] as? String) ?? ""
+        let isDraft = (item["draft"] as? Bool) ?? (item["work_in_progress"] as? Bool) ?? false
+        return PRRecord(
+            number: number,
+            url: url,
+            state: state,
+            isDraft: isDraft,
+            headRefName: headRefName,
+            headRefOid: headRefOid,
+            baseRefName: baseRefName,
+            repoNameWithOwner: fallbackSlug
+        )
     }
 
     public func fetchCrowAuthoredCommits(prURL: String, repoSlug: String, prNumber: Int) async throws -> [CommitInfo] {
@@ -209,7 +226,7 @@ public struct GitLabCodeBackend: CodeBackend {
         return ["GITLAB_HOST": host]
     }
 
-    static func normalizeState(_ raw: String) -> String {
+    public static func normalizeState(_ raw: String) -> String {
         switch raw {
         case "opened": return "OPEN"
         case "merged": return "MERGED"
