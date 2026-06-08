@@ -1294,7 +1294,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         capturedAppState.sessions[idx].ticketURL = url
                         // Auto-detect provider from URL
                         if capturedAppState.sessions[idx].provider == nil {
-                            capturedAppState.sessions[idx].provider = Validation.detectProviderFromURL(url)
+                            let detected = Validation.detectProviderFromURL(url)
+                            capturedAppState.sessions[idx].provider = detected
+                            // Task-only trackers (Jira/Corveil) have no code
+                            // backend — pair with the workspace's code provider.
+                            if capturedAppState.sessions[idx].codeProvider == nil, detected?.isTaskOnly == true {
+                                let wtPath = capturedAppState.worktrees[id]?
+                                    .first(where: { $0.isPrimary })?.worktreePath
+                                    ?? capturedAppState.worktrees[id]?.first?.worktreePath
+                                capturedAppState.sessions[idx].codeProvider = SessionService.resolvedCodeProvider(forTask: detected, worktreePath: wtPath)
+                            }
                         }
                     }
                     if let title = params["title"]?.stringValue { capturedAppState.sessions[idx].ticketTitle = title }

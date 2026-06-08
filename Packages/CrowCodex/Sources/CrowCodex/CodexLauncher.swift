@@ -15,7 +15,8 @@ public actor CodexLauncher {
         session: Session,
         worktrees: [SessionWorktree],
         ticketURL: String?,
-        provider: Provider?
+        provider: Provider?,
+        codeProvider: Provider? = nil
     ) -> String {
         var lines: [String] = []
         lines.append("Before editing anything, sketch a brief plan covering:")
@@ -47,6 +48,14 @@ public actor CodexLauncher {
                 lines.append("```bash")
                 lines.append("glab issue view \(url) --comments")
                 lines.append("```")
+            case .jira:
+                if let key = Validation.jiraKey(from: url) {
+                    lines.append("```bash")
+                    lines.append("acli jira workitem view \(key) --fields summary,status,description,comment")
+                    lines.append("```")
+                } else {
+                    lines.append("URL: \(url)")
+                }
             case .corveil, nil:
                 lines.append("URL: \(url)")
             }

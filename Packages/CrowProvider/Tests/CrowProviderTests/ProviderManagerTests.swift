@@ -81,6 +81,62 @@ struct ProviderManagerTests {
         #expect(result == nil)
     }
 
+    // MARK: - Jira (ADR 0005 task-only provider)
+
+    @Test func detectProviderJiraBrowseURL() async {
+        let result = await manager.detectProvider(from: "https://acme.atlassian.net/browse/PROJ-123")
+        #expect(result.provider == .jira)
+        #expect(result.cli == "acli")
+        #expect(result.host == nil)
+    }
+
+    @Test func parseJiraBrowseURL() {
+        let result = ProviderManager.parseTicketURLComponents("https://acme.atlassian.net/browse/PROJ-123")
+        #expect(result?.org == "PROJ")
+        #expect(result?.repo == "PROJ")
+        #expect(result?.number == 123)
+        #expect(result?.isMR == false)
+    }
+
+    @Test func detectProviderJiraBareKey() async {
+        // A pasted bare key is auto-detected as Jira.
+        let result = await manager.detectProvider(from: "PROJ-123")
+        #expect(result.provider == .jira)
+        #expect(result.cli == "acli")
+    }
+
+    @Test func parseJiraBareKey() {
+        let result = ProviderManager.parseTicketURLComponents("TEAM-7")
+        #expect(result?.org == "TEAM")
+        #expect(result?.number == 7)
+        #expect(result?.isMR == false)
+    }
+
+    @Test func detectProviderBrowseWithoutValidKeyIsNotJira() async {
+        // A `/browse/` path whose tail isn't a valid Jira key must not misroute
+        // to Jira — it falls through to the default (GitHub).
+        let result = await manager.detectProvider(from: "https://example.com/browse/wiki/Home")
+        #expect(result.provider != .jira)
+    }
+
+    @Test func detectProviderSelfHostedJiraBrowseURL() async {
+        // Jira Server on a custom domain: /browse/<valid key> still resolves.
+        let result = await manager.detectProvider(from: "https://jira.acme.com/browse/PROJ-9")
+        #expect(result.provider == .jira)
+    }
+
+    @Test func taskBackendForJiraIsJiraBackend() {
+        let backend = manager.taskBackend(for: .jira)
+        #expect(backend.provider == .jira)
+        #expect(backend is JiraTaskBackend)
+        #expect(backend.capabilities.contains(.projectBoardStatus))
+    }
+
+    @Test func codeBackendForJiraIsNil() {
+        // Jira is task-only — no VCS surface (pairs with a GitHub/GitLab code backend).
+        #expect(manager.codeBackend(for: .jira) == nil)
+    }
+
     // MARK: - detectProvider edge cases
 
     @Test func detectProviderCaseSensitiveHost() async {

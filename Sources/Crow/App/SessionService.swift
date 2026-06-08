@@ -58,7 +58,16 @@ final class SessionService {
         // Backfill provider from ticketURL for sessions that predate provider tracking
         for i in appState.sessions.indices {
             if appState.sessions[i].provider == nil, let url = appState.sessions[i].ticketURL {
-                appState.sessions[i].provider = Validation.detectProviderFromURL(url)
+                let detected = Validation.detectProviderFromURL(url)
+                appState.sessions[i].provider = detected
+                // Task-only trackers (Jira/Corveil) have no code backend — pair
+                // with the workspace's code provider so PR/git flows resolve.
+                if appState.sessions[i].codeProvider == nil, detected?.isTaskOnly == true {
+                    let wtPath = appState.worktrees[appState.sessions[i].id]?
+                        .first(where: { $0.isPrimary })?.worktreePath
+                        ?? appState.worktrees[appState.sessions[i].id]?.first?.worktreePath
+                    appState.sessions[i].codeProvider = Self.resolvedCodeProvider(forTask: detected, worktreePath: wtPath)
+                }
             }
         }
 
@@ -1260,10 +1269,32 @@ final class SessionService {
         return SessionLink(sessionID: sessionID, label: "PR #\(pr.number)", url: pr.url, linkType: .pr)
     }
 
+    /// Resolve the code provider for a task-only tracker (Jira/Corveil) from the
+    /// workspace that owns a worktree (`devRoot/<workspace>/<worktree>`). Returns
+    /// `nil` for code-bearing task providers (they follow `provider`), and the
+    /// workspace's own code provider otherwise — so a Jira-task + GitLab-code
+    /// workspace gets `glab`, not a hardcoded `gh`. Falls back to `.github` when
+    /// the workspace can't be resolved.
+    static func resolvedCodeProvider(forTask taskProvider: Provider?, worktreePath: String?) -> Provider? {
+        guard taskProvider?.isTaskOnly == true else { return nil }
+        guard let worktreePath else { return .github }
+        let workspaceName = ((worktreePath as NSString).deletingLastPathComponent as NSString).lastPathComponent
+        guard let devRoot = ConfigStore.loadDevRoot(),
+              let config = ConfigStore.loadConfig(devRoot: devRoot),
+              let ws = config.workspaces.first(where: { $0.name == workspaceName }),
+              let codeProvider = Provider(rawValue: ws.provider) else {
+            return .github
+        }
+        return codeProvider
+    }
+
     private func recoverOrphan(worktreePath: String, branch: String, repoName: String, repoPath: String) async {
         let dirName = (worktreePath as NSString).lastPathComponent
         let ticket = await parseTicketInfo(dirName: dirName, repoPath: repoPath)
 
+        // A task-only tracker (Jira/Corveil) has no code backend — pair it with
+        // the workspace's code provider for PR/git flows.
+        let codeProvider = Self.resolvedCodeProvider(forTask: ticket.provider, worktreePath: worktreePath)
         let session = Session(
             name: dirName,
             status: .active,
@@ -1271,7 +1302,8 @@ final class SessionService {
             ticketURL: ticket.url,
             ticketTitle: ticket.title,
             ticketNumber: ticket.number,
-            provider: ticket.provider
+            provider: ticket.provider,
+            codeProvider: codeProvider
         )
 
         let worktree = SessionWorktree(
