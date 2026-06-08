@@ -146,7 +146,6 @@ This will:
 Crow can drive a ticket from assignment to merged with minimal manual steps. Toggles live under **Settings → Automation**; full walkthrough in [docs/automation.md](docs/automation.md).
 
 - **Auto-create workspace** when an issue assigned to you is labeled `crow:auto`
-- **Auto-label PRs** opened from a Crow session with `crow:auto`
 - **Auto-suggest opening a PR** if a session completes with no PR linked
 - **Auto-start review sessions** for opted-in workspaces when a PR becomes reviewable
 - **Auto-respond** to changes-requested reviews and failed CI checks (off by default)

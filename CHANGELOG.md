@@ -22,6 +22,7 @@ Backfill of merged PRs since the 0.1.0 release, grouped by theme.
 - #222 — PRs opened from a Crow session are auto-labeled `crow:auto`.
 - #228 — Settings split into discrete tabs; every automation toggle lives under Settings → Automation. New `docs/automation.md` covers the full lifecycle.
 - #327 — Scheduled Jobs scope to a workspace + repo, where the repo picker is populated from the workspace's provider by expanding its "Always Include Repos" specs (`owner/*` globs or `owner/repo` slugs). Repos not yet checked out are cloned on demand when the job fires.
+- #461 — Remove the PR auto-label workflow (reverts #222); `crow:auto` on a PR was a no-op since only assigned issues consume the label. The label itself stays for issue auto-launch.
 
 ### Review Board & Sessions
 

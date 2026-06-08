@@ -9,7 +9,7 @@ A fully automated ticket walks through these stages:
 1. **Assignment** — an issue is assigned to you. If it carries the `crow:auto` label *and* the **Auto-launch workspaces** toggle is on (off by default — #312), Crow auto-creates a workspace for it (#211).
 2. **Workspace** — a git worktree is created, ticket metadata is captured, and the issue is moved to "In Progress" on the project board.
 3. **Session** — Claude Code launches in plan mode with the issue context. Worker sessions inherit the configured permission mode; the Manager terminal can launch with `--permission-mode auto` (#189).
-4. **PR open** — when Claude pushes the branch and you open a PR, Crow auto-suggests opening one if you forget (#213) and auto-applies the `crow:auto` label so the PR is recognizable downstream (#222).
+4. **PR open** — when Claude pushes the branch and you open a PR, Crow auto-suggests opening one if you forget (#213).
 5. **Review** — repos that opt in get a review session auto-started when the PR turns reviewable (#209). The review board lets you batch-start, bulk-delete, and filter sessions (#207, #210, #212, #220, #226, #231).
 6. **Status response** — Crow can prompt Claude to fix changes-requested reviews and failing CI runs without you typing anything (#214).
 7. **Completion** — the session moves to Completed once the PR is merged or the issue is closed *and* the session shows positive evidence the work was attempted (#182). Session analytics are emitted via Claude Code's OpenTelemetry pipeline (#137).
@@ -85,10 +85,6 @@ Auto-complete (PR merged / issue closed) no longer fires solely on the GitHub si
 ### #213 — Auto-suggest opening a PR
 
 When a session completes its work locally but no PR is linked, Crow surfaces a "Open PR" suggestion on the session detail surface. Clicking it walks Claude Code through `gh pr create` against the session's branch.
-
-### #222 — Auto-label PRs with `crow:auto`
-
-When a PR is opened from a Crow session, the PR is automatically labeled `crow:auto` so it's distinguishable from PRs you opened manually. This is the same label that drives auto-creation (#211) and is used by downstream tooling (review filters, status responders).
 
 ### #209 — Auto-start review sessions for opted-in repos
 
