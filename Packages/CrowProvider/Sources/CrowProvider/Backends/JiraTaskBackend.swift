@@ -184,7 +184,7 @@ public struct JiraTaskBackend: TaskBackend {
             "acli", "jira", "workitem", "search",
             "--jql", jql,
             "--json",
-            "--fields", "key,summary,status,assignee",
+            "--fields", "key,summary,status,assignee,labels",
             "--limit", "\(limit)",
         ])
     }
@@ -272,6 +272,9 @@ public struct JiraTaskBackend: TaskBackend {
             let categoryKey = (statusDict?["statusCategory"] as? [String: Any])?["key"] as? String ?? ""
             let status = statusOverride ?? TicketStatus(projectBoardName: statusName)
             let state = (statusOverride == .done || categoryKey == "done") ? "closed" : "open"
+            // Jira labels are plain strings (no color); surface them so
+            // label-driven flows (e.g. auto-create) work for Jira too.
+            let labels = (fields?["labels"] as? [String] ?? []).map { LabelInfo(name: $0) }
             let url = site.flatMap { s -> String? in
                 let host = s.hasPrefix("http") ? s : "https://\(s)"
                 return "\(host)/browse/\(parsed.key)"
@@ -283,7 +286,7 @@ public struct JiraTaskBackend: TaskBackend {
                 state: state,
                 url: url,
                 repo: parsed.project,
-                labels: [],
+                labels: labels,
                 provider: .jira,
                 projectStatus: status
             )
@@ -293,24 +296,10 @@ public struct JiraTaskBackend: TaskBackend {
 
 /// Parses Jira work-item keys out of either a browse URL or a bare key.
 ///
-/// Accepts `https://<site>.atlassian.net/browse/PROJ-123` (with optional query/
-/// fragment) or a bare `PROJ-123`. Splits on the **last** `-` so multi-segment
-/// project keys survive, returning the project prefix, the numeric suffix, and
-/// the normalized key.
+/// Thin alias over the single validated parser in `CrowCore.Validation` so the
+/// provider layer and launcher prompts share one implementation.
 enum JiraKey {
     static func parse(_ spec: String) -> (project: String, number: Int, key: String)? {
-        var token = spec.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let r = token.range(of: "/browse/") {
-            token = String(token[r.upperBound...])
-        }
-        // Strip any trailing path / query / fragment.
-        if let slash = token.firstIndex(where: { $0 == "/" || $0 == "?" || $0 == "#" }) {
-            token = String(token[..<slash])
-        }
-        guard let dash = token.lastIndex(of: "-") else { return nil }
-        let project = String(token[..<dash])
-        let numberStr = String(token[token.index(after: dash)...])
-        guard !project.isEmpty, let number = Int(numberStr) else { return nil }
-        return (project, number, "\(project)-\(number)")
+        Validation.parseJiraKey(spec)
     }
 }

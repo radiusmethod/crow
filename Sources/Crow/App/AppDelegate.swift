@@ -1297,9 +1297,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             let detected = Validation.detectProviderFromURL(url)
                             capturedAppState.sessions[idx].provider = detected
                             // Task-only trackers (Jira/Corveil) have no code
-                            // backend — pair with GitHub for PR/git flows.
+                            // backend — pair with the workspace's code provider.
                             if capturedAppState.sessions[idx].codeProvider == nil, detected?.isTaskOnly == true {
-                                capturedAppState.sessions[idx].codeProvider = .github
+                                let wtPath = capturedAppState.worktrees[id]?
+                                    .first(where: { $0.isPrimary })?.worktreePath
+                                    ?? capturedAppState.worktrees[id]?.first?.worktreePath
+                                capturedAppState.sessions[idx].codeProvider = SessionService.resolvedCodeProvider(forTask: detected, worktreePath: wtPath)
                             }
                         }
                     }

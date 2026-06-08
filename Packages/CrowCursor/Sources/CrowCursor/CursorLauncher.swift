@@ -50,9 +50,13 @@ public actor CursorLauncher {
                 lines.append("glab issue view \(url) --comments")
                 lines.append("```")
             case .jira:
-                lines.append("```bash")
-                lines.append("acli jira workitem view \(Validation.jiraKey(from: url)) --fields summary,status,description,comment")
-                lines.append("```")
+                if let key = Validation.jiraKey(from: url) {
+                    lines.append("```bash")
+                    lines.append("acli jira workitem view \(key) --fields summary,status,description,comment")
+                    lines.append("```")
+                } else {
+                    lines.append("URL: \(url)")
+                }
             case .corveil, nil:
                 lines.append("URL: \(url)")
             }

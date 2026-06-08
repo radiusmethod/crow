@@ -70,9 +70,10 @@ public actor ProviderManager {
     nonisolated static func detect(url: String, additionalGitLabHosts: [String]) -> (provider: Provider, cli: String, host: String?) {
         if url.contains("github.com") {
             return (.github, "gh", nil)
-        } else if url.contains("atlassian.net") || url.contains("/browse/") {
-            // Jira Cloud — task-only, driven by `acli`. Checked before the loose
-            // GitLab matching so a Jira browse URL isn't misrouted.
+        } else if Validation.isJiraSpec(url) {
+            // Jira — task-only, driven by `acli`. An Atlassian host, a `/browse/`
+            // URL with a valid key, or a bare `PROJ-123`. Checked before the
+            // loose GitLab matching so a Jira spec isn't misrouted.
             return (.jira, "acli", nil)
         } else if url.contains("gitlab.com") {
             return (.gitlab, "glab", "gitlab.com")
@@ -118,8 +119,7 @@ public actor ProviderManager {
         // Jira: https://<site>.atlassian.net/browse/PROJ-123 (or a bare PROJ-123).
         // The project key stands in for both org and repo; the numeric suffix is
         // the issue number. The full key is recoverable as "\(org)-\(number)".
-        if url.contains("atlassian.net") || url.contains("/browse/") {
-            guard let jira = JiraKey.parse(url) else { return nil }
+        if Validation.isJiraSpec(url), let jira = Validation.parseJiraKey(url) {
             return (jira.project, jira.project, jira.number, false)
         }
 

@@ -76,7 +76,7 @@ final class JiraTaskBackendTests: XCTestCase {
         let fake = FakeShellRunner()
         fake.responses = [.success("""
         [
-          {"key":"PROJ-1","fields":{"summary":"Open one","status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}}}},
+          {"key":"PROJ-1","fields":{"summary":"Open one","status":{"name":"In Progress","statusCategory":{"key":"indeterminate"}},"labels":["bug","crow:auto"]}},
           {"key":"PROJ-2","fields":{"summary":"Open two","status":{"name":"To Do","statusCategory":{"key":"new"}}}}
         ]
         """)]
@@ -93,6 +93,8 @@ final class JiraTaskBackendTests: XCTestCase {
         XCTAssertEqual(first.state, "open")
         XCTAssertEqual(first.projectStatus, .inProgress)
         XCTAssertEqual(first.url, "https://acme.atlassian.net/browse/PROJ-1")
+        XCTAssertEqual(first.labels.map(\.name), ["bug", "crow:auto"])
+        XCTAssertTrue(listing.open[1].labels.isEmpty)
 
         // Default JQL used; only one search call when includeClosed is false.
         XCTAssertEqual(fake.calls.count, 1)

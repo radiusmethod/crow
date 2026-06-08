@@ -2075,19 +2075,12 @@ final class IssueTracker {
     func markInReview(sessionID: UUID) async {
         guard let session = appState.sessions.first(where: { $0.id == sessionID }),
               let ticketURL = session.ticketURL,
-              session.provider == .github else { return }
+              let taskProvider = session.provider else { return }
 
-        guard let parsed = ProviderManager.parseTicketURLComponents(ticketURL) else {
-            print("[IssueTracker] Could not parse ticket URL: \(ticketURL)")
-            return
-        }
-        let owner = parsed.org
-        let repoName = parsed.repo
-        let number = parsed.number
-
-        let backend = providerManager.taskBackend(for: .github)
-        // Capability-gated UI affordance; the backend method now performs the
-        // GraphQL mutation directly (no more legacy IssueTracker escape-hatch).
+        let backend = providerManager.taskBackend(for: taskProvider)
+        // Capability-gated across providers: GitHub Projects v2 and Jira workflow
+        // transitions both expose `.projectBoardStatus` and implement
+        // `setTaskStatus`. GitLab (no capability) returns early.
         guard backend.capabilities.contains(.projectBoardStatus) else { return }
 
         appState.isMarkingInReview[sessionID] = true
@@ -2102,18 +2095,16 @@ final class IssueTracker {
             print("[IssueTracker] markInReview: \(msg)")
             return
         } catch {
-            print("[IssueTracker] markInReview failed for \(owner)/\(repoName)#\(number): \(error.localizedDescription.prefix(200))")
+            print("[IssueTracker] markInReview failed for \(ticketURL): \(error.localizedDescription.prefix(200))")
             return
         }
 
-        // Update local state
-        if let idx = appState.assignedIssues.firstIndex(where: {
-            $0.repo == "\(owner)/\(repoName)" && $0.number == number
-        }) {
+        // Update local state — match by URL so it works regardless of provider.
+        if let idx = appState.assignedIssues.firstIndex(where: { $0.url == ticketURL }) {
             appState.assignedIssues[idx].projectStatus = .inReview
         }
 
-        print("[IssueTracker] Marked \(owner)/\(repoName)#\(number) as In Review")
+        print("[IssueTracker] Marked \(ticketURL) as In Review")
 
         // Update local session status to .inReview
         appState.onSetSessionInReview?(sessionID)
