@@ -175,6 +175,12 @@ final class IssueTracker {
     }
 
     func start() {
+        // Restore cross-restart state from disk before the first poll so the
+        // initial fetch doesn't re-fire transitions we already handled
+        // (CROW-456). Stale entries for sessions that no longer exist are
+        // dropped during hydration.
+        hydratePersistedState()
+
         // Initial fetch
         Task { await refresh() }
 
@@ -572,7 +578,8 @@ final class IssueTracker {
             linkedIssueReferences: winner.linkedIssueReferences.isEmpty ? loser.linkedIssueReferences : winner.linkedIssueReferences,
             checksState: winner.checksState.isEmpty ? loser.checksState : winner.checksState,
             failedCheckNames: winner.failedCheckNames.isEmpty ? loser.failedCheckNames : winner.failedCheckNames,
-            latestReviewStates: winner.latestReviewStates.isEmpty ? loser.latestReviewStates : winner.latestReviewStates
+            latestReviewStates: winner.latestReviewStates.isEmpty ? loser.latestReviewStates : winner.latestReviewStates,
+            latestReviewID: winner.latestReviewID ?? loser.latestReviewID
         )
     }
 
@@ -1265,9 +1272,16 @@ final class IssueTracker {
             // Re-arm rules whose triggering condition has cleared, so a future
             // re-entry (approved → changesRequested again, passing → failing on
             // a new commit) can fire even if we previously emitted.
+            //
+            // With CROW-456 the `.changesRequested` dedup key is composite
+            // (`session|changesRequested|reviewID|headSha`), so a new review
+            // or new commit naturally produces a different key. This cleanup
+            // bounds the in-memory set: when we leave the bucket entirely we
+            // drop every `changesRequested` entry for this session.
             if let old = oldStatus {
                 if old.reviewStatus == .changesRequested && newStatus.reviewStatus != .changesRequested {
-                    emittedTransitionKeys.remove("\(session.id.uuidString)|changesRequested")
+                    let prefix = "\(session.id.uuidString)|changesRequested|"
+                    emittedTransitionKeys = emittedTransitionKeys.filter { !$0.hasPrefix(prefix) }
                 }
                 if old.checksPass == .failing && newStatus.checksPass != .failing {
                     if let sha = old.headSha {
@@ -1296,8 +1310,46 @@ final class IssueTracker {
             onPRStatusTransitions?(transitions)
         }
 
+        persistTrackerState()
+
         applyAutoMerge(viewerPRs: viewerPRs)
         applyAutoRebase(viewerPRs: viewerPRs)
+    }
+
+    // MARK: - Cross-restart persistence (CROW-456)
+
+    /// Load `previousPRStatus` + `emittedTransitionKeys` from disk on startup.
+    /// Drops entries whose session UUID is no longer present so the in-memory
+    /// state can't grow without bound across long-lived installs.
+    private func hydratePersistedState() {
+        guard let persisted = JSONStore().data.issueTrackerState else { return }
+        let validSessionIDs = Set(appState.sessions.map(\.id))
+        var restored: [UUID: PRStatus] = [:]
+        for (uuidString, status) in persisted.previousPRStatus {
+            guard let uuid = UUID(uuidString: uuidString), validSessionIDs.contains(uuid) else { continue }
+            restored[uuid] = status
+        }
+        previousPRStatus = restored
+
+        // Keep only dedup keys whose session UUID prefix matches a live session.
+        // Each key has shape "<uuid>|kind|…"; reject anything else.
+        let validUUIDPrefixes = Set(validSessionIDs.map { "\($0.uuidString)|" })
+        emittedTransitionKeys = Set(persisted.emittedTransitionKeys.filter { key in
+            validUUIDPrefixes.contains(where: { key.hasPrefix($0) })
+        })
+    }
+
+    /// Persist `previousPRStatus` + `emittedTransitionKeys` after every poll
+    /// that mutated them. `JSONStore.mutate` coalesces writes so this is cheap
+    /// even when transitions are quiet.
+    private func persistTrackerState() {
+        let snapshot = PersistedIssueTrackerState(
+            previousPRStatus: Dictionary(uniqueKeysWithValues: previousPRStatus.map { ($0.key.uuidString, $0.value) }),
+            emittedTransitionKeys: Array(emittedTransitionKeys)
+        )
+        JSONStore().mutate { data in
+            data.issueTrackerState = snapshot
+        }
     }
 
     // MARK: - Auto-Merge Watcher (CROW-299)
@@ -1690,7 +1742,8 @@ final class IssueTracker {
             reviewStatus: reviewStatus,
             mergeable: mergeStatus,
             failedCheckNames: failedChecks,
-            headSha: pr.headRefOid.isEmpty ? nil : pr.headRefOid
+            headSha: pr.headRefOid.isEmpty ? nil : pr.headRefOid,
+            latestReviewID: pr.latestReviewID
         )
     }
 

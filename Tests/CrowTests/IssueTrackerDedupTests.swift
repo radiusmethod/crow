@@ -23,7 +23,8 @@ struct IssueTrackerDedupTests {
         linkedIssueReferences: [LinkedIssueRef] = [],
         checksState: String = "",
         failedCheckNames: [String] = [],
-        latestReviewStates: [String] = []
+        latestReviewStates: [String] = [],
+        latestReviewID: String? = nil
     ) -> IssueTracker.ViewerPR {
         IssueTracker.ViewerPR(
             number: number,
@@ -41,7 +42,8 @@ struct IssueTrackerDedupTests {
             linkedIssueReferences: linkedIssueReferences,
             checksState: checksState,
             failedCheckNames: failedCheckNames,
-            latestReviewStates: latestReviewStates
+            latestReviewStates: latestReviewStates,
+            latestReviewID: latestReviewID
         )
     }
 
@@ -135,5 +137,25 @@ struct IssueTrackerDedupTests {
         )
         #expect(byURL.count == 1)
         #expect(byURL[url]?.state == "MERGED")
+    }
+
+    // MARK: - CROW-456 latestReviewID propagation
+
+    @Test func mergePRRecordsPrefersWinnerLatestReviewID() {
+        // Winner is whichever has the higher-rank state (MERGED beats OPEN).
+        // Forward its latestReviewID; fall back to loser's only when winner's
+        // is nil so we never lose round-2 dedup data during the merge.
+        let url = "https://github.com/radiusmethod/corveil/pull/201"
+        let openWithID = makeViewerPR(url: url, state: "OPEN", latestReviewID: "R_open")
+        let mergedWithID = makeViewerPR(url: url, state: "MERGED", latestReviewID: "R_merged")
+        #expect(IssueTracker.mergePRRecords(openWithID, mergedWithID).latestReviewID == "R_merged")
+        #expect(IssueTracker.mergePRRecords(mergedWithID, openWithID).latestReviewID == "R_merged")
+    }
+
+    @Test func mergePRRecordsBackfillsLatestReviewIDWhenWinnerLacks() {
+        let url = "https://github.com/radiusmethod/corveil/pull/201"
+        let openWithID = makeViewerPR(url: url, state: "OPEN", latestReviewID: "R_open")
+        let mergedNoID = makeViewerPR(url: url, state: "MERGED")
+        #expect(IssueTracker.mergePRRecords(openWithID, mergedNoID).latestReviewID == "R_open")
     }
 }

@@ -251,7 +251,7 @@ public struct GitHubCodeBackend: CodeBackend {
                 }
               }
             }
-            latestReviews(first: 5) { nodes { state } }
+            latestReviews(first: 5) { nodes { id state submittedAt } }
           }
         }
       }
@@ -338,6 +338,11 @@ public struct GitHubCodeBackend: CodeBackend {
         }
         let latestReviewNodes = (node["latestReviews"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []
         let reviewStates = latestReviewNodes.compactMap { $0["state"] as? String }
+        // GitHub returns latestReviews newest-first; the first CHANGES_REQUESTED
+        // entry is the most recent one. Used as the round-2 dedup discriminator
+        // so a fresh "Request changes" submission re-arms auto-respond even when
+        // the bucket stays in changesRequested.
+        let latestReviewID = latestReviewNodes.first(where: { ($0["state"] as? String) == "CHANGES_REQUESTED" })?["id"] as? String
         return PRRecord(
             number: number,
             url: url,
@@ -354,7 +359,8 @@ public struct GitHubCodeBackend: CodeBackend {
             linkedIssueReferences: linkedRefs,
             checksState: checksState,
             failedCheckNames: failedCheckNames,
-            latestReviewStates: reviewStates
+            latestReviewStates: reviewStates,
+            latestReviewID: latestReviewID
         )
     }
 

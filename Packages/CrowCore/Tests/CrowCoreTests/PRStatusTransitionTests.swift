@@ -13,6 +13,7 @@ struct PRStatusTransitionTests {
         review: PRStatus.ReviewStatus = .reviewRequired,
         checks: PRStatus.CheckStatus = .pending,
         sha: String? = nil,
+        reviewID: String? = nil,
         failed: [String] = []
     ) -> PRStatus {
         PRStatus(
@@ -20,7 +21,8 @@ struct PRStatusTransitionTests {
             reviewStatus: review,
             mergeable: .unknown,
             failedCheckNames: failed,
-            headSha: sha
+            headSha: sha,
+            latestReviewID: reviewID
         )
     }
 
@@ -62,9 +64,36 @@ struct PRStatusTransitionTests {
 
     @Test
     func changesRequestedToChangesRequestedDoesNotFire() {
-        // Status hasn't transitioned — every poll observes the same state.
-        let ts = compute(from: status(review: .changesRequested), to: status(review: .changesRequested))
-        #expect(ts.isEmpty)
+        // Status hasn't transitioned — every poll observes the same state with
+        // the same review ID and SHA, so no re-fire.
+        let old = status(review: .changesRequested, sha: shaA, reviewID: "R_1")
+        let new = status(review: .changesRequested, sha: shaA, reviewID: "R_1")
+        #expect(compute(from: old, to: new).isEmpty)
+    }
+
+    @Test
+    func changesRequestedSameStateNewReviewIDFires() {
+        // CROW-456: reviewer submitted a second "Request changes" without an
+        // intervening approval. The review ID rotates, so we must re-arm.
+        let old = status(review: .changesRequested, sha: shaA, reviewID: "R_1")
+        let new = status(review: .changesRequested, sha: shaA, reviewID: "R_2")
+        let ts = compute(from: old, to: new)
+        #expect(ts.count == 1)
+        #expect(ts.first?.kind == .changesRequested)
+        #expect(ts.first?.latestReviewID == "R_2")
+    }
+
+    @Test
+    func changesRequestedSameStateNewShaFires() {
+        // CROW-456: agent pushed a fix after the prior review. Reviewer's next
+        // look should re-trigger auto-respond regardless of whether they've
+        // submitted a fresh formal review yet.
+        let old = status(review: .changesRequested, sha: shaA, reviewID: "R_1")
+        let new = status(review: .changesRequested, sha: shaB, reviewID: "R_1")
+        let ts = compute(from: old, to: new)
+        #expect(ts.count == 1)
+        #expect(ts.first?.kind == .changesRequested)
+        #expect(ts.first?.headSha == shaB)
     }
 
     @Test
@@ -123,13 +152,17 @@ struct PRStatusTransitionTests {
     // MARK: - Dedupe key
 
     @Test
-    func dedupeKeyForChangesRequestedDoesNotIncludeSha() {
-        // Once we've seen a changesRequested for a session, subsequent
-        // re-observations of the same state must dedupe regardless of which
-        // commit happens to be HEAD at the moment.
-        let t1 = PRStatusTransition(kind: .changesRequested, sessionID: sessionID, prURL: prURL, prNumber: 1, headSha: shaA)
-        let t2 = PRStatusTransition(kind: .changesRequested, sessionID: sessionID, prURL: prURL, prNumber: 1, headSha: shaB)
-        #expect(t1.dedupeKey == t2.dedupeKey)
+    func dedupeKeyForChangesRequestedIncludesReviewIDAndSha() {
+        // CROW-456: same review + same SHA must collapse; different review or
+        // different SHA must produce a different key so re-fire isn't suppressed.
+        let base = PRStatusTransition(kind: .changesRequested, sessionID: sessionID, prURL: prURL, prNumber: 1, headSha: shaA, latestReviewID: "R_1")
+        let sameAgain = PRStatusTransition(kind: .changesRequested, sessionID: sessionID, prURL: prURL, prNumber: 1, headSha: shaA, latestReviewID: "R_1")
+        let newReview = PRStatusTransition(kind: .changesRequested, sessionID: sessionID, prURL: prURL, prNumber: 1, headSha: shaA, latestReviewID: "R_2")
+        let newSha = PRStatusTransition(kind: .changesRequested, sessionID: sessionID, prURL: prURL, prNumber: 1, headSha: shaB, latestReviewID: "R_1")
+
+        #expect(base.dedupeKey == sameAgain.dedupeKey)
+        #expect(base.dedupeKey != newReview.dedupeKey)
+        #expect(base.dedupeKey != newSha.dedupeKey)
     }
 
     @Test
