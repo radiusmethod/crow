@@ -47,6 +47,13 @@ public struct PRRecord: Sendable {
     public let checksState: String        // SUCCESS / FAILURE / PENDING / EXPECTED / ERROR / ""
     public let failedCheckNames: [String]
     public let latestReviewStates: [String]
+    /// Node ID of the most recent CHANGES_REQUESTED review on this PR, when
+    /// available. Drives the round-2 dedup logic in `IssueTracker` so a second
+    /// formal "Request changes" submission re-arms auto-respond. `nil` when no
+    /// CHANGES_REQUESTED review is among the latest projected reviews, or on
+    /// providers (e.g. GitLab) that don't surface stable review IDs in the
+    /// monitored-MR query.
+    public let latestReviewID: String?
     /// Used by reconcile tie-breaking when multiple non-OPEN PRs exist on the same branch.
     public let updatedAt: Date?
 
@@ -67,6 +74,7 @@ public struct PRRecord: Sendable {
         checksState: String = "",
         failedCheckNames: [String] = [],
         latestReviewStates: [String] = [],
+        latestReviewID: String? = nil,
         updatedAt: Date? = nil
     ) {
         self.number = number
@@ -85,6 +93,7 @@ public struct PRRecord: Sendable {
         self.checksState = checksState
         self.failedCheckNames = failedCheckNames
         self.latestReviewStates = latestReviewStates
+        self.latestReviewID = latestReviewID
         self.updatedAt = updatedAt
     }
 }

@@ -515,6 +515,120 @@ final class BackendsTests: XCTestCase {
         let backend = mgr.taskBackend(forURL: "https://corveil.io/tasks/42")
         XCTAssertEqual(backend.provider, .corveil)
     }
+
+    // MARK: - parseMonitoredPRsResponse latestReviewID (CROW-456)
+
+    /// `latestReviews` connection has no documented order. The parser must
+    /// pick the CHANGES_REQUESTED review with the latest `submittedAt`, not
+    /// the first one in the array — otherwise round-2 dedup could miss a
+    /// genuine new review (or worse, flip ids across polls and re-fire
+    /// auto-respond for no reviewer action).
+    func testParseMonitoredPRsPicksLatestSubmittedChangesRequestedReview() throws {
+        let json = """
+        {
+          "data": {
+            "viewerPRs": {
+              "pullRequests": {
+                "nodes": [
+                  {
+                    "number": 7,
+                    "url": "https://github.com/a/b/pull/7",
+                    "state": "OPEN",
+                    "reviewDecision": "CHANGES_REQUESTED",
+                    "headRefOid": "deadbeef",
+                    "latestReviews": {
+                      "nodes": [
+                        {"id": "R_old",   "state": "CHANGES_REQUESTED", "submittedAt": "2026-06-01T10:00:00Z"},
+                        {"id": "R_newer", "state": "APPROVED",          "submittedAt": "2026-06-05T10:00:00Z"},
+                        {"id": "R_newest","state": "CHANGES_REQUESTED", "submittedAt": "2026-06-07T10:00:00Z"},
+                        {"id": "R_mid",   "state": "CHANGES_REQUESTED", "submittedAt": "2026-06-03T10:00:00Z"}
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "reviewPRs": {"nodes": []},
+            "viewer": {"login": "me"},
+            "rateLimit": {"remaining": 5000, "limit": 5000, "resetAt": "2026-06-08T17:00:00Z", "cost": 1}
+          }
+        }
+        """
+        let listing = try GitHubCodeBackend.parseMonitoredPRsResponse(json)
+        XCTAssertEqual(listing.viewerPRs.count, 1)
+        XCTAssertEqual(listing.viewerPRs[0].latestReviewID, "R_newest")
+    }
+
+    /// When no review has a `submittedAt` (degraded payload), `max(by:)` over
+    /// equal keys still returns an element rather than throwing — verify we
+    /// at least don't crash and we do return one of the CHANGES_REQUESTED ids.
+    func testParseMonitoredPRsLatestReviewIDDegradesGracefullyWithoutSubmittedAt() throws {
+        let json = """
+        {
+          "data": {
+            "viewerPRs": {
+              "pullRequests": {
+                "nodes": [
+                  {
+                    "number": 8,
+                    "url": "https://github.com/a/b/pull/8",
+                    "state": "OPEN",
+                    "reviewDecision": "CHANGES_REQUESTED",
+                    "headRefOid": "abc",
+                    "latestReviews": {
+                      "nodes": [
+                        {"id": "R_a", "state": "CHANGES_REQUESTED"},
+                        {"id": "R_b", "state": "CHANGES_REQUESTED"}
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "reviewPRs": {"nodes": []},
+            "viewer": {"login": "me"},
+            "rateLimit": {"remaining": 5000, "limit": 5000, "resetAt": "2026-06-08T17:00:00Z", "cost": 1}
+          }
+        }
+        """
+        let listing = try GitHubCodeBackend.parseMonitoredPRsResponse(json)
+        XCTAssertEqual(listing.viewerPRs.count, 1)
+        XCTAssertNotNil(listing.viewerPRs[0].latestReviewID)
+        XCTAssertTrue(["R_a", "R_b"].contains(listing.viewerPRs[0].latestReviewID))
+    }
+
+    func testParseMonitoredPRsLatestReviewIDIsNilWhenNoChangesRequested() throws {
+        let json = """
+        {
+          "data": {
+            "viewerPRs": {
+              "pullRequests": {
+                "nodes": [
+                  {
+                    "number": 9,
+                    "url": "https://github.com/a/b/pull/9",
+                    "state": "OPEN",
+                    "reviewDecision": "APPROVED",
+                    "headRefOid": "abc",
+                    "latestReviews": {
+                      "nodes": [
+                        {"id": "R_ok", "state": "APPROVED", "submittedAt": "2026-06-07T10:00:00Z"}
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "reviewPRs": {"nodes": []},
+            "viewer": {"login": "me"},
+            "rateLimit": {"remaining": 5000, "limit": 5000, "resetAt": "2026-06-08T17:00:00Z", "cost": 1}
+          }
+        }
+        """
+        let listing = try GitHubCodeBackend.parseMonitoredPRsResponse(json)
+        XCTAssertEqual(listing.viewerPRs.count, 1)
+        XCTAssertNil(listing.viewerPRs[0].latestReviewID)
+    }
 }
 
 private func XCTAssertThrowsErrorAsync<T>(_ expression: @autoclosure () async throws -> T,

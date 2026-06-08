@@ -251,7 +251,7 @@ public struct GitHubCodeBackend: CodeBackend {
                 }
               }
             }
-            latestReviews(first: 5) { nodes { state } }
+            latestReviews(first: 5) { nodes { id state submittedAt } }
           }
         }
       }
@@ -338,6 +338,17 @@ public struct GitHubCodeBackend: CodeBackend {
         }
         let latestReviewNodes = (node["latestReviews"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []
         let reviewStates = latestReviewNodes.compactMap { $0["state"] as? String }
+        // Pick the round-2 dedup discriminator deterministically: the
+        // CHANGES_REQUESTED review with the latest `submittedAt`. GitHub's
+        // `latestReviews` connection doesn't document a node order, so we
+        // don't rely on it; ISO-8601 with `Z` is lexicographically sortable
+        // when the timezone is consistent (which GitHub guarantees), so a
+        // string `max(by:)` is correct here without parsing dates.
+        // `max(by:)` over an empty filtered array returns `nil`, which threads
+        // through to PRStatus.latestReviewID = nil exactly as required.
+        let latestReviewID = latestReviewNodes
+            .filter { ($0["state"] as? String) == "CHANGES_REQUESTED" }
+            .max(by: { ($0["submittedAt"] as? String ?? "") < ($1["submittedAt"] as? String ?? "") })?["id"] as? String
         return PRRecord(
             number: number,
             url: url,
@@ -354,7 +365,8 @@ public struct GitHubCodeBackend: CodeBackend {
             linkedIssueReferences: linkedRefs,
             checksState: checksState,
             failedCheckNames: failedCheckNames,
-            latestReviewStates: reviewStates
+            latestReviewStates: reviewStates,
+            latestReviewID: latestReviewID
         )
     }
 

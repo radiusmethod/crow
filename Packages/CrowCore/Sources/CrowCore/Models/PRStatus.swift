@@ -9,19 +9,28 @@ public struct PRStatus: Codable, Sendable, Equatable {
     /// Head commit SHA. Used to dedupe per-commit transition events
     /// (e.g. don't re-fire "checks failing" when the same commit is re-run).
     public var headSha: String?
+    /// Node ID of the most recent CHANGES_REQUESTED review on this PR, when
+    /// the provider surfaces stable review identifiers. Round-2 dedup uses
+    /// this so a fresh "Request changes" submission re-arms auto-respond
+    /// even when the bucket stays in `.changesRequested`. `nil` when no
+    /// CHANGES_REQUESTED review is currently visible, or on providers that
+    /// don't expose review IDs in the monitored-PR query (e.g. GitLab).
+    public var latestReviewID: String?
 
     public init(
         checksPass: CheckStatus = .unknown,
         reviewStatus: ReviewStatus = .unknown,
         mergeable: MergeStatus = .unknown,
         failedCheckNames: [String] = [],
-        headSha: String? = nil
+        headSha: String? = nil,
+        latestReviewID: String? = nil
     ) {
         self.checksPass = checksPass
         self.reviewStatus = reviewStatus
         self.mergeable = mergeable
         self.failedCheckNames = failedCheckNames
         self.headSha = headSha
+        self.latestReviewID = latestReviewID
     }
 
     public init(from decoder: Decoder) throws {
@@ -31,10 +40,11 @@ public struct PRStatus: Codable, Sendable, Equatable {
         mergeable = try c.decodeIfPresent(MergeStatus.self, forKey: .mergeable) ?? .unknown
         failedCheckNames = try c.decodeIfPresent([String].self, forKey: .failedCheckNames) ?? []
         headSha = try c.decodeIfPresent(String.self, forKey: .headSha)
+        latestReviewID = try c.decodeIfPresent(String.self, forKey: .latestReviewID)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case checksPass, reviewStatus, mergeable, failedCheckNames, headSha
+        case checksPass, reviewStatus, mergeable, failedCheckNames, headSha, latestReviewID
     }
 
     public enum CheckStatus: String, Codable, Sendable {

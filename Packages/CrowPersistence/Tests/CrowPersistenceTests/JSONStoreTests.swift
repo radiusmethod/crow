@@ -197,3 +197,55 @@ import Testing
     #expect(rl.linkType == .ticket)
     #expect(rl.label == "Issue")
 }
+
+// MARK: - CROW-456 IssueTracker state persistence
+
+@Test func issueTrackerStateRoundTripsThroughDisk() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let sessionID = UUID()
+    let pr = PRStatus(
+        checksPass: .failing,
+        reviewStatus: .changesRequested,
+        mergeable: .mergeable,
+        failedCheckNames: ["lint"],
+        headSha: "abc123",
+        latestReviewID: "R_kgD0_1"
+    )
+    let dedupKey = "\(sessionID.uuidString)|changesRequested|R_kgD0_1"
+    let state = PersistedIssueTrackerState(
+        previousPRStatus: [sessionID.uuidString: pr],
+        emittedTransitionKeys: [dedupKey]
+    )
+
+    let store = JSONStore(directory: dir)
+    store.mutate { $0.issueTrackerState = state }
+
+    let reloaded = JSONStore(directory: dir).data.issueTrackerState
+    #expect(reloaded == state)
+    #expect(reloaded?.previousPRStatus[sessionID.uuidString]?.latestReviewID == "R_kgD0_1")
+    #expect(reloaded?.emittedTransitionKeys == [dedupKey])
+}
+
+@Test func storeDataDecodesWithoutIssueTrackerStateField() throws {
+    // Backward compatibility: older store.json files predate CROW-456 and
+    // won't have the issueTrackerState key. Decoding must still succeed.
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+    let legacyJSON = """
+    {
+      "sessions": [],
+      "worktrees": [],
+      "links": [],
+      "terminals": []
+    }
+    """
+    try legacyJSON.data(using: .utf8)!.write(to: dir.appendingPathComponent("store.json"))
+
+    let store = JSONStore(directory: dir)
+    #expect(store.data.issueTrackerState == nil)
+    #expect(store.data.sessions.isEmpty)
+}

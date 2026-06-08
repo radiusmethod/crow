@@ -1,6 +1,25 @@
 import Foundation
 import CrowCore
 
+/// Persisted slice of `IssueTracker` state needed to survive Crow restarts
+/// without re-firing already-handled PR transitions (CROW-456).
+///
+/// `previousPRStatus` is keyed by session UUID string so the on-disk shape
+/// stays plain JSON. `emittedTransitionKeys` is serialized as an array because
+/// `Set` is not a stable JSON type — the in-memory load converts back.
+public struct PersistedIssueTrackerState: Codable, Sendable, Equatable {
+    public var previousPRStatus: [String: PRStatus]
+    public var emittedTransitionKeys: [String]
+
+    public init(
+        previousPRStatus: [String: PRStatus] = [:],
+        emittedTransitionKeys: [String] = []
+    ) {
+        self.previousPRStatus = previousPRStatus
+        self.emittedTransitionKeys = emittedTransitionKeys
+    }
+}
+
 /// Persisted data structure.
 public struct StoreData: Codable, Sendable {
     public var sessions: [Session]
@@ -12,19 +31,26 @@ public struct StoreData: Codable, Sendable {
     /// synthesized `Codable` tolerates a missing optional, keeping us backward
     /// compatible and avoiding the corrupt-store backup path.
     public var hookStates: [String: PersistedHookState]?
+    /// Cross-restart cache of last-observed PR statuses + emitted transition
+    /// dedup keys (CROW-456). Optional for backward compatibility with older
+    /// `store.json` files; on first read after upgrade it's nil and the
+    /// tracker behaves as it always did until the next poll persists state.
+    public var issueTrackerState: PersistedIssueTrackerState?
 
     public init(
         sessions: [Session] = [],
         worktrees: [SessionWorktree] = [],
         links: [SessionLink] = [],
         terminals: [SessionTerminal] = [],
-        hookStates: [String: PersistedHookState]? = nil
+        hookStates: [String: PersistedHookState]? = nil,
+        issueTrackerState: PersistedIssueTrackerState? = nil
     ) {
         self.sessions = sessions
         self.worktrees = worktrees
         self.links = links
         self.terminals = terminals
         self.hookStates = hookStates
+        self.issueTrackerState = issueTrackerState
     }
 }
 
