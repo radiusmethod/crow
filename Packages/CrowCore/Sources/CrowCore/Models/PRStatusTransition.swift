@@ -105,6 +105,14 @@ extension PRStatus {
 
         if new.reviewStatus == .changesRequested {
             let entering = old.reviewStatus != .changesRequested
+            // Require both ids to be non-nil. If a CHANGES_REQUESTED review is
+            // briefly absent from `latestReviews(first: 5)` (buried behind 5+
+            // other reviewers' latest reviews) and then resurfaces with a new
+            // id, the nil → id step intentionally won't fire. We prefer a
+            // missed re-prompt to a spurious one — `reviewDecision` and the
+            // `latestReviews`-derived id can legitimately disagree during a
+            // single CHANGES_REQUESTED tenure, and a spurious fire would
+            // re-prompt the agent for no reviewer action.
             let newReview = old.latestReviewID != nil
                 && new.latestReviewID != nil
                 && old.latestReviewID != new.latestReviewID
