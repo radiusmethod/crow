@@ -7,6 +7,7 @@ public final class GhosttySurfaceView: NSView {
     private var pendingText: [String] = []
     private var markedTextStorage = NSMutableAttributedString()
     private var trackingArea: NSTrackingArea?
+    private var isHoveringLink: Bool = false
 
     /// Backoff schedule for retrying createSurface() when ghostty_surface_new returns nil.
     /// 4 retries totalling ~7.5s before declaring permanent failure.
@@ -202,6 +203,21 @@ public final class GhosttySurfaceView: NSView {
         )
         addTrackingArea(area)
         trackingArea = area
+    }
+
+    /// Toggle the pointing-hand cursor when libghostty reports the mouse is
+    /// hovering an OSC 8 hyperlink. Fed from `GHOSTTY_ACTION_MOUSE_OVER_LINK`
+    /// in `GhosttyApp.handleAction()`.
+    public func setHoveringLink(_ hovering: Bool) {
+        guard isHoveringLink != hovering else { return }
+        isHoveringLink = hovering
+        window?.invalidateCursorRects(for: self)
+    }
+
+    public override func resetCursorRects() {
+        if isHoveringLink {
+            addCursorRect(bounds, cursor: .pointingHand)
+        }
     }
 
     public override var acceptsFirstResponder: Bool { true }

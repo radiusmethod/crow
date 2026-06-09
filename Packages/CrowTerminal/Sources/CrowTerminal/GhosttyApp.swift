@@ -99,6 +99,14 @@ public final class GhosttyApp {
     /// remain discoverable.
     nonisolated private static let silencedActionTags: Set<UInt32> = [26, 32, 36, 56]
 
+    /// URL schemes Crow will hand to `NSWorkspace.shared.open()` from an OSC 8
+    /// click. Anything else (file, javascript, data, vbscript, …) is dropped on
+    /// the floor — the URL is still rendered, but clicking it is a no-op. Keep
+    /// this tight; OSC 8 emitters are not always trustworthy.
+    nonisolated private static let allowedURLSchemes: Set<String> = [
+        "http", "https", "mailto", "ftp", "ftps",
+    ]
+
     nonisolated static func handleAction(
         app: ghostty_app_t?,
         target: ghostty_target_s,
@@ -116,6 +124,40 @@ public final class GhosttyApp {
                     guard let terminalID = view.terminalID else { return }
                     GhosttyApp.shared.onChildExited?(terminalID, exitCode)
                 }
+            }
+            return true
+        }
+        // OSC 8 hover: libghostty reports the mouse entering/leaving a hyperlink
+        // cell. Non-zero `len` = entering, zero = leaving. We don't need the URL
+        // itself — Ghostty tracks it internally and re-emits via OPEN_URL on click.
+        if action.tag == GHOSTTY_ACTION_MOUSE_OVER_LINK {
+            if target.tag == GHOSTTY_TARGET_SURFACE,
+               let userdata = ghostty_surface_userdata(target.target.surface) {
+                let hovering = action.action.mouse_over_link.len > 0
+                DispatchQueue.main.async {
+                    let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+                    view.setHoveringLink(hovering)
+                }
+            }
+            return true
+        }
+        // OSC 8 click: hand the URL to NSWorkspace after a scheme allowlist
+        // check. The C buffer is not null-terminated — read exactly `len` bytes.
+        if action.tag == GHOSTTY_ACTION_OPEN_URL {
+            let payload = action.action.open_url
+            guard payload.len > 0, let ptr = payload.url else { return true }
+            let urlString = String(
+                decoding: UnsafeRawBufferPointer(start: ptr, count: Int(payload.len)),
+                as: UTF8.self
+            )
+            guard let url = URL(string: urlString),
+                  let scheme = url.scheme?.lowercased(),
+                  GhosttyApp.allowedURLSchemes.contains(scheme) else {
+                NSLog("[GhosttyApp] OPEN_URL rejected (scheme not allowed): len=\(payload.len)")
+                return true
+            }
+            DispatchQueue.main.async {
+                NSWorkspace.shared.open(url)
             }
             return true
         }
