@@ -47,6 +47,7 @@ public struct SettingsView: View {
                 defaults: $config.defaults,
                 remoteControlEnabled: $config.remoteControlEnabled,
                 managerAutoPermissionMode: $config.managerAutoPermissionMode,
+                managerGateway: $config.managerGateway,
                 autoRespond: $config.autoRespond,
                 attributionTrailers: $config.attributionTrailers,
                 autoMergeWatcherEnabled: $config.autoMergeWatcherEnabled,

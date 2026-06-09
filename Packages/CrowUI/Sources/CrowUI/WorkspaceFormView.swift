@@ -22,6 +22,8 @@ public struct WorkspaceFormView: View {
     @State private var alwaysIncludeText: String
     @State private var autoReviewReposText: String
     @State private var customInstructionsText: String
+    @State private var gatewayBaseURL: String
+    @State private var gatewayHeadersText: String
 
     /// Probed `acli` availability — gates whether Jira is offered as a Task Backend.
     @State private var jiraAvailability: JiraAvailability?
@@ -50,6 +52,10 @@ public struct WorkspaceFormView: View {
         self._alwaysIncludeText = State(initialValue: workspace?.alwaysInclude.joined(separator: ", ") ?? "")
         self._autoReviewReposText = State(initialValue: workspace?.autoReviewRepos.joined(separator: ", ") ?? "")
         self._customInstructionsText = State(initialValue: workspace?.customInstructions ?? "")
+        self._gatewayBaseURL = State(initialValue: workspace?.gateway?.baseURL ?? "")
+        self._gatewayHeadersText = State(initialValue: workspace?.gateway.map {
+            WorkspaceGateway.headerLines(from: $0.customHeaders)
+        } ?? "")
         self.existingNames = existingNames
         self.onSave = onSave
     }
@@ -69,6 +75,34 @@ public struct WorkspaceFormView: View {
     /// hidden — we surface a warning instead).
     private var jiraOfferable: Bool {
         jiraAvailability == .ready || jiraSelected
+    }
+
+    /// Parsed header map from the editor text.
+    private var parsedHeaders: [String: String] {
+        WorkspaceGateway.parseHeaderLines(gatewayHeadersText)
+    }
+
+    /// Reject a half-filled gateway (base URL xor headers) — matches the
+    /// parse-time validation in `WorkspaceGateway` so the UI never writes a
+    /// config the decoder would later reject.
+    private var gatewayValidationError: String? {
+        let hasBaseURL = !gatewayBaseURL.trimmingCharacters(in: .whitespaces).isEmpty
+        let hasHeaders = !parsedHeaders.isEmpty
+        if hasBaseURL && !hasHeaders {
+            return "Add at least one custom header (e.g. an API key), or clear the Base URL."
+        }
+        if hasHeaders && !hasBaseURL {
+            return "Set a Base URL, or remove the custom headers."
+        }
+        return nil
+    }
+
+    /// The gateway to persist, or nil when both fields are empty.
+    private var gatewayForSave: WorkspaceGateway? {
+        let trimmedURL = gatewayBaseURL.trimmingCharacters(in: .whitespaces)
+        let headers = parsedHeaders
+        if trimmedURL.isEmpty && headers.isEmpty { return nil }
+        return WorkspaceGateway(baseURL: trimmedURL, customHeaders: headers)
     }
 
     public var body: some View {
@@ -152,6 +186,32 @@ public struct WorkspaceFormView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Section("AI Gateway") {
+                TextField("Base URL (e.g., https://corveil.io)", text: $gatewayBaseURL)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+
+                Text("Custom Headers")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $gatewayHeadersText)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(minHeight: 60)
+                Text("One `Name: Value` per line. A value starting with `op://` is resolved at launch via the 1Password CLI and kept out of config.json (the resolved value is cached owner-only in the worktree's settings.local.json). Any other value is stored in plain text in config.json — anyone with read access can see it; prefer an `op://` reference for production keys.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let error = gatewayValidationError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                Text("When set, `claude` launches in this workspace route through this gateway (ANTHROPIC_BASE_URL / ANTHROPIC_CUSTOM_HEADERS). Leave empty to use the vanilla Anthropic API. Does not affect the Manager session — set that under Automation.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .task {
@@ -165,7 +225,7 @@ public struct WorkspaceFormView: View {
                     onSave(buildWorkspace())
                     dismiss()
                 }
-                .disabled(nameValidationError != nil)
+                .disabled(nameValidationError != nil || gatewayValidationError != nil)
                 .keyboardShortcut(.defaultAction)
             }
             .padding()
@@ -195,7 +255,8 @@ public struct WorkspaceFormView: View {
             taskProvider: resolvedTaskProvider,
             jiraProjectKey: isJira ? nonEmpty(jiraProjectKey) : nil,
             jiraJQL: isJira ? nonEmpty(jiraJQL) : nil,
-            jiraSite: isJira ? nonEmpty(jiraSite) : nil
+            jiraSite: isJira ? nonEmpty(jiraSite) : nil,
+            gateway: gatewayForSave
         )
     }
 

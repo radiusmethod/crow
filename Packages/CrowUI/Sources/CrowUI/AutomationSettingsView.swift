@@ -8,6 +8,7 @@ public struct AutomationSettingsView: View {
     @Binding var defaults: ConfigDefaults
     @Binding var remoteControlEnabled: Bool
     @Binding var managerAutoPermissionMode: Bool
+    @Binding var managerGateway: WorkspaceGateway?
     @Binding var autoRespond: AutoRespondSettings
     @Binding var attributionTrailers: Bool
     @Binding var autoMergeWatcherEnabled: Bool
@@ -18,11 +19,14 @@ public struct AutomationSettingsView: View {
     @State private var excludeReviewReposText: String
     @State private var ignoreReviewLabelsText: String
     @State private var excludeTicketReposText: String
+    @State private var managerGatewayBaseURL: String
+    @State private var managerGatewayHeadersText: String
 
     public init(
         defaults: Binding<ConfigDefaults>,
         remoteControlEnabled: Binding<Bool>,
         managerAutoPermissionMode: Binding<Bool>,
+        managerGateway: Binding<WorkspaceGateway?>,
         autoRespond: Binding<AutoRespondSettings>,
         attributionTrailers: Binding<Bool>,
         autoMergeWatcherEnabled: Binding<Bool>,
@@ -33,6 +37,7 @@ public struct AutomationSettingsView: View {
         self._defaults = defaults
         self._remoteControlEnabled = remoteControlEnabled
         self._managerAutoPermissionMode = managerAutoPermissionMode
+        self._managerGateway = managerGateway
         self._autoRespond = autoRespond
         self._attributionTrailers = attributionTrailers
         self._autoMergeWatcherEnabled = autoMergeWatcherEnabled
@@ -42,6 +47,35 @@ public struct AutomationSettingsView: View {
         self._excludeReviewReposText = State(initialValue: defaults.wrappedValue.excludeReviewRepos.joined(separator: ", "))
         self._ignoreReviewLabelsText = State(initialValue: defaults.wrappedValue.ignoreReviewLabels.joined(separator: ", "))
         self._excludeTicketReposText = State(initialValue: defaults.wrappedValue.excludeTicketRepos.joined(separator: ", "))
+        self._managerGatewayBaseURL = State(initialValue: managerGateway.wrappedValue?.baseURL ?? "")
+        self._managerGatewayHeadersText = State(initialValue: managerGateway.wrappedValue.map {
+            WorkspaceGateway.headerLines(from: $0.customHeaders)
+        } ?? "")
+    }
+
+    /// Reject a half-filled Manager gateway (base URL xor headers), matching the
+    /// parse-time validation in `WorkspaceGateway`.
+    private var managerGatewayValidationError: String? {
+        let hasBaseURL = !managerGatewayBaseURL.trimmingCharacters(in: .whitespaces).isEmpty
+        let hasHeaders = !WorkspaceGateway.parseHeaderLines(managerGatewayHeadersText).isEmpty
+        if hasBaseURL && !hasHeaders { return "Add at least one custom header, or clear the Base URL." }
+        if hasHeaders && !hasBaseURL { return "Set a Base URL, or remove the custom headers." }
+        return nil
+    }
+
+    /// Push the editor fields back into the `managerGateway` binding (nil when
+    /// both are empty, or while half-filled so an invalid block isn't persisted).
+    private func commitManagerGateway() {
+        let trimmedURL = managerGatewayBaseURL.trimmingCharacters(in: .whitespaces)
+        let headers = WorkspaceGateway.parseHeaderLines(managerGatewayHeadersText)
+        if trimmedURL.isEmpty && headers.isEmpty {
+            managerGateway = nil
+        } else if managerGatewayValidationError == nil {
+            managerGateway = WorkspaceGateway(baseURL: trimmedURL, customHeaders: headers)
+        } else {
+            return  // half-filled — don't persist until valid
+        }
+        onSave?()
     }
 
     public var body: some View {
@@ -104,6 +138,34 @@ public struct AutomationSettingsView: View {
                 Toggle("Launch in auto permission mode", isOn: $managerAutoPermissionMode)
                     .onChange(of: managerAutoPermissionMode) { _, _ in onSave?() }
                 Text("Passes --permission-mode auto so the Manager can run crow, gh, and git commands without per-call approval. Requires Claude Code 2.1.83+ on a Max, Team, Enterprise, or API plan with the Anthropic provider. Turn off if your account reports auto mode as unavailable. Takes effect on next app launch.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Manager AI Gateway") {
+                TextField("Base URL (e.g., https://corveil.io)", text: $managerGatewayBaseURL)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .onChange(of: managerGatewayBaseURL) { _, _ in commitManagerGateway() }
+
+                Text("Custom Headers")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $managerGatewayHeadersText)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(minHeight: 60)
+                    .onChange(of: managerGatewayHeadersText) { _, _ in commitManagerGateway() }
+                Text("One `Name: Value` per line. A value starting with `op://` is resolved at launch via the 1Password CLI and kept out of config.json (the resolved value is cached owner-only in settings.local.json); any other value is stored in plain text in config.json — prefer an `op://` reference for production keys.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let error = managerGatewayValidationError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                Text("The Manager sits at the dev root and isn't tied to one workspace, so it has its own gateway. Per-workspace gateways are set under Workspaces. Leave empty to use the vanilla Anthropic API. Takes effect on next app launch.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

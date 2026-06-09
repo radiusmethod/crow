@@ -58,6 +58,13 @@ public struct AppConfig: Codable, Sendable, Equatable {
     /// `{"review": "codex"}` — Swift's default `JSONEncoder` only treats
     /// dictionaries with `String`/`Int` keys as JSON objects.
     public var agentsByKind: [String: AgentKind]
+    /// Optional AI gateway for the Manager session's `claude` launch. The
+    /// Manager sits at `devRoot` and isn't bound to a single workspace, so it
+    /// has its own gateway rather than inheriting any one workspace's. When nil,
+    /// the Manager uses the vanilla Anthropic API (env vars explicitly unset so a
+    /// global `~/.zshrc` export doesn't bleed in). Per-workspace `gateway` blocks
+    /// apply to non-Manager sessions only (CROW-402).
+    public var managerGateway: WorkspaceGateway?
 
     public init(
         workspaces: [WorkspaceInfo] = [],
@@ -76,7 +83,8 @@ public struct AppConfig: Codable, Sendable, Equatable {
         cleanup: CleanupConfig = CleanupConfig(),
         jobs: [JobConfig] = [],
         defaultAgentKind: AgentKind = .claudeCode,
-        agentsByKind: [String: AgentKind] = [:]
+        agentsByKind: [String: AgentKind] = [:],
+        managerGateway: WorkspaceGateway? = nil
     ) {
         self.workspaces = workspaces
         self.defaults = defaults
@@ -95,6 +103,7 @@ public struct AppConfig: Codable, Sendable, Equatable {
         self.jobs = jobs
         self.defaultAgentKind = defaultAgentKind
         self.agentsByKind = agentsByKind
+        self.managerGateway = managerGateway
     }
 
     public init(from decoder: Decoder) throws {
@@ -116,10 +125,11 @@ public struct AppConfig: Codable, Sendable, Equatable {
         jobs = try container.decodeIfPresent([JobConfig].self, forKey: .jobs) ?? []
         defaultAgentKind = try container.decodeIfPresent(AgentKind.self, forKey: .defaultAgentKind) ?? .claudeCode
         agentsByKind = try container.decodeIfPresent([String: AgentKind].self, forKey: .agentsByKind) ?? [:]
+        managerGateway = try container.decodeIfPresent(WorkspaceGateway.self, forKey: .managerGateway)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, jobsAutoPermissionMode, telemetry, autoRespond, attributionTrailers, autoMergeWatcherEnabled, autoCreateWatcherEnabled, autoRebaseWatcherEnabled, cleanup, jobs, defaultAgentKind, agentsByKind
+        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, jobsAutoPermissionMode, telemetry, autoRespond, attributionTrailers, autoMergeWatcherEnabled, autoCreateWatcherEnabled, autoRebaseWatcherEnabled, cleanup, jobs, defaultAgentKind, agentsByKind, managerGateway
     }
 
     /// Resolve the agent that should drive a newly-created session of the
@@ -127,6 +137,88 @@ public struct AppConfig: Codable, Sendable, Equatable {
     /// back to `defaultAgentKind` (CROW-421, CROW-433).
     public func agentKind(for sessionKind: SessionKind) -> AgentKind {
         return agentsByKind[sessionKind.rawValue] ?? defaultAgentKind
+    }
+}
+
+/// Per-workspace (or per-Manager) AI gateway configuration. When present, the
+/// `claude` launches it applies to inherit `ANTHROPIC_BASE_URL` (from `baseURL`)
+/// and `ANTHROPIC_CUSTOM_HEADERS` (from `customHeaders`, serialized to
+/// newline-separated `Name: Value` lines). When absent, those env vars are
+/// explicitly unset before launch so a global `~/.zshrc` export — or a sibling
+/// workspace's gateway — doesn't bleed in (CROW-402).
+///
+/// A header value may be a plaintext string or a secret reference. `op://…`
+/// references are resolved at launch via the 1Password CLI (`op read`) so the
+/// secret never lands at rest in `config.json`; any other value is treated
+/// literally (plaintext — stored in `config.json`, so warn in the UI).
+public struct WorkspaceGateway: Codable, Sendable, Equatable {
+    public var baseURL: String
+    public var customHeaders: [String: String]
+
+    public init(baseURL: String, customHeaders: [String: String]) {
+        self.baseURL = baseURL
+        self.customHeaders = customHeaders
+    }
+
+    /// Whether this gateway has anything to apply. A gateway whose `baseURL` is
+    /// blank and whose `customHeaders` is empty is treated as "no gateway".
+    public var isEmpty: Bool {
+        baseURL.trimmingCharacters(in: .whitespaces).isEmpty && customHeaders.isEmpty
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedBaseURL = try container.decodeIfPresent(String.self, forKey: .baseURL) ?? ""
+        let decodedHeaders = try container.decodeIfPresent([String: String].self, forKey: .customHeaders) ?? [:]
+
+        // Reject a half-filled block at parse time (CROW-402): a baseURL with no
+        // headers can't authenticate against the gateway, and headers with no
+        // baseURL have nothing to attach to. Both-empty is allowed (it just means
+        // "no gateway"); both-present is the valid case.
+        let hasBaseURL = !decodedBaseURL.trimmingCharacters(in: .whitespaces).isEmpty
+        let hasHeaders = !decodedHeaders.isEmpty
+        if hasBaseURL != hasHeaders {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: container.codingPath,
+                    debugDescription: "gateway must set both baseURL and customHeaders, or neither (got baseURL: \(hasBaseURL ? "present" : "empty"), customHeaders: \(hasHeaders ? "present" : "empty"))"
+                )
+            )
+        }
+
+        baseURL = decodedBaseURL
+        customHeaders = decodedHeaders
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case baseURL, customHeaders
+    }
+}
+
+extension WorkspaceGateway {
+    /// Parse a multiline `Name: Value` editor string into a header map. Blank
+    /// lines are ignored; each line's first `:` splits name from value. Used by
+    /// the Settings UI so a free-text editor maps to the `customHeaders` dict.
+    public static func parseHeaderLines(_ text: String) -> [String: String] {
+        var result: [String: String] = [:]
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, let colon = line.firstIndex(of: ":") else { continue }
+            let name = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+            let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { continue }
+            result[name] = value
+        }
+        return result
+    }
+
+    /// Render a header map as a multiline `Name: Value` editor string (sorted by
+    /// name for stable display).
+    public static func headerLines(from headers: [String: String]) -> String {
+        headers
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key): \($0.value)" }
+            .joined(separator: "\n")
     }
 }
 
@@ -177,6 +269,12 @@ public struct WorkspaceInfo: Identifiable, Codable, Sendable, Equatable {
     public var alwaysInclude: [String] // repos to always list in prompt table
     public var autoReviewRepos: [String] // repos where review requests auto-create a review session
     public var customInstructions: String? // free-text instructions appended to session prompts
+    /// Optional AI gateway. When set, `claude` launches into this workspace
+    /// inherit `ANTHROPIC_BASE_URL`/`ANTHROPIC_CUSTOM_HEADERS` derived from it;
+    /// when nil, those env vars are explicitly unset so a global `~/.zshrc`
+    /// export doesn't leak in (CROW-402). Does not apply to the Manager session,
+    /// which has its own `AppConfig.managerGateway`.
+    public var gateway: WorkspaceGateway?
 
     /// Where this workspace's **tasks/tickets** live, independent of `provider`
     /// (which is the **code/PR** host). `nil` means "follow the code provider"
@@ -218,7 +316,8 @@ public struct WorkspaceInfo: Identifiable, Codable, Sendable, Equatable {
         taskProvider: String? = nil,
         jiraProjectKey: String? = nil,
         jiraJQL: String? = nil,
-        jiraSite: String? = nil
+        jiraSite: String? = nil,
+        gateway: WorkspaceGateway? = nil
     ) {
         self.id = id
         self.name = name
@@ -232,6 +331,7 @@ public struct WorkspaceInfo: Identifiable, Codable, Sendable, Equatable {
         self.jiraProjectKey = jiraProjectKey
         self.jiraJQL = jiraJQL
         self.jiraSite = jiraSite
+        self.gateway = gateway
     }
 
     public init(from decoder: Decoder) throws {
@@ -248,11 +348,12 @@ public struct WorkspaceInfo: Identifiable, Codable, Sendable, Equatable {
         jiraProjectKey = try container.decodeIfPresent(String.self, forKey: .jiraProjectKey)
         jiraJQL = try container.decodeIfPresent(String.self, forKey: .jiraJQL)
         jiraSite = try container.decodeIfPresent(String.self, forKey: .jiraSite)
+        gateway = try container.decodeIfPresent(WorkspaceGateway.self, forKey: .gateway)
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, provider, cli, host, alwaysInclude, autoReviewRepos, customInstructions
-        case taskProvider, jiraProjectKey, jiraJQL, jiraSite
+        case taskProvider, jiraProjectKey, jiraJQL, jiraSite, gateway
     }
 
     /// Characters that are unsafe in directory names (workspace names become directory names).

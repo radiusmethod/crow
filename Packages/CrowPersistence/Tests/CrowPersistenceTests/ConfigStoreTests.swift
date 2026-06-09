@@ -117,3 +117,50 @@ import Testing
     let dirPerms = dirAttrs[.posixPermissions] as? Int
     #expect(dirPerms == 0o700)
 }
+
+@Test func configStoreGatewayRoundTrip() throws {
+    // A workspace gateway + managerGateway survive a save/load through disk (CROW-402).
+    let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let claudeDir = tmpDir.appendingPathComponent(".claude", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+    var config = AppConfig(
+        workspaces: [
+            WorkspaceInfo(
+                name: "RadiusMethod",
+                gateway: WorkspaceGateway(
+                    baseURL: "https://corveil.io",
+                    customHeaders: ["x-citadel-api-key": "op://Spotlight Prod/Citadel/api_key"]
+                )
+            ),
+            WorkspaceInfo(name: "Personal"),  // no gateway → vanilla Anthropic
+        ]
+    )
+    config.managerGateway = WorkspaceGateway(
+        baseURL: "https://corveil.io",
+        customHeaders: ["x-citadel-api-key": "Bearer sk-citadel-456"]
+    )
+
+    try ConfigStore.saveConfig(config, to: claudeDir)
+    let configURL = claudeDir.appendingPathComponent("config.json")
+    let loaded = ConfigStore.loadConfig(from: configURL)
+
+    #expect(loaded?.workspaces[0].gateway?.baseURL == "https://corveil.io")
+    #expect(loaded?.workspaces[0].gateway?.customHeaders["x-citadel-api-key"] == "op://Spotlight Prod/Citadel/api_key")
+    #expect(loaded?.workspaces[1].gateway == nil)
+    #expect(loaded?.managerGateway?.customHeaders["x-citadel-api-key"] == "Bearer sk-citadel-456")
+}
+
+@Test func configStoreLoadReturnsNilOnMalformedGateway() throws {
+    // A half-filled gateway (baseURL but no headers) is rejected at decode time;
+    // loadConfig logs and returns nil rather than dropping just the bad field.
+    let tmpDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: tmpDir) }
+    try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+
+    let configURL = tmpDir.appendingPathComponent("config.json")
+    try #"{"managerGateway": {"baseURL": "https://corveil.io", "customHeaders": {}}}"#
+        .write(to: configURL, atomically: true, encoding: .utf8)
+
+    #expect(ConfigStore.loadConfig(from: configURL) == nil)
+}
