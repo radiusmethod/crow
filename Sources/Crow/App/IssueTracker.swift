@@ -935,6 +935,18 @@ final class IssueTracker {
         let gitlabHost: String?    // nil for github.com
     }
 
+    /// A Jira-tasked session whose PR should be found by the *ticket key* it
+    /// references (e.g. `MAXX-6859`) rather than by branch. Jira PR branches
+    /// are renamed by the working agent and rarely match the session's
+    /// registered worktree branch, so branch matching can't find them.
+    struct ReconcileKeyCandidate: Sendable, Equatable {
+        let sessionID: UUID
+        let provider: Provider     // code provider (.github today)
+        let repoSlug: String
+        let key: String            // "MAXX-6859"
+        let gitlabHost: String?
+    }
+
     /// A branch match returned by the provider. `state` follows GitHub's
     /// `PullRequestState` for GitHub and a normalized "OPEN"/"MERGED"/"CLOSED"
     /// for GitLab (mapping `opened|merged|closed`). `updatedAt` drives
@@ -1002,7 +1014,8 @@ final class IssueTracker {
     /// after the reactive `applySessionPRLinks` pass.
     private func reconcileMissingPRLinks() async {
         let candidates = buildReconcileCandidates()
-        guard !candidates.isEmpty else { return }
+        let keyCandidates = buildReconcileKeyCandidates()
+        guard !candidates.isEmpty || !keyCandidates.isEmpty else { return }
 
         var matches: [ReconcileBranchMatch] = []
 
@@ -1017,6 +1030,12 @@ final class IssueTracker {
             let forHost = gitlab.filter { $0.gitlabHost == host }
             matches.append(contentsOf: await fetchGitLabMRsForReconcile(candidates: forHost, host: host))
         }
+
+        // Jira-tasked sessions: find the PR by the ticket key it references,
+        // since the PR branch won't match the worktree branch. Feeds the same
+        // `decideReconcileLinks` so a key-found and branch-found PR for one
+        // session resolve to a single best pick.
+        matches.append(contentsOf: await fetchPRsByKeyForReconcile(candidates: keyCandidates))
 
         applyReconciledPRLinks(Self.decideReconcileLinks(matches: matches))
     }
@@ -1061,6 +1080,103 @@ final class IssueTracker {
                 branch: primaryWt.branch,
                 gitlabHost: gitlabHost
             ))
+        }
+        return out
+    }
+
+    /// Build key-based reconcile candidates: Jira-tasked sessions missing a PR
+    /// link, whose PR is discoverable by the ticket key (e.g. `MAXX-6859`)
+    /// rather than by branch. Gated on a Jira ticket URL so GitHub/GitLab-tasked
+    /// sessions are untouched (they keep pure branch matching). Runs on
+    /// MainActor; safe to read appState directly.
+    private func buildReconcileKeyCandidates() -> [ReconcileKeyCandidate] {
+        var out: [ReconcileKeyCandidate] = []
+        for session in appState.sessions {
+            guard !session.isManager else { continue }
+            guard session.status != .archived else { continue }
+            guard session.kind == .work else { continue }
+            let links = appState.links(for: session.id)
+            guard !links.contains(where: { $0.linkType == .pr }) else { continue }
+
+            // Only task-only trackers whose PR branch won't match the worktree.
+            guard let ticketURL = session.ticketURL,
+                  Validation.isJiraSpec(ticketURL),
+                  let key = Validation.jiraKey(from: ticketURL) else { continue }
+
+            let wts = appState.worktrees(for: session.id)
+            guard let primaryWt = wts.first(where: { $0.isPrimary }) ?? wts.first else { continue }
+
+            let info = resolveRepoInfo(worktree: primaryWt)
+            guard !info.slug.isEmpty else { continue }
+
+            let (provider, gitlabHost) = Self.resolveReconcileProvider(
+                codeProvider: session.codeProvider,
+                provider: session.provider,
+                host: info.host
+            )
+            if provider == .gitlab, gitlabHost == nil { continue }
+
+            out.append(ReconcileKeyCandidate(
+                sessionID: session.id,
+                provider: provider,
+                repoSlug: info.slug,
+                key: key,
+                gitlabHost: gitlabHost
+            ))
+        }
+        return out
+    }
+
+    /// Resolve PR links for Jira-tasked sessions by searching the code repo for
+    /// the ticket key. GitHub only today (the `CodeBackend` default returns no
+    /// matches for providers without text PR search). Best-effort: a backend
+    /// error skips the cycle rather than dropping links.
+    private func fetchPRsByKeyForReconcile(candidates: [ReconcileKeyCandidate]) async -> [ReconcileBranchMatch] {
+        let github = candidates.filter { $0.provider == .github }
+        guard !github.isEmpty, let backend = providerManager.codeBackend(for: .github) else { return [] }
+        do {
+            let matches = try await backend.findPRsMatchingKeys(Self.dedupedKeyCandidates(github))
+            return Self.fanOutKeyMatches(matches, across: github)
+        } catch {
+            handleGitHubBackendError(error, operation: "findPRsMatchingKeys(github)")
+            return []
+        }
+    }
+
+    /// Project `ReconcileKeyCandidate`s onto de-duplicated `(repoSlug, key)`
+    /// pairs for the backend. Mirrors `dedupedBranchCandidates`.
+    nonisolated static func dedupedKeyCandidates(_ candidates: [ReconcileKeyCandidate]) -> [KeyCandidate] {
+        var seen: Set<KeyCandidate> = []
+        var out: [KeyCandidate] = []
+        for c in candidates {
+            let kc = KeyCandidate(repoSlug: c.repoSlug, key: c.key)
+            if seen.insert(kc).inserted { out.append(kc) }
+        }
+        return out
+    }
+
+    /// Fan each `KeyPRMatch` back to every session sharing its `(repoSlug, key)`.
+    /// Mirrors `fanOutMatches` for the branch path.
+    nonisolated static func fanOutKeyMatches(
+        _ matches: [KeyPRMatch],
+        across candidates: [ReconcileKeyCandidate]
+    ) -> [ReconcileBranchMatch] {
+        var sessionsByKey: [KeyCandidate: [UUID]] = [:]
+        for c in candidates {
+            sessionsByKey[KeyCandidate(repoSlug: c.repoSlug, key: c.key), default: []].append(c.sessionID)
+        }
+        var out: [ReconcileBranchMatch] = []
+        for match in matches {
+            guard let sids = sessionsByKey[match.candidate] else { continue }
+            for sid in sids {
+                out.append(ReconcileBranchMatch(
+                    sessionID: sid,
+                    number: match.number,
+                    url: match.url,
+                    state: match.state,
+                    updatedAt: match.updatedAt
+                ))
+            }
         }
         return out
     }

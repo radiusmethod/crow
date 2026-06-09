@@ -288,3 +288,59 @@ struct IssueTrackerReconcileFanOutTests {
         #expect(fanned[0].number == 1)
     }
 }
+
+@Suite("IssueTracker reconcile key fan-out")
+struct IssueTrackerReconcileKeyFanOutTests {
+
+    private func keyCandidate(_ sid: UUID, _ slug: String, _ key: String) -> IssueTracker.ReconcileKeyCandidate {
+        IssueTracker.ReconcileKeyCandidate(
+            sessionID: sid, provider: .github, repoSlug: slug, key: key, gitlabHost: nil
+        )
+    }
+
+    @Test func dedupedKeyCandidatesCollapsesDuplicates() {
+        // Two sessions on the same (repoSlug, key) — e.g. a duplicated Jira
+        // session — must produce a single backend search.
+        let s1 = UUID(); let s2 = UUID()
+        let cands = [
+            keyCandidate(s1, "acme/api", "MAXX-6859"),
+            keyCandidate(s2, "acme/api", "MAXX-6859"),
+            keyCandidate(s1, "acme/api", "MAXX-6860"),
+        ]
+        let out = IssueTracker.dedupedKeyCandidates(cands)
+        #expect(out.count == 2)
+        #expect(out.contains(KeyCandidate(repoSlug: "acme/api", key: "MAXX-6859")))
+        #expect(out.contains(KeyCandidate(repoSlug: "acme/api", key: "MAXX-6860")))
+    }
+
+    @Test func fanOutKeyMatchesEmitsOnePerSessionSharingAKey() {
+        let s1 = UUID(); let s2 = UUID()
+        let cands = [
+            keyCandidate(s1, "acme/api", "MAXX-6859"),
+            keyCandidate(s2, "acme/api", "MAXX-6859"),
+        ]
+        let kc = KeyCandidate(repoSlug: "acme/api", key: "MAXX-6859")
+        let backendMatches = [
+            KeyPRMatch(candidate: kc, number: 52, url: "https://github.com/acme/api/pull/52",
+                       state: "OPEN", updatedAt: nil)
+        ]
+        let fanned = IssueTracker.fanOutKeyMatches(backendMatches, across: cands)
+        #expect(fanned.count == 2)
+        #expect(Set(fanned.map(\.sessionID)) == [s1, s2])
+        #expect(fanned.allSatisfy { $0.number == 52 && $0.state == "OPEN" })
+    }
+
+    @Test func fanOutKeyMatchesDropsUnknownCandidates() {
+        let s1 = UUID()
+        let known = KeyCandidate(repoSlug: "acme/api", key: "MAXX-6859")
+        let unknown = KeyCandidate(repoSlug: "acme/api", key: "MAXX-9999")
+        let backendMatches = [
+            KeyPRMatch(candidate: known, number: 1, url: "u1", state: "OPEN", updatedAt: nil),
+            KeyPRMatch(candidate: unknown, number: 2, url: "u2", state: "OPEN", updatedAt: nil),
+        ]
+        let cands = [keyCandidate(s1, "acme/api", "MAXX-6859")]
+        let fanned = IssueTracker.fanOutKeyMatches(backendMatches, across: cands)
+        #expect(fanned.count == 1)
+        #expect(fanned[0].number == 1)
+    }
+}
