@@ -367,6 +367,12 @@ public final class GhosttySurfaceView: NSView {
         }
 
         let menu = NSMenu(title: "Terminal")
+        // AppKit's default `autoenablesItems = true` ignores per-item
+        // `isEnabled` and instead enables anything whose target responds to
+        // its action selector — which would render every item enabled
+        // regardless of selection / pasteboard / hover state. Disable so the
+        // gating below is what users see.
+        menu.autoenablesItems = false
 
         let hasSelection: Bool = {
             guard let surface else { return false }
