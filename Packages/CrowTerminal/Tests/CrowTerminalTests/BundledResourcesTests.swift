@@ -62,4 +62,33 @@ struct BundledResourcesTests {
         #expect(body.contains(#"send-keys -X select-word ; run -d0.3 ; send-keys -X copy-pipe-no-clear "pbcopy""#))
         #expect(body.contains(#"send-keys -X select-line ; run -d0.3 ; send-keys -X copy-pipe-no-clear "pbcopy""#))
     }
+
+    @Test func tmuxConfHasNoBarePrefixUnbind() throws {
+        // #473: a bare `unbind-key -a` (no `-T`) defaults to the prefix
+        // table, which is empty/non-existent after the first clear on
+        // Crow's tmux server. The command errored with `table prefix
+        // doesn't exist` and made `source-file` return exit 1 — breaking
+        // #451's reconcile-on-attach gating. The fix uses an explicit
+        // `bind-key -T prefix Any …` stub followed by
+        // `unbind-key -a -T prefix` so the clear is idempotent. This test
+        // pins both invariants: the bare form is gone, and the
+        // stub-then-clear pair is present in that order.
+        let url = try #require(BundledResources.tmuxConfURL)
+        let body = try String(contentsOf: url, encoding: .utf8)
+        for line in body.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.hasPrefix("#") else { continue }
+            #expect(
+                trimmed != "unbind-key -a" && trimmed != "unbind -a",
+                "bare `unbind-key -a` would re-introduce the #473 exit-1 bug"
+            )
+        }
+        let stubIdx = body.range(of: "bind-key -T prefix Any send-keys")
+        let clearIdx = body.range(of: "unbind-key -a -T prefix")
+        #expect(stubIdx != nil, "missing stub bind that pre-creates the prefix table")
+        #expect(clearIdx != nil, "missing explicit `unbind-key -a -T prefix`")
+        if let s = stubIdx, let c = clearIdx {
+            #expect(s.lowerBound < c.lowerBound, "stub must precede the clear")
+        }
+    }
 }
