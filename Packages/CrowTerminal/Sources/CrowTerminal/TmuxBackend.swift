@@ -577,6 +577,33 @@ public final class TmuxBackend {
         }
     }
 
+    /// Re-source the bundled `crow-tmux.conf` against the live tmux server
+    /// unconditionally — driven by the "Reload Terminal Config" menu item
+    /// (#475), where the user has explicitly asked for a reload. Unlike
+    /// `reconcileBundledConfigIfStale`, this skips the mtime gate.
+    ///
+    /// Returns `nil` on success, or a human-readable error string the caller
+    /// can surface in a banner. Idempotent: `source-file` against a live
+    /// server updates server-scoped options in place; existing windows and
+    /// sessions are unaffected.
+    @MainActor
+    public func reloadBundledConfig() -> String? {
+        guard let ctrl = controller, ctrl.hasSession() else {
+            return "tmux server is not running"
+        }
+        guard let confURL = BundledResources.tmuxConfURL else {
+            return "bundled crow-tmux.conf not found"
+        }
+        do {
+            try ctrl.run(["source-file", confURL.path])
+            NSLog("[CrowTelemetry tmux:config_reloaded_by_user path=\(confURL.path)]")
+            return nil
+        } catch {
+            NSLog("[CrowTelemetry tmux:config_reload_failed error=\"\(error)\"]")
+            return "\(error)"
+        }
+    }
+
     /// Pure policy: reconcile when either timestamp is missing (conservative
     /// — a redundant `source-file` is cheap) or when the conf is newer than
     /// the running server.

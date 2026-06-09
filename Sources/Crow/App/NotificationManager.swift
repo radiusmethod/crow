@@ -159,6 +159,31 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         )
     }
 
+    // MARK: - Terminal Config Reload (#475)
+
+    /// One-shot banner for the "Reload Terminal Config" menu item. Pass
+    /// `nil` for success; any non-nil string is shown as the failure body.
+    func notifyConfigReloaded(errorText: String?) {
+        guard !settings.globalMute else { return }
+        guard settings.systemNotificationsEnabled else { return }
+
+        if let errorText {
+            postSystemNotification(
+                title: "Terminal config reload failed",
+                body: errorText,
+                sessionID: UUID(),
+                eventName: "ConfigReloadFailed"
+            )
+        } else {
+            postSystemNotification(
+                title: "Terminal config reloaded",
+                body: "Sourced crow-tmux.conf into the running tmux server.",
+                sessionID: UUID(),
+                eventName: "ConfigReloaded"
+            )
+        }
+    }
+
     // MARK: - Auto-Rebase Notifications (CROW-318)
 
     /// Notify the user that Crow rebased a PR branch onto its base and

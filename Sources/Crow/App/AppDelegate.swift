@@ -976,6 +976,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let restartTmuxItem = NSMenuItem(title: "Restart tmux Server", action: #selector(restartTmuxServer), keyEquivalent: "")
         restartTmuxItem.target = self
         appMenu.addItem(restartTmuxItem)
+        // Non-destructive — re-sources the bundled tmux conf against the live
+        // server. No keyEquivalent for now (#475); can be added if asked.
+        let reloadConfigItem = NSMenuItem(title: "Reload Terminal Config", action: #selector(reloadTerminalConfig), keyEquivalent: "")
+        reloadConfigItem.target = self
+        appMenu.addItem(reloadConfigItem)
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Hide Crow", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let hideOthersItem = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
@@ -1010,6 +1015,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if alert.runModal() == .alertFirstButtonReturn {
             appState.onRestartTmuxServer?()
         }
+    }
+
+    @objc private func reloadTerminalConfig() {
+        NSLog("[CrowTelemetry tmux:config_reload_by_user]")
+        let errorText = TmuxBackend.shared.reloadBundledConfig()
+        notificationManager?.notifyConfigReloaded(errorText: errorText)
     }
 
     @objc private func showAbout() {
