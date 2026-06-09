@@ -1,5 +1,11 @@
 // swift-tools-version: 6.0
 import PackageDescription
+import Foundation
+
+// CROW-466 spike: mirror the CrowTerminal-side flag so the app target's
+// AppDelegate forks resolve to the right renderer at compile time.
+let useSwiftTerm = ProcessInfo.processInfo.environment["CROW_RENDERER_SWIFTTERM"] != nil
+let appSwiftSettings: [SwiftSetting] = useSwiftTerm ? [.define("CROW_RENDERER_SWIFTTERM")] : []
 
 let package = Package(
     name: "Crow",
@@ -44,6 +50,7 @@ let package = Package(
                 .copy("Resources/AppIcon.png"),
                 .copy("Resources/CorveilBrandmark.svg"),
             ],
+            swiftSettings: appSwiftSettings,
             linkerSettings: [
                 .linkedFramework("Carbon"),
                 .linkedFramework("Metal"),
