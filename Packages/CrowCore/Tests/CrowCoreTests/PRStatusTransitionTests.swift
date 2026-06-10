@@ -33,13 +33,45 @@ struct PRStatusTransitionTests {
     // MARK: - First-observation gate
 
     @Test
-    func firstObservationNeverFires() {
-        // No prior status — even if the PR is already in a transition state,
-        // we must not fire (it'd flood the user with notifications on every
-        // app launch).
-        #expect(compute(from: nil, to: status(review: .changesRequested)).isEmpty)
-        #expect(compute(from: nil, to: status(checks: .failing, sha: shaA)).isEmpty)
-        #expect(compute(from: nil, to: status(review: .changesRequested, checks: .failing, sha: shaA)).isEmpty)
+    func firstObservationOpenWithNoReviewDoesNotFire() {
+        // No prior status AND the new state isn't attention-needing — must not
+        // fire. Protects the startup-flood case the original guard was meant
+        // to cover.
+        #expect(compute(from: nil, to: status(review: .reviewRequired, checks: .pending)).isEmpty)
+        #expect(compute(from: nil, to: status(review: .approved, checks: .passing)).isEmpty)
+    }
+
+    @Test
+    func firstObservationChangesRequestedFires() {
+        // CROW-477: PR was already in CHANGES_REQUESTED when Crow first observed
+        // it (poll missed the open → changes-requested window, or session was
+        // created after the review landed). Must still route to auto-respond.
+        // IssueTracker's persisted dedupe (CROW-456) prevents restart re-fires.
+        let ts = compute(from: nil, to: status(review: .changesRequested, sha: shaA, reviewID: "R_1"))
+        #expect(ts.count == 1)
+        #expect(ts.first?.kind == .changesRequested)
+        #expect(ts.first?.latestReviewID == "R_1")
+        #expect(ts.first?.headSha == shaA)
+        #expect(ts.first?.sessionID == sessionID)
+        #expect(ts.first?.prURL == prURL)
+    }
+
+    @Test
+    func firstObservationFailingChecksFires() {
+        // CROW-477: same idea for failing CI on first observation.
+        let ts = compute(from: nil, to: status(checks: .failing, sha: shaA, failed: ["lint"]))
+        #expect(ts.count == 1)
+        #expect(ts.first?.kind == .checksFailing)
+        #expect(ts.first?.headSha == shaA)
+        #expect(ts.first?.failedCheckNames == ["lint"])
+    }
+
+    @Test
+    func firstObservationBothChangesRequestedAndFailingFiresBoth() {
+        let ts = compute(from: nil, to: status(review: .changesRequested, checks: .failing, sha: shaA, reviewID: "R_1", failed: ["lint"]))
+        #expect(ts.count == 2)
+        #expect(ts.contains(where: { $0.kind == .changesRequested && $0.latestReviewID == "R_1" }))
+        #expect(ts.contains(where: { $0.kind == .checksFailing && $0.failedCheckNames == ["lint"] }))
     }
 
     // MARK: - Changes requested
