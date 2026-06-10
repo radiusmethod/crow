@@ -98,6 +98,12 @@ fi
 _crow_precmd() {
   crow_log "precmd_fired"
   if [ -n "${TMUX:-}" ]; then
+    # Emit OSC 133;A twice under tmux: the wrapped form passes through to
+    # Ghostty (which uses the mark for #470 hyperlink and #471 cursor
+    # gating), and the bare form is consumed by tmux's emulator so
+    # `send-keys -X previous-prompt` / `next-prompt` can navigate marks
+    # for Cmd+up/down prompt jumps (#471 gap 6).
+    printf '\033]133;A\007'
     printf '\033Ptmux;\033\033]133;A\007\033\\'
     printf '\033Ptmux;\033\033]9;crow-ready\007\033\\'
   else
@@ -150,6 +156,12 @@ fi
 _crow_precmd() {
   crow_log "precmd_fired"
   if [ -n "${TMUX:-}" ]; then
+    # Emit OSC 133;A twice under tmux: the wrapped form passes through to
+    # Ghostty (which uses the mark for #470 hyperlink and #471 cursor
+    # gating), and the bare form is consumed by tmux's emulator so
+    # `send-keys -X previous-prompt` / `next-prompt` can navigate marks
+    # for Cmd+up/down prompt jumps (#471 gap 6).
+    printf '\033]133;A\007'
     printf '\033Ptmux;\033\033]133;A\007\033\\'
     printf '\033Ptmux;\033\033]9;crow-ready\007\033\\'
   else
@@ -179,6 +191,9 @@ BRC
     # hook. Production work would extend this with shell-specific paths.
     crow_log "hook_skipped reason=unsupported_shell shell=$SHELL"
     if [ -n "${TMUX:-}" ]; then
+      # See `_crow_precmd` above for why we emit OSC 133;A twice under
+      # tmux (bare for tmux's prompt tracking, wrapped for Ghostty).
+      printf '\033]133;A\007'
       printf '\033Ptmux;\033\033]133;A\007\033\\\033Ptmux;\033\033]9;crow-ready\007\033\\'
     else
       printf '\033]133;A\007\033]9;crow-ready\007'
