@@ -77,9 +77,15 @@ public struct PRStatusTransition: Sendable, Equatable {
 extension PRStatus {
     /// Compute the transitions implied by moving from `old` to `new`.
     ///
-    /// Returns an empty array on the first observation (`old == nil`) so
-    /// existing PR state never triggers a fire-on-startup. Otherwise emits
-    /// at most one `.changesRequested` and one `.checksFailing`, in that order.
+    /// On the first observation (`old == nil`), emits a transition only when
+    /// the new state is itself a "needs attention" condition — `.changesRequested`
+    /// or failing checks. A PR first observed as `.open` with passing/pending
+    /// checks emits nothing (the startup-flood safety the bare guard used to
+    /// provide). Persisted `emittedTransitionKeys` in `IssueTracker` (CROW-456)
+    /// suppress restart re-fires of transitions already emitted by a prior run.
+    ///
+    /// Otherwise emits at most one `.changesRequested` and one `.checksFailing`,
+    /// in that order.
     ///
     /// `.changesRequested` fires when the bucket is entered (`old` wasn't
     /// `.changesRequested`) or when the latest CHANGES_REQUESTED review ID
@@ -99,7 +105,36 @@ extension PRStatus {
         prURL: String,
         prNumber: Int?
     ) -> [PRStatusTransition] {
-        guard let old else { return [] } // first observation — never fire
+        guard let old else {
+            // First observation (CROW-477): emit only when the new state is
+            // itself attention-needing, so a PR Crow first sees already in
+            // CHANGES_REQUESTED (or with failing checks) still routes to
+            // auto-respond. Restart-spurious re-fires are prevented by the
+            // persisted dedupe keys at the IssueTracker layer, not here.
+            var out: [PRStatusTransition] = []
+            if new.reviewStatus == .changesRequested {
+                out.append(PRStatusTransition(
+                    kind: .changesRequested,
+                    sessionID: sessionID,
+                    prURL: prURL,
+                    prNumber: prNumber,
+                    headSha: new.headSha,
+                    latestReviewID: new.latestReviewID,
+                    failedCheckNames: []
+                ))
+            }
+            if new.checksPass == .failing {
+                out.append(PRStatusTransition(
+                    kind: .checksFailing,
+                    sessionID: sessionID,
+                    prURL: prURL,
+                    prNumber: prNumber,
+                    headSha: new.headSha,
+                    failedCheckNames: new.failedCheckNames
+                ))
+            }
+            return out
+        }
 
         var out: [PRStatusTransition] = []
 
