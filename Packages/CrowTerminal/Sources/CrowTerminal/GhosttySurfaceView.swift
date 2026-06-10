@@ -10,12 +10,11 @@ public final class GhosttySurfaceView: NSView {
     private var trackingArea: NSTrackingArea?
     private var hoveredLinkURL: String?
 
-    /// Backing URL for the active Quick Look preview (spacebar, #471 gap 4).
-    /// Either a remote URL pulled directly from the selection or a temp
-    /// text file we wrote to render plain selection text. Cleared and the
-    /// temp file removed when the preview panel closes.
+    /// Backing item for the active Quick Look preview (spacebar, #471
+    /// gap 4). Either a remote URL detected directly in the selection
+    /// or the resolved file URL for a `path:line` reference. Cleared in
+    /// `endPreviewPanelControl(_:)` when the user closes the preview.
     private var quickLookItem: NSURL?
-    private var quickLookTempFile: URL?
 
     /// Backoff schedule for retrying createSurface() when ghostty_surface_new returns nil.
     /// 4 retries totalling ~7.5s before declaring permanent failure.
@@ -301,11 +300,15 @@ public final class GhosttySurfaceView: NSView {
 
         // Spacebar Quick Look on an active selection (#471 gap 4). Bare
         // space only — modified space (Ctrl+Space, etc.) still goes to
-        // the surface. We deliberately do not consume space when there's
-        // no selection, so typing into the shell is unaffected.
+        // the surface. Restricted to selections that parse as a URL or
+        // a path:line reference so we don't hijack typed input: a
+        // common flow (drag-select output → keep typing at the shell)
+        // would otherwise have the next space typed open Quick Look
+        // instead of reaching the shell.
         if event.charactersIgnoringModifiers == " ",
            event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
-           ghostty_surface_has_selection(surface) {
+           ghostty_surface_has_selection(surface),
+           selectionHasQuickLookCandidate() {
             showQuickLook()
             return
         }
@@ -390,8 +393,12 @@ public final class GhosttySurfaceView: NSView {
         // Multi-line paste safety prompt (iTerm2 / Terminal.app convention):
         // pastes that contain a newline can submit a destructive command
         // before the user realises what they pasted. Confirm via sheet, then
-        // forward through the same path as a single-line paste.
-        if content.contains("\n") || content.contains("\r") {
+        // forward through the same path as a single-line paste. A lone
+        // trailing newline (e.g. `"git status\n"` copied with its
+        // submit) is ignored — only genuinely multi-line payloads should
+        // trigger the prompt; matches iTerm2 / Terminal behaviour.
+        let body = content.hasSuffix("\n") ? String(content.dropLast()) : content
+        if body.contains("\n") || body.contains("\r") {
             confirmMultilinePaste(content)
             return
         }
@@ -614,33 +621,46 @@ public final class GhosttySurfaceView: NSView {
 
     // MARK: - Quick Look
 
+    /// Quick test (no temp file, no detector side effects beyond the
+    /// existing pure helpers) for whether the current selection is
+    /// something Quick Look can usefully preview: a remote URL with an
+    /// allowed scheme, or a `path:line` that resolves to an existing
+    /// regular file. Used to gate the spacebar intercept so we don't
+    /// swallow keystrokes typed against a stale selection.
+    private func selectionHasQuickLookCandidate() -> Bool {
+        guard let selection = currentSelectionText() else { return false }
+        if SmartDetect.detectURL(
+            in: selection, allowedSchemes: GhosttyApp.allowedURLSchemes
+        ) != nil {
+            return true
+        }
+        if let fileLine = SmartDetect.detectFileLine(in: selection),
+           resolveFileURL(path: fileLine.path) != nil {
+            return true
+        }
+        return false
+    }
+
     /// Open `QLPreviewPanel` against the current selection (#471 gap 4).
-    /// URL selections preview directly; plain text is staged into a tmp
-    /// file under `$TMPDIR/crow-quicklook-<uuid>.txt`. Cleanup happens in
-    /// `endPreviewPanelControl(_:)` when the user closes the preview.
+    /// Caller is responsible for gating via
+    /// `selectionHasQuickLookCandidate()` so this only runs on a URL or
+    /// a resolvable `path:line` reference. URL → previewed directly;
+    /// `path:line` → the resolved file URL (line number is dropped;
+    /// QLPreviewPanel has no concept of "open at line N").
     private func showQuickLook() {
         guard let selection = currentSelectionText() else { return }
 
-        cleanupQuickLookTempFile()
         quickLookItem = nil
 
         if let url = SmartDetect.detectURL(
             in: selection, allowedSchemes: GhosttyApp.allowedURLSchemes
         ) {
             quickLookItem = url as NSURL
+        } else if let fileLine = SmartDetect.detectFileLine(in: selection),
+                  let fileURL = resolveFileURL(path: fileLine.path) {
+            quickLookItem = fileURL as NSURL
         } else {
-            let tmpDir = ProcessInfo.processInfo.environment["TMPDIR"]
-                ?? NSTemporaryDirectory()
-            let tmpURL = URL(fileURLWithPath: tmpDir)
-                .appendingPathComponent("crow-quicklook-\(UUID().uuidString).txt")
-            do {
-                try selection.write(to: tmpURL, atomically: true, encoding: .utf8)
-                quickLookTempFile = tmpURL
-                quickLookItem = tmpURL as NSURL
-            } catch {
-                NSLog("[GhosttySurfaceView] Quick Look temp write failed: \(error)")
-                return
-            }
+            return
         }
 
         let panel = QLPreviewPanel.shared()
@@ -649,12 +669,6 @@ public final class GhosttySurfaceView: NSView {
         } else {
             panel?.makeKeyAndOrderFront(nil)
         }
-    }
-
-    private func cleanupQuickLookTempFile() {
-        guard let path = quickLookTempFile else { return }
-        try? FileManager.default.removeItem(at: path)
-        quickLookTempFile = nil
     }
 
     public override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool {
@@ -677,34 +691,45 @@ public final class GhosttySurfaceView: NSView {
         MainActor.assumeIsolated {
             if panel.dataSource === self { panel.dataSource = nil }
             if panel.delegate === self { panel.delegate = nil }
-            cleanupQuickLookTempFile()
             quickLookItem = nil
         }
     }
 
     /// Resolve a `path:line` detection's path to a file URL by checking
-    /// (1) absolute / cwd-relative on its own and (2) joined with the
-    /// surface's `workingDirectory`. Returns nil if neither exists, so the
-    /// "Open in Editor" item stays disabled rather than handing a bogus
-    /// path to NSWorkspace.
+    /// (1) absolute on its own and (2) joined with the *active pane's*
+    /// live cwd via `TmuxBackend.activePaneCwd`. We deliberately do NOT
+    /// fall back to the surface's stored `workingDirectory` — that field
+    /// is fixed to `$HOME` at cockpit-surface create time and never
+    /// follows the shell's `cd`s, so it'd resolve `Sources/Foo.swift`
+    /// against `$HOME` and miss the project tree. Returns nil if the
+    /// path doesn't point at an existing regular file, so "Open in
+    /// Editor" stays disabled rather than launching an app bundle or a
+    /// directory by accident.
     private func resolveFileURL(path: String) -> URL? {
         let fm = FileManager.default
-        if (path as NSString).isAbsolutePath, fm.fileExists(atPath: path) {
+        if (path as NSString).isAbsolutePath, isRegularFile(at: path, fm: fm) {
             return URL(fileURLWithPath: path)
         }
-        if let cwd = workingDirectory {
+        if let id = TmuxBackend.shared.activeTerminalID,
+           let cwd = TmuxBackend.shared.activePaneCwd(id: id) {
             let joined = (cwd as NSString).appendingPathComponent(path)
-            if fm.fileExists(atPath: joined) {
+            if isRegularFile(at: joined, fm: fm) {
                 return URL(fileURLWithPath: joined)
             }
         }
-        // Last resort: treat as relative to the process cwd. Mostly a
-        // no-op since Crow doesn't chdir, but avoids surprising the user
-        // when they invoke from an unusual launcher.
-        if fm.fileExists(atPath: path) {
-            return URL(fileURLWithPath: path)
-        }
         return nil
+    }
+
+    /// True only for plain files — directories and `.app` bundles (which
+    /// `FileManager.fileExists` happily reports as existing) are rejected
+    /// so the right-click "Open in Editor" item doesn't launch an app
+    /// from a `/Applications/Foo.app:1` selection.
+    private func isRegularFile(at path: String, fm: FileManager) -> Bool {
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue else {
+            return false
+        }
+        return true
     }
 
     public override func keyUp(with event: NSEvent) {

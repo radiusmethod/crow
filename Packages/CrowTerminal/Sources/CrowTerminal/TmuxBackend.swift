@@ -393,6 +393,27 @@ public final class TmuxBackend {
         }
     }
 
+    /// Read the live working directory of terminal `id`'s pane via
+    /// `tmux display-message -p -F '#{pane_current_path}'`. Used by
+    /// smart-detect `path:line` resolution (#471 gap 5) to honour the
+    /// pane's *current* cwd rather than the cockpit surface's static
+    /// `workingDirectory` (which is fixed to `$HOME` at create time and
+    /// never tracks the shell's `cd`s). Returns nil on any error so the
+    /// caller can fall back without crashing.
+    public func activePaneCwd(id: UUID) -> String? {
+        guard let windowIndex = bindings[id] else { return nil }
+        do {
+            let ctrl = try ensureRunningServer()
+            let target = "\(ctrl.sessionName):\(windowIndex)"
+            let raw = try ctrl.displayMessage(target: target, format: "#{pane_current_path}")
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        } catch {
+            reportIfTimeout(error)
+            return nil
+        }
+    }
+
     /// Direction for `searchInScrollback`. `backward` walks toward older
     /// output (the common case for Cmd+F on terminal history); `forward`
     /// walks toward newer output.
