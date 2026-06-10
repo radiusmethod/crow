@@ -655,16 +655,25 @@ public final class GhosttySurfaceView: NSView {
         return true
     }
 
+    // The QLPreviewPanel control hooks are inherited as nonisolated from
+    // NSResponder, but AppKit only ever dispatches them on the main
+    // thread. Hop via `MainActor.assumeIsolated` so we can touch the
+    // surface's main-isolated state (panel.dataSource/.delegate are
+    // themselves `@MainActor`).
     public override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
-        panel.dataSource = self
-        panel.delegate = self
+        MainActor.assumeIsolated {
+            panel.dataSource = self
+            panel.delegate = self
+        }
     }
 
     public override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
-        if panel.dataSource === self { panel.dataSource = nil }
-        if panel.delegate === self { panel.delegate = nil }
-        cleanupQuickLookTempFile()
-        quickLookItem = nil
+        MainActor.assumeIsolated {
+            if panel.dataSource === self { panel.dataSource = nil }
+            if panel.delegate === self { panel.delegate = nil }
+            cleanupQuickLookTempFile()
+            quickLookItem = nil
+        }
     }
 
     /// Resolve a `path:line` detection's path to a file URL by checking
