@@ -1,5 +1,6 @@
 import AppKit
 import GhosttyKit
+import QuickLookUI
 
 /// NSView subclass that hosts a libghostty terminal surface with Metal rendering.
 public final class GhosttySurfaceView: NSView {
@@ -8,6 +9,12 @@ public final class GhosttySurfaceView: NSView {
     private var markedTextStorage = NSMutableAttributedString()
     private var trackingArea: NSTrackingArea?
     private var hoveredLinkURL: String?
+
+    /// Backing item for the active Quick Look preview (spacebar, #471
+    /// gap 4). Either a remote URL detected directly in the selection
+    /// or the resolved file URL for a `path:line` reference. Cleared in
+    /// `endPreviewPanelControl(_:)` when the user closes the preview.
+    private var quickLookItem: NSURL?
 
     /// Backoff schedule for retrying createSurface() when ghostty_surface_new returns nil.
     /// 4 retries totalling ~7.5s before declaring permanent failure.
@@ -219,6 +226,11 @@ public final class GhosttySurfaceView: NSView {
     }
 
     public override func resetCursorRects() {
+        // I-beam by default so terminal text feels selectable like macOS
+        // Terminal / iTerm2. Pointing-hand wins on hovered OSC 8 links —
+        // AppKit picks the last-registered cursor whose rect contains the
+        // point, so the order here matters.
+        addCursorRect(bounds, cursor: .iBeam)
         if hoveredLinkURL != nil {
             addCursorRect(bounds, cursor: .pointingHand)
         }
@@ -257,6 +269,49 @@ public final class GhosttySurfaceView: NSView {
 
     public override func keyDown(with event: NSEvent) {
         guard let surface else { return }
+
+        // Cmd+F → open the search overlay (#471 gap 2). Notification is
+        // observed by `TerminalSearchBar`; the bar takes first responder
+        // from us so the user can type immediately.
+        if event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers == "f" {
+            NotificationCenter.default.post(name: .terminalBeginSearch, object: nil)
+            return
+        }
+
+        // Cmd+↑ / Cmd+↓ → jump between OSC 133 prompts (#471 gap 6). Lives
+        // before the generic Cmd path so the arrow keys don't reach the
+        // surface (which would scroll a line). 126 = up, 125 = down on
+        // macOS.
+        if event.modifierFlags.contains(.command),
+           event.keyCode == 126 || event.keyCode == 125,
+           let id = TmuxBackend.shared.activeTerminalID {
+            do {
+                if event.keyCode == 126 {
+                    try TmuxBackend.shared.previousPrompt(id: id)
+                } else {
+                    try TmuxBackend.shared.nextPrompt(id: id)
+                }
+            } catch {
+                NSLog("[GhosttySurfaceView] prompt jump failed: \(error)")
+            }
+            return
+        }
+
+        // Spacebar Quick Look on an active selection (#471 gap 4). Bare
+        // space only — modified space (Ctrl+Space, etc.) still goes to
+        // the surface. Restricted to selections that parse as a URL or
+        // a path:line reference so we don't hijack typed input: a
+        // common flow (drag-select output → keep typing at the shell)
+        // would otherwise have the next space typed open Quick Look
+        // instead of reaching the shell.
+        if event.charactersIgnoringModifiers == " ",
+           event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
+           ghostty_surface_has_selection(surface),
+           selectionHasQuickLookCandidate() {
+            showQuickLook()
+            return
+        }
 
         // Handle Cmd+V (paste) directly
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "v" {
@@ -331,26 +386,76 @@ public final class GhosttySurfaceView: NSView {
     // MARK: - Copy / Paste
 
     @objc public func paste(_ sender: Any?) {
-        guard let surface else { return }
+        guard surface != nil else { return }
         let pasteboard = NSPasteboard.general
         guard let content = pasteboard.string(forType: .string) else { return }
+
+        // Multi-line paste safety prompt (iTerm2 / Terminal.app convention):
+        // pastes that contain a newline can submit a destructive command
+        // before the user realises what they pasted. Confirm via sheet, then
+        // forward through the same path as a single-line paste. A lone
+        // trailing newline (e.g. `"git status\n"` copied with its
+        // submit) is ignored — only genuinely multi-line payloads should
+        // trigger the prompt; matches iTerm2 / Terminal behaviour.
+        let body = content.hasSuffix("\n") ? String(content.dropLast()) : content
+        if body.contains("\n") || body.contains("\r") {
+            confirmMultilinePaste(content)
+            return
+        }
+        forwardPaste(content)
+    }
+
+    /// Forward already-vetted pasteboard text to the libghostty surface.
+    /// Shared by single-line paste and the confirm-sheet handler.
+    private func forwardPaste(_ content: String) {
+        guard let surface else { return }
         content.withCString { ptr in
             ghostty_surface_text(surface, ptr, UInt(content.utf8.count))
         }
     }
 
+    /// Show a confirmation sheet before forwarding a paste that contains a
+    /// newline. Modeless on `self.window`; falls back to a synchronous alert
+    /// if the view is not yet attached to a window (shouldn't happen in
+    /// practice, but a paste shortcut could arrive between detach and free).
+    private func confirmMultilinePaste(_ content: String) {
+        let alert = NSAlert()
+        alert.messageText = "Paste multiple lines?"
+        alert.informativeText = "The clipboard contains a line break, which may submit a command immediately."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Paste")
+        alert.addButton(withTitle: "Cancel")
+
+        guard let window else {
+            if alert.runModal() == .alertFirstButtonReturn {
+                forwardPaste(content)
+            }
+            return
+        }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.forwardPaste(content)
+        }
+    }
+
     @objc public func copy(_ sender: Any?) {
-        guard let surface else { return }
+        guard let str = currentSelectionText() else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(str, forType: .string)
+    }
+
+    /// Read the active selection from libghostty as a Swift `String`, or
+    /// `nil` if there is no selection. Shared by Copy, the right-click
+    /// smart-detect items, and Quick Look.
+    private func currentSelectionText() -> String? {
+        guard let surface else { return nil }
         var text = ghostty_text_s()
         guard ghostty_surface_has_selection(surface),
-              ghostty_surface_read_selection(surface, &text) else { return }
+              ghostty_surface_read_selection(surface, &text) else { return nil }
         defer { ghostty_surface_free_text(surface, &text) }
-        if let ptr = text.text, text.text_len > 0 {
-            let str = String(cString: ptr)
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(str, forType: .string)
-        }
+        guard let ptr = text.text, text.text_len > 0 else { return nil }
+        return String(cString: ptr)
     }
 
     // MARK: - Right-click context menu
@@ -434,6 +539,41 @@ public final class GhosttySurfaceView: NSView {
         openLinkItem.isEnabled = linkURL != nil
         menu.addItem(openLinkItem)
 
+        // Smart-detect items off the current selection (#471 gap 5). These
+        // are hover-independent: select a bare URL or a `path:line` token
+        // and the matching action lights up. Both items always render so the
+        // menu shape is stable across selections; isEnabled gates dispatch.
+        let selection = currentSelectionText()
+        let detectedURL: URL? = selection.flatMap {
+            SmartDetect.detectURL(in: $0, allowedSchemes: GhosttyApp.allowedURLSchemes)
+        }
+        let detectedFileLine: (path: String, line: Int)? = selection.flatMap {
+            SmartDetect.detectFileLine(in: $0)
+        }
+        let resolvedFileURL: URL? = detectedFileLine.flatMap { resolveFileURL(path: $0.path) }
+
+        menu.addItem(.separator())
+
+        let openURLItem = NSMenuItem(
+            title: "Open URL",
+            action: #selector(contextOpenDetectedURL(_:)),
+            keyEquivalent: ""
+        )
+        openURLItem.target = self
+        openURLItem.representedObject = detectedURL
+        openURLItem.isEnabled = detectedURL != nil
+        menu.addItem(openURLItem)
+
+        let openInEditorItem = NSMenuItem(
+            title: "Open in Editor",
+            action: #selector(contextOpenInEditor(_:)),
+            keyEquivalent: ""
+        )
+        openInEditorItem.target = self
+        openInEditorItem.representedObject = resolvedFileURL
+        openInEditorItem.isEnabled = resolvedFileURL != nil
+        menu.addItem(openInEditorItem)
+
         return menu
     }
 
@@ -459,6 +599,137 @@ public final class GhosttySurfaceView: NSView {
         guard let item = sender as? NSMenuItem,
               let url = item.representedObject as? URL else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    @objc private func contextOpenDetectedURL(_ sender: Any?) {
+        guard let item = sender as? NSMenuItem,
+              let url = item.representedObject as? URL else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func contextOpenInEditor(_ sender: Any?) {
+        guard let item = sender as? NSMenuItem,
+              let url = item.representedObject as? URL else { return }
+        // v1 limitation: we resolve the file path but drop the line
+        // number `SmartDetect.detectFileLine` parsed. Jumping to a
+        // specific line is editor-specific (txmt://, vscode://, …) and
+        // there is no portable way to pick one without a configurable
+        // editor preference. Opening the file is still useful; line
+        // navigation can be a follow-up once we add an editor setting.
+        NSWorkspace.shared.open(url)
+    }
+
+    // MARK: - Quick Look
+
+    /// Quick test (no temp file, no detector side effects beyond the
+    /// existing pure helpers) for whether the current selection is
+    /// something Quick Look can usefully preview: a remote URL with an
+    /// allowed scheme, or a `path:line` that resolves to an existing
+    /// regular file. Used to gate the spacebar intercept so we don't
+    /// swallow keystrokes typed against a stale selection.
+    private func selectionHasQuickLookCandidate() -> Bool {
+        guard let selection = currentSelectionText() else { return false }
+        if SmartDetect.detectURL(
+            in: selection, allowedSchemes: GhosttyApp.allowedURLSchemes
+        ) != nil {
+            return true
+        }
+        if let fileLine = SmartDetect.detectFileLine(in: selection),
+           resolveFileURL(path: fileLine.path) != nil {
+            return true
+        }
+        return false
+    }
+
+    /// Open `QLPreviewPanel` against the current selection (#471 gap 4).
+    /// Caller is responsible for gating via
+    /// `selectionHasQuickLookCandidate()` so this only runs on a URL or
+    /// a resolvable `path:line` reference. URL → previewed directly;
+    /// `path:line` → the resolved file URL (line number is dropped;
+    /// QLPreviewPanel has no concept of "open at line N").
+    private func showQuickLook() {
+        guard let selection = currentSelectionText() else { return }
+
+        quickLookItem = nil
+
+        if let url = SmartDetect.detectURL(
+            in: selection, allowedSchemes: GhosttyApp.allowedURLSchemes
+        ) {
+            quickLookItem = url as NSURL
+        } else if let fileLine = SmartDetect.detectFileLine(in: selection),
+                  let fileURL = resolveFileURL(path: fileLine.path) {
+            quickLookItem = fileURL as NSURL
+        } else {
+            return
+        }
+
+        let panel = QLPreviewPanel.shared()
+        if panel?.isVisible == true {
+            panel?.reloadData()
+        } else {
+            panel?.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    public override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool {
+        return true
+    }
+
+    // The QLPreviewPanel control hooks are inherited as nonisolated from
+    // NSResponder, but AppKit only ever dispatches them on the main
+    // thread. Hop via `MainActor.assumeIsolated` so we can touch the
+    // surface's main-isolated state (panel.dataSource/.delegate are
+    // themselves `@MainActor`).
+    public override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        MainActor.assumeIsolated {
+            panel.dataSource = self
+            panel.delegate = self
+        }
+    }
+
+    public override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        MainActor.assumeIsolated {
+            if panel.dataSource === self { panel.dataSource = nil }
+            if panel.delegate === self { panel.delegate = nil }
+            quickLookItem = nil
+        }
+    }
+
+    /// Resolve a `path:line` detection's path to a file URL by checking
+    /// (1) absolute on its own and (2) joined with the *active pane's*
+    /// live cwd via `TmuxBackend.activePaneCwd`. We deliberately do NOT
+    /// fall back to the surface's stored `workingDirectory` — that field
+    /// is fixed to `$HOME` at cockpit-surface create time and never
+    /// follows the shell's `cd`s, so it'd resolve `Sources/Foo.swift`
+    /// against `$HOME` and miss the project tree. Returns nil if the
+    /// path doesn't point at an existing regular file, so "Open in
+    /// Editor" stays disabled rather than launching an app bundle or a
+    /// directory by accident.
+    private func resolveFileURL(path: String) -> URL? {
+        let fm = FileManager.default
+        if (path as NSString).isAbsolutePath, isRegularFile(at: path, fm: fm) {
+            return URL(fileURLWithPath: path)
+        }
+        if let id = TmuxBackend.shared.activeTerminalID,
+           let cwd = TmuxBackend.shared.activePaneCwd(id: id) {
+            let joined = (cwd as NSString).appendingPathComponent(path)
+            if isRegularFile(at: joined, fm: fm) {
+                return URL(fileURLWithPath: joined)
+            }
+        }
+        return nil
+    }
+
+    /// True only for plain files — directories and `.app` bundles (which
+    /// `FileManager.fileExists` happily reports as existing) are rejected
+    /// so the right-click "Open in Editor" item doesn't launch an app
+    /// from a `/Applications/Foo.app:1` selection.
+    private func isRegularFile(at path: String, fm: FileManager) -> Bool {
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue else {
+            return false
+        }
+        return true
     }
 
     public override func keyUp(with event: NSEvent) {
@@ -499,6 +770,14 @@ public final class GhosttySurfaceView: NSView {
 
     public override func mouseDown(with event: NSEvent) {
         guard let surface else { return }
+        // Note: smart-detect (gap 5) is intentionally NOT bound to
+        // Cmd+click here. libghostty's C surface doesn't expose
+        // text-at-point, so we can't verify the click landed on the
+        // detected URL — a global "Cmd+click anywhere opens the
+        // selected URL" would override macOS Terminal's
+        // selection-extend convention and surprise the user. The
+        // right-click menu's "Open URL" / "Open in Editor" items
+        // already cover the selection-based flow.
         sendMousePosition(for: event)
         ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, translateMods(event.modifierFlags))
     }
@@ -659,6 +938,18 @@ extension GhosttySurfaceView {
 
     public override func accessibilitySelectedTextRange() -> NSRange {
         return selectedRange()
+    }
+}
+
+// MARK: - Quick Look conformance (#471 gap 4)
+
+extension GhosttySurfaceView: @preconcurrency QLPreviewPanelDataSource, @preconcurrency QLPreviewPanelDelegate {
+    public func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+        return quickLookItem != nil ? 1 : 0
+    }
+
+    public func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
+        return quickLookItem
     }
 }
 

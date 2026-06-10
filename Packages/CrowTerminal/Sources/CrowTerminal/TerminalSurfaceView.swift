@@ -94,6 +94,19 @@ public struct TerminalSurfaceView: NSViewRepresentable {
             surface.topAnchor.constraint(equalTo: container.topAnchor),
             surface.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
+
+        // Float the Cmd+F search bar over the surface (#471 gap 2). Only
+        // install one per container; later re-parents keep the same bar.
+        if container.subviews.contains(where: { $0 is TerminalSearchBar }) == false {
+            let bar = TerminalSearchBar(frame: .zero)
+            bar.translatesAutoresizingMaskIntoConstraints = false
+            bar.setHostSurface(surface)
+            container.addSubview(bar)
+            NSLayoutConstraint.activate([
+                bar.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+                bar.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            ])
+        }
     }
 
     @MainActor
