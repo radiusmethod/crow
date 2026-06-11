@@ -29,16 +29,26 @@ public final class ShellEnvironment: Sendable {
         env.merging(extra) { _, new in new }
     }
 
-    /// Returns `true` if `name` is an executable found in the resolved PATH.
-    public func hasCommand(_ name: String) -> Bool {
+    /// Returns the absolute path of `name` if it resolves to an executable on
+    /// the user's PATH, or `nil` otherwise. Mirrors the behavior of shell
+    /// `command -v` — walks `resolvedPATH` left-to-right and returns the first
+    /// hit. Used by every `CodingAgent` to find its CLI binary regardless of
+    /// where the user's package manager installed it (npm-global / nvm /
+    /// volta / pnpm / asdf — see CROW-484).
+    public func findExecutable(_ name: String) -> String? {
         let fm = FileManager.default
         for dir in resolvedPATH.split(separator: ":") {
             let path = "\(dir)/\(name)"
             if fm.isExecutableFile(atPath: path) {
-                return true
+                return path
             }
         }
-        return false
+        return nil
+    }
+
+    /// Returns `true` if `name` is an executable found in the resolved PATH.
+    public func hasCommand(_ name: String) -> Bool {
+        findExecutable(name) != nil
     }
 
     // MARK: - PATH Resolution

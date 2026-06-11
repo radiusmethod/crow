@@ -18,16 +18,29 @@ public struct CursorAgent: CodingAgent {
     public let iconSystemName: String = "cursorarrow.rays"
     public let supportsRemoteControl: Bool = true
     /// Cursor's CLI binary is named `agent`, not `cursor`.
+    ///
+    /// `agent` is a generic name — CI runner installs (Azure DevOps, TeamCity)
+    /// also ship a binary called `agent`, so the PATH-walk discovery in
+    /// `CodingAgent.findBinary()` can in principle resolve a non-Cursor
+    /// executable on a build machine. If that happens, set
+    /// `defaults.binaries.cursor` to the absolute path of Cursor's CLI in
+    /// `{devRoot}/.claude/config.json` — the explicit override is consulted
+    /// before the PATH walk and pins the resolution. We accept the false-
+    /// positive risk here (CROW-484) because real workstations don't usually
+    /// have a competing `agent` on PATH, and the override knob exists for
+    /// the exotic case.
     public let launchCommandToken: String = "agent"
     public let hookConfigWriter: any HookConfigWriter
     public let stateSignalSource: any StateSignalSource
 
     private let launcher: CursorLauncher
 
-    /// Standard search paths for the `agent` binary, in priority order.
-    /// Homebrew-cask installs the Cursor app bundle at the first path on
-    /// macOS; users who symlink the embedded CLI usually drop it there.
-    static let cursorBinaryCandidates: [String] = [
+    /// Last-resort search paths for the `agent` binary (Cursor's CLI), used
+    /// only when the configured `BinaryOverrides` and a PATH walk both miss.
+    /// The Cursor app bundle's embedded CLI is usually symlinked into PATH or
+    /// installed via the Cursor app's "Install 'cursor' command" action; this
+    /// list is the historical hardcoded set we used to check first (CROW-484).
+    public let fallbackCandidates: [String] = [
         "/opt/homebrew/bin/agent",
         "/usr/local/bin/agent",
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/agent").path,
@@ -40,15 +53,6 @@ public struct CursorAgent: CodingAgent {
         self.hookConfigWriter = hookConfigWriter
         self.stateSignalSource = stateSignalSource
         self.launcher = CursorLauncher()
-    }
-
-    public func findBinary() -> String? {
-        for path in Self.cursorBinaryCandidates {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-        return nil
     }
 
     public func autoLaunchCommand(

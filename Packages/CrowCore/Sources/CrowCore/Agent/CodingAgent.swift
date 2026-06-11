@@ -35,6 +35,12 @@ public protocol CodingAgent: Sendable {
     /// `AgentStateTransition` values.
     var stateSignalSource: any StateSignalSource { get }
 
+    /// Last-resort hardcoded paths for the agent's CLI binary, checked after
+    /// the user's explicit `BinaryOverrides` and a PATH walk both miss. Used
+    /// only when the user's resolved PATH is unusually narrow (CROW-484). An
+    /// empty list is fine — most agents will resolve through PATH first.
+    var fallbackCandidates: [String] { get }
+
     /// Resolve this agent's binary on disk, or return `nil` if it isn't
     /// installed. Drives binary-presence gating for the per-session picker
     /// and the launch-command builder below.
@@ -98,6 +104,35 @@ public protocol CodingAgent: Sendable {
 }
 
 public extension CodingAgent {
+    /// Default empty `fallbackCandidates` so simple conformers don't have to
+    /// declare an empty array. Agents with known install locations should
+    /// override this.
+    var fallbackCandidates: [String] { [] }
+
+    /// Default binary discovery: explicit `BinaryOverrides` → PATH walk
+    /// (using the agent's `launchCommandToken` as the binary name) →
+    /// hardcoded `fallbackCandidates`. Returns the first resolved absolute
+    /// path, or `nil` if nothing matches.
+    ///
+    /// This replaces the per-agent hardcoded-list-only impl that left
+    /// nvm/Volta/pnpm/asdf installs invisible to Crow (CROW-484).
+    func findBinary() -> String? {
+        let fm = FileManager.default
+        // 1. Explicit user override from `defaults.binaries.<kind>`. Verify
+        //    the path is still executable so a stale override falls through
+        //    to discovery rather than breaking registration outright.
+        if let configured = BinaryOverrides.shared.path(for: kind),
+           fm.isExecutableFile(atPath: configured) {
+            return configured
+        }
+        // 2. Walk the user's resolved PATH the same way `command -v` does.
+        if let found = ShellEnvironment.shared.findExecutable(launchCommandToken) {
+            return found
+        }
+        // 3. Hardcoded last-resort fallback covers the exotic-PATH case.
+        return fallbackCandidates.first { fm.isExecutableFile(atPath: $0) }
+    }
+
     /// Default Manager launch command: invoke the agent's CLI binary by
     /// name with no extra flags. The terminal backend (tmux/Ghostty) owns
     /// the submitting Enter — return the raw command without a trailing

@@ -16,8 +16,12 @@ public struct ClaudeCodeAgent: CodingAgent {
 
     private let launcher: ClaudeLauncher
 
-    /// Standard search paths for the Claude CLI binary, in priority order.
-    static let claudeBinaryCandidates: [String] = [
+    /// Last-resort search paths for the `claude` binary, used only when the
+    /// configured `BinaryOverrides` and a PATH walk both miss. Claude Code
+    /// installs via its installer to `~/.local/bin/claude` by default, which
+    /// is the first hit on most setups; the homebrew paths cover users who
+    /// symlinked the CLI into a system location (CROW-484).
+    public let fallbackCandidates: [String] = [
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/claude").path,
         "/usr/local/bin/claude",
         "/opt/homebrew/bin/claude",
@@ -30,15 +34,6 @@ public struct ClaudeCodeAgent: CodingAgent {
         self.hookConfigWriter = hookConfigWriter
         self.stateSignalSource = stateSignalSource
         self.launcher = ClaudeLauncher()
-    }
-
-    public func findBinary() -> String? {
-        for path in Self.claudeBinaryCandidates {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-        return nil
     }
 
     public func autoLaunchCommand(

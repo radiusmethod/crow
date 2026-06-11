@@ -8,7 +8,7 @@ import Testing
             WorkspaceInfo(name: "TestOrg", provider: "github", cli: "gh", alwaysInclude: ["repo1"]),
             WorkspaceInfo(name: "GitLabOrg", provider: "gitlab", cli: "glab", host: "gitlab.example.com"),
         ],
-        defaults: ConfigDefaults(provider: "gitlab", cli: "glab", branchPrefix: "fix/", excludeDirs: ["vendor"], excludeReviewRepos: ["zarf-dev/zarf", "bmlt-enabled/yap"], excludeTicketRepos: ["org/hidden-repo"]),
+        defaults: ConfigDefaults(provider: "gitlab", cli: "glab", branchPrefix: "fix/", excludeDirs: ["vendor"], excludeReviewRepos: ["zarf-dev/zarf", "bmlt-enabled/yap"], excludeTicketRepos: ["org/hidden-repo"], binaries: ["codex": "/tmp/codex"]),
         notifications: NotificationSettings(globalMute: true),
         sidebar: SidebarSettings(hideSessionDetails: true)
     )
@@ -27,8 +27,38 @@ import Testing
     #expect(decoded.defaults.excludeDirs == ["vendor"])
     #expect(decoded.defaults.excludeReviewRepos == ["zarf-dev/zarf", "bmlt-enabled/yap"])
     #expect(decoded.defaults.excludeTicketRepos == ["org/hidden-repo"])
+    #expect(decoded.defaults.binaries == ["codex": "/tmp/codex"])
     #expect(decoded.notifications.globalMute == true)
     #expect(decoded.sidebar.hideSessionDetails == true)
+}
+
+/// `defaults.binaries` decodes from explicit JSON and is keyed by
+/// `AgentKind.rawValue` (CROW-484).
+@Test func configDefaultsBinariesDecodesFromJSON() throws {
+    let json = #"""
+        {
+            "defaults": {
+                "binaries": {
+                    "codex":       "/Users/me/.nvm/versions/node/v22/bin/codex",
+                    "cursor":      "/Users/me/.bun/bin/agent",
+                    "claude-code": "/Users/me/.local/bin/claude"
+                }
+            }
+        }
+        """#.data(using: .utf8)!
+    let config = try JSONDecoder().decode(AppConfig.self, from: json)
+
+    #expect(config.defaults.binaries["codex"] == "/Users/me/.nvm/versions/node/v22/bin/codex")
+    #expect(config.defaults.binaries["cursor"] == "/Users/me/.bun/bin/agent")
+    #expect(config.defaults.binaries["claude-code"] == "/Users/me/.local/bin/claude")
+}
+
+/// Missing `binaries` key decodes to an empty map (forward-compat with
+/// existing config files written before CROW-484).
+@Test func configDefaultsBinariesDefaultsEmpty() throws {
+    let json = #"{ "defaults": { "branchPrefix": "fix/" } }"#.data(using: .utf8)!
+    let config = try JSONDecoder().decode(AppConfig.self, from: json)
+    #expect(config.defaults.binaries.isEmpty)
 }
 
 @Test func appConfigDecodeFromEmptyJSON() throws {

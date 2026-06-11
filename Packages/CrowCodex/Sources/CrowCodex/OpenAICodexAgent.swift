@@ -18,9 +18,12 @@ public struct OpenAICodexAgent: CodingAgent {
 
     private let launcher: CodexLauncher
 
-    /// Standard search paths for the `codex` binary, in priority order.
-    /// Homebrew-cask installs Codex at the first path on macOS.
-    static let codexBinaryCandidates: [String] = [
+    /// Last-resort search paths for the `codex` binary, used only when the
+    /// configured `BinaryOverrides` and a PATH walk both miss. Most users will
+    /// resolve through PATH (codex ships via `npm i -g @openai/codex` and
+    /// lives wherever the user's Node manager puts globals); this list is just
+    /// the historical hardcoded set we used to check first (CROW-484).
+    public let fallbackCandidates: [String] = [
         "/opt/homebrew/bin/codex",
         "/usr/local/bin/codex",
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/codex").path,
@@ -33,15 +36,6 @@ public struct OpenAICodexAgent: CodingAgent {
         self.hookConfigWriter = hookConfigWriter
         self.stateSignalSource = stateSignalSource
         self.launcher = CodexLauncher()
-    }
-
-    public func findBinary() -> String? {
-        for path in Self.codexBinaryCandidates {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-        return nil
     }
 
     public func autoLaunchCommand(

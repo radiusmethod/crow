@@ -3,7 +3,7 @@ import Testing
 @testable import CrowCodex
 @testable import CrowCore
 
-@Suite("OpenAICodexAgent")
+@Suite("OpenAICodexAgent", .serialized)
 struct OpenAICodexAgentTests {
     private let agent = OpenAICodexAgent()
 
@@ -61,5 +61,30 @@ struct OpenAICodexAgentTests {
         // may or may not exist depending on the developer machine, so we
         // accept either outcome and just verify the result type.
         _ = agent.findBinary()  // smoke test: must not crash
+    }
+
+    @Test func findBinaryHonorsBinaryOverride() {
+        // `defaults.binaries.codex` -> absolute path. The default
+        // `CodingAgent.findBinary()` impl should consult
+        // `BinaryOverrides.shared` before walking PATH (CROW-484).
+        // `/bin/sh` is guaranteed-executable on macOS and clearly distinct
+        // from any real codex install, so a positive result here means the
+        // override path was honored.
+        BinaryOverrides.shared.set(["codex": "/bin/sh"])
+        defer { BinaryOverrides.shared.set([:]) }
+
+        #expect(agent.findBinary() == "/bin/sh")
+    }
+
+    @Test func findBinaryIgnoresOverrideWhenPathMissing() {
+        // A stale override (binary moved/uninstalled after config edit) must
+        // not break registration outright — fall through to PATH/fallback
+        // discovery instead. We can't guarantee codex is installed in the
+        // test env, so we just assert that the bogus override doesn't get
+        // returned literally.
+        BinaryOverrides.shared.set(["codex": "/tmp/this-path-does-not-exist-crow484"])
+        defer { BinaryOverrides.shared.set([:]) }
+
+        #expect(agent.findBinary() != "/tmp/this-path-does-not-exist-crow484")
     }
 }
