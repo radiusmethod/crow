@@ -548,6 +548,36 @@ struct TmuxBackendTests {
     }
 }
 
+// MARK: - CROW-487 crowBinDir propagation
+
+/// `configure(...)` stores the per-devroot bin dir so `registerTerminal` can
+/// inject `CROW_BIN_DIR` (consumed by the shell wrapper to win PATH precedence
+/// after user rc sourcing — see crow-shell-wrapper.sh). Separate suite so it
+/// runs even when tmux isn't installed — the integration suite is gated on
+/// `discoveredTmuxBinary != nil`, but this check is pure state propagation.
+@MainActor
+@Suite("TmuxBackend crowBinDir")
+struct TmuxBackendCrowBinDirTests {
+    @Test func configurePropagatesCrowBinDir() {
+        let backend = TmuxBackend()
+        backend.configure(
+            tmuxBinary: "/usr/bin/tmux",
+            socketPath: "/tmp/crow-487-probe.sock",
+            crowBinDir: "/devroot/.claude/bin"
+        )
+        #expect(backend.crowBinDir == "/devroot/.claude/bin")
+    }
+
+    @Test func configureDefaultsCrowBinDirToEmpty() {
+        let backend = TmuxBackend()
+        backend.configure(
+            tmuxBinary: "/usr/bin/tmux",
+            socketPath: "/tmp/crow-487-probe.sock"
+        )
+        #expect(backend.crowBinDir == "")
+    }
+}
+
 /// Pure-policy tests for `shouldReconcile`. No tmux required, so the suite is
 /// always enabled (unlike the integration suite above).
 @Suite("TmuxBackend stale-config policy")

@@ -25,10 +25,19 @@ struct Scaffolder {
     /// user's locally-built corveil binary (CROW-482). Failures here are
     /// non-fatal: they are returned as `ScaffoldResult.warning` and never
     /// throw — the rest of the scaffold has already succeeded by that point.
+    ///
+    /// `binaryOverrides` is the full `defaults.binaries` map. Every entry
+    /// whose target is executable becomes a symlink at
+    /// `{devRoot}/.claude/bin/<name>` (CROW-487). Combined with the shell
+    /// wrapper's PATH prepend, that dir wins precedence for bare invocations
+    /// of `corveil` / `codex` / `cursor` inside spawned agent terminals, so
+    /// embedded skills (e.g. `/query-corveil`) resolve to the user-configured
+    /// binary instead of whatever happens to be on PATH.
     @discardableResult
     func scaffold(workspaceNames: [String],
                   managerAgentKind: AgentKind = .claudeCode,
-                  corveilBinaryPath: String? = nil) throws -> ScaffoldResult {
+                  corveilBinaryPath: String? = nil,
+                  binaryOverrides: [String: String] = [:]) throws -> ScaffoldResult {
         let fm = FileManager.default
 
         // Create devRoot
@@ -132,11 +141,79 @@ struct Scaffolder {
         let promptsDir = (claudeDir as NSString).appendingPathComponent("prompts")
         try fm.createDirectory(atPath: promptsDir, withIntermediateDirectories: true)
 
+        // Per-devroot bin dir is the precedence anchor for bare-command
+        // invocations inside spawned agent terminals (CROW-487). Every
+        // configured `defaults.binaries.<name>` becomes a symlink here, and
+        // the tmux shell wrapper prepends this dir to PATH after sourcing
+        // user rc — so `corveil`, `codex`, `cursor` resolve to the
+        // user-configured binary regardless of what's on PATH.
+        installBinarySymlinks(binaryOverrides, claudeDir: claudeDir)
+
         // Re-install the embedded /query-corveil slash command from the
         // user-configured corveil binary on every launch (CROW-482). Failure
         // here is intentionally non-fatal — the rest of the scaffold is done.
         let warning = installCorveilSkill(corveilBinaryPath)
         return ScaffoldResult(warning: warning)
+    }
+
+    /// Materialize `{devRoot}/.claude/bin/<name>` symlinks for every
+    /// `defaults.binaries.<name>` whose target is an executable file
+    /// (CROW-487). Idempotent — re-run on every Scaffolder pass:
+    ///
+    /// - Reaps symlinks whose key was removed from config, so a stale entry
+    ///   never shadows a working PATH install. Only removes entries that are
+    ///   actually symlinks (we never own non-link files in this dir).
+    /// - Skips non-executable / empty targets, dropping any prior link for
+    ///   that key. Prevents a misconfigured path from hiding `corveil` on
+    ///   the user's PATH.
+    /// - Recreates good links with `removeItem` + `createSymbolicLink`,
+    ///   matching `ln -sf` semantics.
+    ///
+    /// All errors are logged + swallowed; this step is best-effort and must
+    /// never fail an otherwise-successful scaffold pass.
+    private func installBinarySymlinks(_ overrides: [String: String], claudeDir: String) {
+        let fm = FileManager.default
+        let binDir = (claudeDir as NSString).appendingPathComponent("bin")
+        do {
+            try fm.createDirectory(atPath: binDir, withIntermediateDirectories: true)
+        } catch {
+            NSLog("[Scaffolder] could not create bin dir %@: %@", binDir, error.localizedDescription)
+            return
+        }
+
+        // Reap stale symlinks whose key is no longer in config. Skip
+        // anything that isn't a symlink — we never want to nuke a real
+        // file that someone dropped here by hand.
+        let existing = (try? fm.contentsOfDirectory(atPath: binDir)) ?? []
+        for name in existing where overrides[name] == nil {
+            let link = (binDir as NSString).appendingPathComponent(name)
+            if let attrs = try? fm.attributesOfItem(atPath: link),
+               (attrs[.type] as? FileAttributeType) == .typeSymbolicLink {
+                try? fm.removeItem(atPath: link)
+            }
+        }
+
+        for (name, target) in overrides {
+            let trimmed = target.trimmingCharacters(in: .whitespacesAndNewlines)
+            let link = (binDir as NSString).appendingPathComponent(name)
+            guard !trimmed.isEmpty, fm.isExecutableFile(atPath: trimmed) else {
+                // Misconfigured: drop any stale link for this key so a
+                // broken pointer doesn't shadow a working PATH install.
+                try? fm.removeItem(atPath: link)
+                if !trimmed.isEmpty {
+                    NSLog("[Scaffolder] defaults.binaries.%@ not executable at %@ — skipping symlink",
+                          name, trimmed)
+                }
+                continue
+            }
+            try? fm.removeItem(atPath: link)
+            do {
+                try fm.createSymbolicLink(atPath: link, withDestinationPath: trimmed)
+            } catch {
+                NSLog("[Scaffolder] failed to symlink %@ -> %@: %@",
+                      link, trimmed, error.localizedDescription)
+            }
+        }
     }
 
     /// Runs `<corveilBinaryPath> skill install --path {devRoot}/.claude/commands/query-corveil.md`

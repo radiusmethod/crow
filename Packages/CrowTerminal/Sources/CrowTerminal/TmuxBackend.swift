@@ -111,9 +111,17 @@ public final class TmuxBackend {
     /// AppDelegate guarantees only one owner).
     public private(set) var socketPath: String = ""
 
-    public func configure(tmuxBinary: String, socketPath: String) {
+    /// Per-devroot bin dir containing symlinks for `defaults.binaries.<name>`
+    /// (CROW-487). When non-empty, `registerTerminal` exports `CROW_BIN_DIR`
+    /// into the spawned tmux window and seeds the window's `PATH` with this
+    /// directory in front. The shell wrapper re-prepends it after sourcing
+    /// the user's rc so a user `export PATH=…` can't shadow the symlink farm.
+    public private(set) var crowBinDir: String = ""
+
+    public func configure(tmuxBinary: String, socketPath: String, crowBinDir: String = "") {
         self.tmuxBinary = tmuxBinary
         self.socketPath = socketPath
+        self.crowBinDir = crowBinDir
     }
 
     // MARK: - Lifecycle
@@ -221,6 +229,17 @@ public final class TmuxBackend {
             }
         }
         if !cwd.isEmpty { env["PWD"] = cwd }
+
+        // CROW-487: hand the per-devroot bin dir to the wrapper so it can
+        // prepend it to PATH *after* user rc sourcing — that's the only
+        // insertion point that survives `export PATH=…` in `.zshrc`. We also
+        // seed the window's PATH directly so non-rc shells (fish, the
+        // unknown-shell fallback branch of the wrapper, processes that
+        // bypass the wrapper entirely) still find the symlink farm.
+        if !crowBinDir.isEmpty {
+            env["CROW_BIN_DIR"] = crowBinDir
+            env["PATH"] = "\(crowBinDir):\(ShellEnvironment.shared.resolvedPATH)"
+        }
 
         let windowIndex = try ctrl.newWindow(
             name: name,

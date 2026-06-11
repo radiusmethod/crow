@@ -33,6 +33,15 @@ export CROW_SENTINEL
 if [ -n "${CROW_AGENT_KIND:-}" ]; then export CROW_AGENT_KIND; fi
 if [ -n "${CROW_AGENT_DISPLAY_NAME:-}" ]; then export CROW_AGENT_DISPLAY_NAME; fi
 
+# CROW-487: per-devroot bin dir holds symlinks for every configured
+# `defaults.binaries.<name>`. We export it here so the embedded zsh / bash
+# rc files (below) can prepend it to PATH *after* sourcing the user's rc —
+# that's the only insertion point that survives the user doing
+# `export PATH=…` in `.zshrc`. The Swift side already seeded PATH with this
+# dir in front via tmux `new-window -e`, so non-rc shells (fish, custom)
+# also resolve symlinks correctly.
+if [ -n "${CROW_BIN_DIR:-}" ]; then export CROW_BIN_DIR; fi
+
 # CROW_WRAPPER_LOG is optional. Default to /dev/null so the helper is always
 # safe to call without an unset-var guard. Issue #256.
 CROW_WRAPPER_LOG="${CROW_WRAPPER_LOG:-/dev/null}"
@@ -95,6 +104,17 @@ else
   crow_log "user_rc_skipped reason=missing rc=$ZDOTDIR/.zshrc"
 fi
 
+# CROW-487: re-prepend the Crow-managed bin dir AFTER user rc, so a user
+# `export PATH=…` in `.zshrc` cannot shadow the symlink farm. Skip the
+# re-prepend when the dir is already at the front (avoids unbounded growth
+# if a new shell is exec'd inside the existing one).
+if [ -n "${CROW_BIN_DIR:-}" ] && [ -d "$CROW_BIN_DIR" ]; then
+  case ":$PATH:" in
+    "$CROW_BIN_DIR:"*) ;;  # already first — nothing to do
+    *) export PATH="$CROW_BIN_DIR:$PATH" ;;
+  esac
+fi
+
 _crow_precmd() {
   crow_log "precmd_fired"
   if [ -n "${TMUX:-}" ]; then
@@ -152,6 +172,14 @@ if [ -f "$HOME/.bashrc" ]; then
   crow_log "user_rc_sourced rc=$HOME/.bashrc"
 else
   crow_log "user_rc_skipped reason=missing rc=$HOME/.bashrc"
+fi
+# CROW-487: re-prepend the Crow-managed bin dir AFTER user rc — see the
+# zsh branch above for rationale.
+if [ -n "${CROW_BIN_DIR:-}" ] && [ -d "$CROW_BIN_DIR" ]; then
+  case ":$PATH:" in
+    "$CROW_BIN_DIR:"*) ;;  # already first
+    *) export PATH="$CROW_BIN_DIR:$PATH" ;;
+  esac
 fi
 _crow_precmd() {
   crow_log "precmd_fired"
