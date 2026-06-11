@@ -667,6 +667,17 @@ public struct SettingsView: View {
             errDrain.abandon()
             return "✗ Could not launch: \(error.localizedDescription)"
         }
+        // Close the parent's copies of the pipe write ends so EOF arrives at
+        // our read ends when the child exits. Foundation's `Process` only
+        // closes them as part of `waitUntilExit()`; this code uses a polling
+        // loop on `isRunning` instead, so if we don't close them ourselves
+        // the drain threads' `readDataToEndOfFile()` will block forever
+        // waiting for an EOF that never comes (which would show up as empty
+        // captured output even when the child wrote bytes to its stdout).
+        // The child has its own dup'd fd, so closing the parent's copy is
+        // safe — it doesn't affect the child's ability to write.
+        try? outPipe.fileHandleForWriting.close()
+        try? errPipe.fileHandleForWriting.close()
 
         // Wall-clock timeout. Poll in 50ms slices so a hung binary is
         // SIGTERM'd rather than blocking forever; a 500ms grace lets the

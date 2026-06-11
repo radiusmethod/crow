@@ -196,6 +196,13 @@ struct Scaffolder {
             NSLog("[Scaffolder] corveil launch failed: %@", error.localizedDescription)
             return "Corveil skill install failed — \(error.localizedDescription). Check path in Settings."
         }
+        // Close the parent's copy of the stderr write end so EOF arrives at
+        // our read end when the child exits. Foundation's `Process` only
+        // closes it as part of `waitUntilExit()`; the polling loop below
+        // uses `isRunning` instead, so without this the drain thread's
+        // `readDataToEndOfFile()` would block past `pipeDrainGrace` and the
+        // failure stderr would be reported as empty.
+        try? stderrPipe.fileHandleForWriting.close()
 
         // Wall-clock timeout: poll for completion in short slices so a hung
         // process gets SIGTERM'd instead of blocking app launch indefinitely.
