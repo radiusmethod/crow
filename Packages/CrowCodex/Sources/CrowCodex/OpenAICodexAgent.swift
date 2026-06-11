@@ -50,10 +50,15 @@ public struct OpenAICodexAgent: CodingAgent {
         // log and skip rather than producing a malformed command.
         guard session.kind == .work else { return nil }
 
-        // Bare `codex` launch — the user types their prompt into the TUI.
-        // No env prefix (Codex has no OTEL equivalent), no `--continue`
-        // (MVP doesn't auto-resume), no `--rc` (Codex doesn't do remote
-        // control). The terminal's cwd is already the worktree path.
+        // Bare `codex` launch in-app. First-launch prompt delivery happens
+        // in the workspace skill (`crow-workspace/setup.sh launch_codex`),
+        // which passes the prompt file as Codex's positional argv before
+        // handing the terminal off to Crow. In-app re-launches resume the
+        // existing TUI rather than re-running the original prompt — same
+        // shape as `CursorAgent` `.work` (no `--continue` equivalent in MVP).
+        // No env prefix (Codex has no OTEL equivalent), no `--rc` (Codex
+        // doesn't do remote control). The terminal's cwd is already the
+        // worktree path.
         return "codex\n"
     }
 
