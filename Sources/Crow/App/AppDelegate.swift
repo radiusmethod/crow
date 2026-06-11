@@ -1099,6 +1099,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.appState.corveilSkillInstallWarning =
                         "Re-scaffold failed: \(error.localizedDescription)"
                 }
+            },
+            onCorveilReinstall: { [weak self] newPath in
+                // CROW-490: when the user commits a new corveil binary path in
+                // Settings, re-run just the `corveil skill install` step —
+                // not the whole Scaffolder pass — so `/query-corveil` reflects
+                // the new binary without requiring an app restart.
+                //
+                // `installCorveilSkill` calls `proc.waitUntilExit()` (bounded
+                // by `Scaffolder.corveilInstallTimeout`), so it must run off
+                // the main thread or it would freeze the Settings window for
+                // up to 5s. Result is always assigned: `nil` (success or
+                // empty/cleared path) clears any prior banner; non-nil shows
+                // the same diagnostic the launch-time path produces via the
+                // existing `AppState.corveilSkillInstallWarning` surface.
+                guard let self else { return }
+                // `devRoot` is the non-optional local from the outer guard at
+                // `showSettings()` line 1066 — captured here so the closure
+                // doesn't need to re-unwrap `self.devRoot`.
+                Task.detached {
+                    let scaffolder = Scaffolder(devRoot: devRoot)
+                    let warning = scaffolder.installCorveilSkill(newPath)
+                    await MainActor.run {
+                        self.appState.corveilSkillInstallWarning = warning
+                    }
+                }
             }
         )
 

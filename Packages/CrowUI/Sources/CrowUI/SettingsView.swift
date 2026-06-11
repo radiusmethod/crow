@@ -27,15 +27,24 @@ public struct SettingsView: View {
 
     public var onSave: ((String, AppConfig) -> Void)?
     public var onRescaffold: ((String) -> Void)?
+    /// Fired when the user commits a new value into the corveil picker
+    /// (Browse confirm or Enter on the TextField), so AppDelegate can
+    /// re-run just `Scaffolder.installCorveilSkill` instead of waiting for
+    /// the next app restart (CROW-490). `nil` argument means "the user
+    /// cleared the field" — the install is a no-op then but the caller
+    /// still gets the signal to clear any stale warning banner.
+    public var onCorveilReinstall: ((String?) -> Void)?
 
     public init(appState: AppState, devRoot: String, config: AppConfig,
                 onSave: ((String, AppConfig) -> Void)? = nil,
-                onRescaffold: ((String) -> Void)? = nil) {
+                onRescaffold: ((String) -> Void)? = nil,
+                onCorveilReinstall: ((String?) -> Void)? = nil) {
         self.appState = appState
         self._devRoot = State(initialValue: devRoot)
         self._config = State(initialValue: config)
         self.onSave = onSave
         self.onRescaffold = onRescaffold
+        self.onCorveilReinstall = onCorveilReinstall
     }
 
     /// Names of all workspaces except the one currently being edited.
@@ -266,7 +275,14 @@ public struct SettingsView: View {
                 HStack {
                     TextField("Path to corveil binary", text: corveilBinding)
                         .textFieldStyle(.roundedBorder)
-                        .onSubmit { save() }
+                        .onSubmit {
+                            save()
+                            // Hot-trigger install on Enter — passes nil if the
+                            // user committed an empty field so callers can
+                            // clear any stale warning banner (CROW-490).
+                            let path = corveilBinding.wrappedValue
+                            onCorveilReinstall?(path.isEmpty ? nil : path)
+                        }
                     Button("Browse...") {
                         let panel = NSOpenPanel()
                         panel.canChooseFiles = true
@@ -277,6 +293,8 @@ public struct SettingsView: View {
                             save()
                             // Clear stale verify result — it's about a previous binary.
                             corveilVerifyResult = nil
+                            // Hot-trigger install on Browse confirm (CROW-490).
+                            onCorveilReinstall?(url.path)
                         }
                     }
                     Button(corveilVerifying ? "Verifying…" : "Verify") { verifyCorveil() }
