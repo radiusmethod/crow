@@ -283,16 +283,24 @@ public struct SettingsView: View {
                     TextField("Path to corveil binary", text: corveilBinding)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { commitCorveilPath() }
+                        // Typing/pasting a new path into the field (not just
+                        // Browse) also makes prior results stale. Watch the
+                        // binding's source-of-truth — the config dict slot —
+                        // and clear both inline results when it changes.
+                        .onChange(of: config.defaults.binaries["corveil"] ?? "") { _, _ in
+                            corveilVerifyResult = nil
+                            corveilReinstallResult = nil
+                        }
                     Button("Browse...") {
                         let panel = NSOpenPanel()
                         panel.canChooseFiles = true
                         panel.canChooseDirectories = false
                         panel.allowsMultipleSelection = false
                         if panel.runModal() == .OK, let url = panel.url {
+                            // Mutating the binding triggers the .onChange
+                            // above, which clears stale verify/reinstall
+                            // results — no manual clears needed here.
                             corveilBinding.wrappedValue = url.path
-                            // Clear stale results — they're about a previous binary.
-                            corveilVerifyResult = nil
-                            corveilReinstallResult = nil
                             commitCorveilPath()
                         }
                     }
@@ -693,10 +701,17 @@ public struct SettingsView: View {
         // doesn't shadow this reinstall with stale output.
         corveilVerifyResult = nil
         Task {
-            // Closure may not be wired in unit tests / previews — degrade
-            // gracefully. Mirrors the `onListWorkspaceRepos` invocation
-            // pattern used elsewhere in this view.
-            let warning = await appState.onReinstallCorveilSkill?(path)
+            // Distinguish "closure returned nil (real success)" from "closure
+            // unwired (previews/tests)" — otherwise the unwired case would
+            // print a false `✓ Skill reinstalled` for an install that never
+            // ran. Explicit guard inside the Task so we don't capture a
+            // non-Sendable closure across the actor boundary.
+            guard let callback = appState.onReinstallCorveilSkill else {
+                corveilReinstallResult = "✗ Reinstall unavailable in this build (callback not wired)."
+                corveilReinstalling = false
+                return
+            }
+            let warning = await callback(path)
             if let warning {
                 corveilReinstallResult = "✗ \(warning)"
                 // Mirror the launch-time surface so the orange banner at

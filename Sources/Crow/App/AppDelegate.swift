@@ -459,14 +459,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Settings → Corveil CLI → "Reinstall skill" (issue #491). Runs the
         // same `corveil skill install` flow as the per-launch path, on
-        // demand. Captures `devRoot` (a let) — Scaffolder is a value-type
-        // struct so we construct fresh per click. The closure is async and
-        // offloads the synchronous `Process.waitUntilExit` work to a
-        // detached task; SettingsView awaits this without blocking the
-        // main actor for the install timeout.
-        appState.onReinstallCorveilSkill = { path in
-            await Task.detached(priority: .userInitiated) {
-                let scaffolder = Scaffolder(devRoot: devRoot)
+        // demand. Reads `self.devRoot` live (not the captured launch-time
+        // `let devRoot`) because Settings can mutate devRoot via
+        // `saveSettings(devRoot:config:)` in the same window — capturing
+        // the launch-time value would silently install into the previous
+        // devRoot. Mirrors the `onListWorkspaceRepos` pattern. The closure
+        // is async and offloads the synchronous `Process.waitUntilExit`
+        // work to a detached task; SettingsView awaits this without
+        // blocking the main actor for the install timeout.
+        appState.onReinstallCorveilSkill = { [weak self] path in
+            guard let currentDevRoot = self?.devRoot else { return nil }
+            return await Task.detached(priority: .userInitiated) {
+                let scaffolder = Scaffolder(devRoot: currentDevRoot)
                 return scaffolder.installCorveilSkill(path)
             }.value
         }
