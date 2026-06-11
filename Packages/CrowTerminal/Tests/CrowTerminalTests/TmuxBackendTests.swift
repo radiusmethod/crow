@@ -286,6 +286,49 @@ struct TmuxBackendTests {
         try backend.sendText(id: id, text: "PROD2-486-normal-\(UUID().uuidString)\n")
     }
 
+    /// Regression for the bare-Enter leg of #486: `crow send "\n"` (and the
+    /// `sendTextEmptyWithNewlineDoesNotThrow` shape) skip the paste path
+    /// entirely and go straight to `send-keys Enter`. Without the pre-cancel
+    /// hoisted out of the `if !payload.isEmpty` block, the Enter is routed
+    /// through the copy-mode key table (emacs `copy-selection-and-cancel`,
+    /// vi `cancel`) — exits copy-mode but never delivers a CR to the shell.
+    /// Verify the cancel still runs and the pane leaves copy-mode.
+    @Test func sendTextBareEnterCancelsCopyMode() throws {
+        let backend = makeBackend()
+        defer { backend.shutdown() }
+
+        let id = UUID()
+        let binding = try backend.registerTerminal(
+            id: id,
+            name: "bare-enter-copy-mode",
+            cwd: NSHomeDirectory(),
+            command: nil,
+            trackReadiness: false
+        )
+
+        let ctrl = TmuxController(
+            tmuxBinary: discoveredTmuxBinary!,
+            socketPath: backend.socketPath,
+            sessionName: TmuxBackend.cockpitSessionName
+        )
+        let target = "\(TmuxBackend.cockpitSessionName):\(binding.windowIndex)"
+        _ = try ctrl.run(["copy-mode", "-H", "-t", target])
+
+        let inModeBefore = try ctrl.run([
+            "display-message", "-p", "-t", target, "-F", "#{pane_in_mode}"
+        ]).trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(inModeBefore == "1")
+
+        // Bare "\n" — empty payload, didPaste stays false. The pre-cancel
+        // must still run.
+        try backend.sendText(id: id, text: "\n")
+
+        let inModeAfter = try ctrl.run([
+            "display-message", "-p", "-t", target, "-F", "#{pane_in_mode}"
+        ]).trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(inModeAfter == "0")
+    }
+
     @Test func retryReadinessEmitsTimedOutWhenSentinelMissing() async throws {
         let backend = makeBackend()
         defer { backend.shutdown() }
