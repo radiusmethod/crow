@@ -18,6 +18,12 @@ public struct SettingsView: View {
     @State private var editingJob: JobConfig?
     /// A pre-filled copy of a job, presented in the form (create mode) to duplicate it.
     @State private var duplicatingJob: JobConfig?
+    /// Live result of the most recent corveil "Verify" run. `nil` until the
+    /// user has clicked Verify at least once this Settings session. Starts
+    /// with `✓` on success, `✗` on failure (CROW-482).
+    @State private var corveilVerifyResult: String?
+    /// True while the Verify button's subprocess is in flight.
+    @State private var corveilVerifying: Bool = false
 
     public var onSave: ((String, AppConfig) -> Void)?
     public var onRescaffold: ((String) -> Void)?
@@ -181,6 +187,23 @@ public struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var corveilSkillWarningBanner: some View {
+        if let warning = appState.corveilSkillInstallWarning {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(warning)
+                    .font(.caption)
+                    .textSelection(.enabled)
+                Spacer()
+            }
+            .padding(10)
+            .background(Color.orange.opacity(0.12))
+            .cornerRadius(6)
+        }
+    }
+
     private var generalTab: some View {
         Form {
             if appState.githubScopeWarning != nil {
@@ -191,6 +214,9 @@ public struct SettingsView: View {
             }
             if appState.rateLimitWarning != nil {
                 Section { rateLimitWarningBanner }
+            }
+            if appState.corveilSkillInstallWarning != nil {
+                Section { corveilSkillWarningBanner }
             }
             Section("Development Root") {
                 HStack {
@@ -232,6 +258,37 @@ public struct SettingsView: View {
                 perActionAgentPicker(label: "Agent for scheduled jobs", kind: .job)
                 perActionAgentPicker(label: "Agent for Manager", kind: .manager)
                 Text("Per-action overrides. “Use default” falls back to the Default Agent above. Manager changes take effect on next Manager respawn.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Corveil CLI") {
+                HStack {
+                    TextField("Path to corveil binary", text: corveilBinding)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { save() }
+                    Button("Browse...") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseFiles = true
+                        panel.canChooseDirectories = false
+                        panel.allowsMultipleSelection = false
+                        if panel.runModal() == .OK, let url = panel.url {
+                            corveilBinding.wrappedValue = url.path
+                            save()
+                            // Clear stale verify result — it's about a previous binary.
+                            corveilVerifyResult = nil
+                        }
+                    }
+                    Button(corveilVerifying ? "Verifying…" : "Verify") { verifyCorveil() }
+                        .disabled(corveilBinding.wrappedValue.isEmpty || corveilVerifying)
+                }
+                if let result = corveilVerifyResult {
+                    Text(result)
+                        .font(.caption)
+                        .foregroundStyle(result.hasPrefix("✓") ? .green : .orange)
+                        .textSelection(.enabled)
+                }
+                Text("On launch, Crow runs `corveil skill install --path` to install the `/query-corveil` slash command into this devRoot. Leave blank to skip.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -535,6 +592,77 @@ public struct SettingsView: View {
 
     private func save() {
         onSave?(devRoot, config)
+    }
+
+    /// Two-way binding into `config.defaults.binaries["corveil"]` that treats
+    /// an empty string as "unset" (so the map doesn't accumulate stale empty
+    /// entries when the user clears the field). Trimming happens on commit so
+    /// pasted paths with stray whitespace are normalized.
+    private var corveilBinding: Binding<String> {
+        Binding(
+            get: { config.defaults.binaries["corveil"] ?? "" },
+            set: { newValue in
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty {
+                    config.defaults.binaries.removeValue(forKey: "corveil")
+                } else {
+                    config.defaults.binaries["corveil"] = trimmed
+                }
+            }
+        )
+    }
+
+    /// Run `<corveilPath> --version` and surface the result. Lives off the
+    /// main actor so the spinning UI doesn't block. Truncates noisy output
+    /// to keep the inline result line readable.
+    private func verifyCorveil() {
+        let path = corveilBinding.wrappedValue
+        guard !path.isEmpty else { return }
+        corveilVerifying = true
+        corveilVerifyResult = nil
+        Task.detached {
+            let result = SettingsView.runCorveilVersion(at: path)
+            await MainActor.run {
+                corveilVerifyResult = result
+                corveilVerifying = false
+            }
+        }
+    }
+
+    /// Pure helper for `verifyCorveil` — easier to reason about off the main
+    /// actor and trivially testable. Returns a single-line summary suitable
+    /// for inline display.
+    nonisolated static func runCorveilVersion(at path: String) -> String {
+        let fm = FileManager.default
+        guard fm.isExecutableFile(atPath: path) else {
+            return "✗ Not executable: \(path)"
+        }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: path)
+        proc.arguments = ["--version"]
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        proc.standardOutput = outPipe
+        proc.standardError = errPipe
+        do {
+            try proc.run()
+        } catch {
+            return "✗ Could not launch: \(error.localizedDescription)"
+        }
+        proc.waitUntilExit()
+        let out = (try? outPipe.fileHandleForReading.readToEnd())
+            .flatMap { String(data: $0, encoding: .utf8) }?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let err = (try? errPipe.fileHandleForReading.readToEnd())
+            .flatMap { String(data: $0, encoding: .utf8) }?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let combined = [out, err].filter { !$0.isEmpty }.joined(separator: " — ")
+        let snippet = combined.split(separator: "\n").first.map(String.init) ?? combined
+        if proc.terminationStatus == 0 {
+            return snippet.isEmpty ? "✓ Verified" : "✓ \(snippet)"
+        }
+        let detail = snippet.isEmpty ? "exit code \(proc.terminationStatus)" : snippet
+        return "✗ \(detail)"
     }
 
     /// One per-action agent picker (Coding/Reviews/Jobs). "Use default"

@@ -1,6 +1,14 @@
 import CrowCore
 import Foundation
 
+/// Outcome of a single `Scaffolder.scaffold(...)` run. `warning` is non-nil only
+/// for non-fatal post-scaffold issues (today: a configured `corveil` binary
+/// that's missing/non-executable or whose `skill install` returned non-zero).
+/// Callers surface it via `AppState.corveilSkillInstallWarning`; never fatal.
+struct ScaffoldResult {
+    var warning: String?
+}
+
 /// Creates the devRoot directory structure and copies bundled resources.
 struct Scaffolder {
     let devRoot: String
@@ -10,7 +18,17 @@ struct Scaffolder {
     /// `managerAgentKind` drives `{{CROW_AGENT_DISPLAY_NAME}}` substitution in the
     /// dev-root skill bodies (issue #447). The Manager session is the consumer of
     /// these files, so its agent kind is the right one to bake in.
-    func scaffold(workspaceNames: [String], managerAgentKind: AgentKind = .claudeCode) throws {
+    ///
+    /// `corveilBinaryPath`, when set and executable, triggers a post-scaffold
+    /// `corveil skill install --path {devRoot}/.claude/commands/query-corveil.md`
+    /// so the embedded `/query-corveil` slash command stays in sync with the
+    /// user's locally-built corveil binary (CROW-482). Failures here are
+    /// non-fatal: they are returned as `ScaffoldResult.warning` and never
+    /// throw — the rest of the scaffold has already succeeded by that point.
+    @discardableResult
+    func scaffold(workspaceNames: [String],
+                  managerAgentKind: AgentKind = .claudeCode,
+                  corveilBinaryPath: String? = nil) throws -> ScaffoldResult {
         let fm = FileManager.default
 
         // Create devRoot
@@ -113,6 +131,64 @@ struct Scaffolder {
         // Create prompts directory for crow-workspace prompt files
         let promptsDir = (claudeDir as NSString).appendingPathComponent("prompts")
         try fm.createDirectory(atPath: promptsDir, withIntermediateDirectories: true)
+
+        // Re-install the embedded /query-corveil slash command from the
+        // user-configured corveil binary on every launch (CROW-482). Failure
+        // here is intentionally non-fatal — the rest of the scaffold is done.
+        let warning = installCorveilSkill(corveilBinaryPath)
+        return ScaffoldResult(warning: warning)
+    }
+
+    /// Runs `<corveilBinaryPath> skill install --path {devRoot}/.claude/commands/query-corveil.md`
+    /// when the path is set and points at an executable. Returns a short
+    /// user-facing warning string on failure; `nil` on success or when the
+    /// feature is unconfigured (empty/nil path).
+    private func installCorveilSkill(_ corveilBinaryPath: String?) -> String? {
+        guard let path = corveilBinaryPath?.trimmingCharacters(in: .whitespaces),
+              !path.isEmpty else {
+            return nil
+        }
+        let fm = FileManager.default
+        guard fm.isExecutableFile(atPath: path) else {
+            NSLog("[Scaffolder] corveil binary not executable: %@", path)
+            return "Corveil skill install skipped — binary at \(path) is missing or not executable. Check Settings → General → Corveil CLI."
+        }
+
+        let commandsDir = (devRoot as NSString).appendingPathComponent(".claude/commands")
+        do {
+            try fm.createDirectory(atPath: commandsDir, withIntermediateDirectories: true)
+        } catch {
+            NSLog("[Scaffolder] could not create commands dir: %@", error.localizedDescription)
+            return "Corveil skill install failed — could not create .claude/commands directory."
+        }
+        let target = (commandsDir as NSString).appendingPathComponent("query-corveil.md")
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: path)
+        proc.arguments = ["skill", "install", "--path", target]
+        let stderrPipe = Pipe()
+        proc.standardError = stderrPipe
+        // Discard stdout — corveil prints a single diagnostic line we don't surface.
+        proc.standardOutput = Pipe()
+
+        do {
+            try proc.run()
+        } catch {
+            NSLog("[Scaffolder] corveil launch failed: %@", error.localizedDescription)
+            return "Corveil skill install failed — \(error.localizedDescription). Check path in Settings."
+        }
+        proc.waitUntilExit()
+        if proc.terminationStatus != 0 {
+            let stderr = (try? stderrPipe.fileHandleForReading.readToEnd())
+                .flatMap { String(data: $0, encoding: .utf8) }?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            NSLog("[Scaffolder] corveil skill install exit=%d stderr=%@",
+                  proc.terminationStatus, stderr)
+            let detail = stderr.isEmpty ? "exit code \(proc.terminationStatus)" : stderr
+            return "Corveil skill install failed — \(detail). Check path in Settings."
+        }
+        NSLog("[Scaffolder] corveil skill installed at %@", target)
+        return nil
     }
 
     // MARK: - Bundled Templates

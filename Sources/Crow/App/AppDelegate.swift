@@ -300,10 +300,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Scaffold directory structure
             let scaffolder = Scaffolder(devRoot: devRoot)
-            try scaffolder.scaffold(
+            let result = try scaffolder.scaffold(
                 workspaceNames: config.workspaces.map(\.name),
-                managerAgentKind: config.agentKind(for: .manager)
+                managerAgentKind: config.agentKind(for: .manager),
+                corveilBinaryPath: config.defaults.binaries["corveil"]
             )
+            appState.corveilSkillInstallWarning = result.warning
 
             // Save config
             try ConfigStore.saveConfig(config, devRoot: devRoot)
@@ -403,10 +405,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Update skills and CLAUDE.md on every launch
         let scaffolder = Scaffolder(devRoot: devRoot)
         do {
-            try scaffolder.scaffold(
+            let result = try scaffolder.scaffold(
                 workspaceNames: config.workspaces.map(\.name),
-                managerAgentKind: config.agentKind(for: .manager)
+                managerAgentKind: config.agentKind(for: .manager),
+                corveilBinaryPath: config.defaults.binaries["corveil"]
             )
+            appState.corveilSkillInstallWarning = result.warning
         } catch {
             NSLog("[Crow] Scaffold update failed: %@", error.localizedDescription)
         }
@@ -1068,10 +1072,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onRescaffold: { [weak self] devRoot in
                 let scaffolder = Scaffolder(devRoot: devRoot)
                 let cfg = self?.appConfig
-                try? scaffolder.scaffold(
+                let result = try? scaffolder.scaffold(
                     workspaceNames: cfg?.workspaces.map(\.name) ?? [],
-                    managerAgentKind: cfg?.agentKind(for: .manager) ?? .claudeCode
+                    managerAgentKind: cfg?.agentKind(for: .manager) ?? .claudeCode,
+                    corveilBinaryPath: cfg?.defaults.binaries["corveil"]
                 )
+                if let warning = result?.warning {
+                    self?.appState.corveilSkillInstallWarning = warning
+                } else if result != nil {
+                    // Scaffold completed and corveil install (if attempted) succeeded —
+                    // clear any stale warning from a prior failed launch.
+                    self?.appState.corveilSkillInstallWarning = nil
+                }
             }
         )
 
