@@ -324,37 +324,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func launchMainApp() {
         guard let devRoot else { return }
 
+        // Load config first so per-agent binary overrides
+        // (`defaults.binaries.<kind>`) are visible to the registration gates
+        // below — `CodingAgent.findBinary()` consults `BinaryOverrides.shared`
+        // before walking PATH (CROW-484).
+        let config = appConfig ?? ConfigStore.loadConfig(devRoot: devRoot) ?? AppConfig()
+        self.appConfig = config
+        BinaryOverrides.shared.set(config.defaults.binaries)
+
         // Register the Claude Code agent in the shared registry — always
         // present, since the Manager terminal and the default-agent picker
         // both rely on it.
         AgentRegistry.shared.register(ClaudeCodeAgent())
 
         // Conditionally register the OpenAI Codex agent — only when its
-        // binary is on disk. Keeps the per-session picker clean for users
-        // who haven't installed Codex.
+        // binary resolves on PATH (or via an explicit `defaults.binaries.codex`
+        // override). Keeps the per-session picker clean for users who haven't
+        // installed Codex (CROW-484).
         let codexAgent = OpenAICodexAgent()
-        if codexAgent.findBinary() != nil {
+        if let codexPath = codexAgent.findBinary() {
             AgentRegistry.shared.register(codexAgent)
-            NSLog("[Crow] OpenAI Codex agent registered")
+            NSLog("[Crow] OpenAI Codex agent registered at %@", codexPath)
         }
 
         // Conditionally register the Cursor agent on the same gate. The
         // Cursor CLI installs the binary as `agent` (not `cursor`); when
         // it's absent the picker silently stays at the two prior agents.
         let cursorAgent = CursorAgent()
-        if cursorAgent.findBinary() != nil {
+        if let cursorPath = cursorAgent.findBinary() {
             AgentRegistry.shared.register(cursorAgent)
-            NSLog("[Crow] Cursor agent registered")
+            NSLog("[Crow] Cursor agent registered at %@", cursorPath)
         }
 
         // Initialize libghostty
         NSLog("[Crow] Initializing Ghostty")
         GhosttyApp.shared.initialize()
 
-        // Load config before initializing the terminal backend so any future
-        // backend selection knobs can read it.
-        let config = appConfig ?? ConfigStore.loadConfig(devRoot: devRoot) ?? AppConfig()
-        self.appConfig = config
         NSLog("[Crow] Config loaded (workspaces: %d)", config.workspaces.count)
 
         // Configure the tmux backend (#198 → defaulted-on in #301 → the only

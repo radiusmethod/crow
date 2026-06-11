@@ -406,6 +406,12 @@ public struct ConfigDefaults: Codable, Sendable, Equatable {
     public var excludeReviewRepos: [String]
     public var excludeTicketRepos: [String]
     public var ignoreReviewLabels: [String]
+    /// Explicit absolute-path overrides for `CodingAgent` binary discovery,
+    /// keyed by `AgentKind.rawValue` (e.g. `"codex"`, `"cursor"`, `"claude-code"`).
+    /// Consulted before the PATH walk in `CodingAgent.findBinary()` — set this
+    /// when discovery doesn't find your install for any reason (exotic Node
+    /// manager, sandboxed PATH, etc.). See CROW-484.
+    public var binaries: [String: String]
 
     /// Characters that are invalid in git ref names (see `git check-ref-format`).
     private static let invalidBranchChars = CharacterSet(charactersIn: " ~^:?*[\\")
@@ -432,7 +438,8 @@ public struct ConfigDefaults: Codable, Sendable, Equatable {
         excludeDirs: [String] = ["node_modules", ".git", "vendor", "dist", "build", "target"],
         excludeReviewRepos: [String] = [],
         excludeTicketRepos: [String] = [],
-        ignoreReviewLabels: [String] = []
+        ignoreReviewLabels: [String] = [],
+        binaries: [String: String] = [:]
     ) {
         self.provider = provider
         self.cli = cli
@@ -441,6 +448,7 @@ public struct ConfigDefaults: Codable, Sendable, Equatable {
         self.excludeReviewRepos = excludeReviewRepos
         self.excludeTicketRepos = excludeTicketRepos
         self.ignoreReviewLabels = ignoreReviewLabels
+        self.binaries = binaries
     }
 
     public init(from decoder: Decoder) throws {
@@ -452,10 +460,11 @@ public struct ConfigDefaults: Codable, Sendable, Equatable {
         excludeReviewRepos = try container.decodeIfPresent([String].self, forKey: .excludeReviewRepos) ?? []
         excludeTicketRepos = try container.decodeIfPresent([String].self, forKey: .excludeTicketRepos) ?? []
         ignoreReviewLabels = try container.decodeIfPresent([String].self, forKey: .ignoreReviewLabels) ?? []
+        binaries = try container.decodeIfPresent([String: String].self, forKey: .binaries) ?? [:]
     }
 
     private enum CodingKeys: String, CodingKey {
-        case provider, cli, branchPrefix, excludeDirs, excludeReviewRepos, excludeTicketRepos, ignoreReviewLabels
+        case provider, cli, branchPrefix, excludeDirs, excludeReviewRepos, excludeTicketRepos, ignoreReviewLabels, binaries
     }
 }
 

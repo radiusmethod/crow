@@ -24,10 +24,12 @@ public struct CursorAgent: CodingAgent {
 
     private let launcher: CursorLauncher
 
-    /// Standard search paths for the `agent` binary, in priority order.
-    /// Homebrew-cask installs the Cursor app bundle at the first path on
-    /// macOS; users who symlink the embedded CLI usually drop it there.
-    static let cursorBinaryCandidates: [String] = [
+    /// Last-resort search paths for the `agent` binary (Cursor's CLI), used
+    /// only when the configured `BinaryOverrides` and a PATH walk both miss.
+    /// The Cursor app bundle's embedded CLI is usually symlinked into PATH or
+    /// installed via the Cursor app's "Install 'cursor' command" action; this
+    /// list is the historical hardcoded set we used to check first (CROW-484).
+    public let fallbackCandidates: [String] = [
         "/opt/homebrew/bin/agent",
         "/usr/local/bin/agent",
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/agent").path,
@@ -40,15 +42,6 @@ public struct CursorAgent: CodingAgent {
         self.hookConfigWriter = hookConfigWriter
         self.stateSignalSource = stateSignalSource
         self.launcher = CursorLauncher()
-    }
-
-    public func findBinary() -> String? {
-        for path in Self.cursorBinaryCandidates {
-            if FileManager.default.isExecutableFile(atPath: path) {
-                return path
-            }
-        }
-        return nil
     }
 
     public func autoLaunchCommand(
