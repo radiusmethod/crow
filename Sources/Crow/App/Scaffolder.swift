@@ -175,8 +175,10 @@ struct Scaffolder {
         proc.arguments = ["skill", "install", "--path", target]
         let stderrPipe = Pipe()
         proc.standardError = stderrPipe
-        // Discard stdout — corveil prints a single diagnostic line we don't surface.
-        proc.standardOutput = Pipe()
+        // Discard stdout explicitly. We don't surface corveil's diagnostic
+        // line, and routing to /dev/null is deadlock-proof — an undrained
+        // `Pipe()` would block the child if it ever wrote >64KB before exit.
+        proc.standardOutput = FileHandle.nullDevice
 
         do {
             try proc.run()

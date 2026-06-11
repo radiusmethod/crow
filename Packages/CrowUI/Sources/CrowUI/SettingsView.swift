@@ -632,6 +632,13 @@ public struct SettingsView: View {
     /// Pure helper for `verifyCorveil` — easier to reason about off the main
     /// actor and trivially testable. Returns a single-line summary suitable
     /// for inline display.
+    ///
+    /// Bounded by `verifyTimeout` so a misbehaving binary that hangs on
+    /// `--version` can't pin the detached Task forever (matches the
+    /// `Scaffolder.installCorveilSkill` install-path timeout). stdout/stderr
+    /// are drained concurrently via readability handlers so a binary that
+    /// emits more than the pipe buffer (~64KB) before exiting can't deadlock
+    /// against the unread pipe.
     nonisolated static func runCorveilVersion(at path: String) -> String {
         let fm = FileManager.default
         guard fm.isExecutableFile(atPath: path) else {
@@ -644,26 +651,74 @@ public struct SettingsView: View {
         let errPipe = Pipe()
         proc.standardOutput = outPipe
         proc.standardError = errPipe
+
+        // Concurrent drain. The readability handlers run on a Foundation-
+        // managed background queue, so we cannot capture local `var`s — use
+        // a thread-safe reference-typed accumulator that's safe to share.
+        let outAcc = DataAccumulator()
+        let errAcc = DataAccumulator()
+        outPipe.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if !chunk.isEmpty { outAcc.append(chunk) }
+        }
+        errPipe.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if !chunk.isEmpty { errAcc.append(chunk) }
+        }
+        // Ensure handlers detach on every exit path so the file handles
+        // close cleanly even if we return early on launch failure.
+        defer {
+            outPipe.fileHandleForReading.readabilityHandler = nil
+            errPipe.fileHandleForReading.readabilityHandler = nil
+        }
+
         do {
             try proc.run()
         } catch {
             return "✗ Could not launch: \(error.localizedDescription)"
         }
-        proc.waitUntilExit()
-        let out = (try? outPipe.fileHandleForReading.readToEnd())
-            .flatMap { String(data: $0, encoding: .utf8) }?
+
+        // Wall-clock timeout. Poll in 50ms slices so a hung binary is
+        // SIGTERM'd rather than blocking forever; a 500ms grace lets the
+        // process honor SIGTERM before we drop it.
+        let deadline = Date().addingTimeInterval(verifyTimeout)
+        var timedOut = false
+        while proc.isRunning {
+            if Date() >= deadline {
+                proc.terminate()
+                let graceDeadline = Date().addingTimeInterval(0.5)
+                while proc.isRunning, Date() < graceDeadline {
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+                timedOut = true
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+
+        let outStr = String(data: outAcc.snapshot(), encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let err = (try? errPipe.fileHandleForReading.readToEnd())
-            .flatMap { String(data: $0, encoding: .utf8) }?
+        let errStr = String(data: errAcc.snapshot(), encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let combined = [out, err].filter { !$0.isEmpty }.joined(separator: " — ")
+        let combined = [outStr, errStr].filter { !$0.isEmpty }.joined(separator: " — ")
         let snippet = combined.split(separator: "\n").first.map(String.init) ?? combined
+
+        if timedOut {
+            return "✗ Timed out after \(Int(verifyTimeout))s — binary may be hung."
+        }
         if proc.terminationStatus == 0 {
             return snippet.isEmpty ? "✓ Verified" : "✓ \(snippet)"
         }
         let detail = snippet.isEmpty ? "exit code \(proc.terminationStatus)" : snippet
         return "✗ \(detail)"
     }
+
+    /// Wall-clock budget for the "Verify" subprocess. Matches the install
+    /// path's `Scaffolder.corveilInstallTimeout` — a corveil that hangs on
+    /// `--version` is bounded to the same 5s window as one that hangs on
+    /// `skill install`. The Task wrapper runs off the main actor so the UI
+    /// stays responsive while this wait elapses.
+    nonisolated static let verifyTimeout: TimeInterval = 5.0
 
     /// One per-action agent picker (Coding/Reviews/Jobs). "Use default"
     /// removes the override; selecting a concrete agent writes the
@@ -700,5 +755,25 @@ public struct SettingsView: View {
         case "jira": return Color.blue.opacity(0.15)
         default: return Color.orange.opacity(0.15)  // gitlab / other
         }
+    }
+}
+
+/// Lock-serialized `Data` accumulator. Used by `SettingsView.runCorveilVersion`
+/// so the off-queue readability handlers can share mutable state with the
+/// polling loop without tripping Swift 6 sendable-capture rules.
+/// `@unchecked Sendable` is sound here because every access goes through
+/// the lock.
+private final class DataAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ chunk: Data) {
+        lock.lock(); defer { lock.unlock() }
+        data.append(chunk)
+    }
+
+    func snapshot() -> Data {
+        lock.lock(); defer { lock.unlock() }
+        return data
     }
 }

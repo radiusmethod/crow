@@ -1074,17 +1074,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onRescaffold: { [weak self] devRoot in
                 let scaffolder = Scaffolder(devRoot: devRoot)
                 let cfg = self?.appConfig
-                let result = try? scaffolder.scaffold(
-                    workspaceNames: cfg?.workspaces.map(\.name) ?? [],
-                    managerAgentKind: cfg?.agentKind(for: .manager) ?? .claudeCode,
-                    corveilBinaryPath: cfg?.defaults.binaries["corveil"]
-                )
-                if let warning = result?.warning {
-                    self?.appState.corveilSkillInstallWarning = warning
-                } else if result != nil {
-                    // Scaffold completed and corveil install (if attempted) succeeded —
-                    // clear any stale warning from a prior failed launch.
-                    self?.appState.corveilSkillInstallWarning = nil
+                do {
+                    let result = try scaffolder.scaffold(
+                        workspaceNames: cfg?.workspaces.map(\.name) ?? [],
+                        managerAgentKind: cfg?.agentKind(for: .manager) ?? .claudeCode,
+                        corveilBinaryPath: cfg?.defaults.binaries["corveil"]
+                    )
+                    // Always assign — clears a stale warning from a prior
+                    // launch when the install now succeeds (`result.warning`
+                    // is `nil` on success or no-op).
+                    self?.appState.corveilSkillInstallWarning = result.warning
+                } catch {
+                    NSLog("[Crow] Re-scaffold failed: %@", error.localizedDescription)
+                    // Replace any existing corveil-install banner with a
+                    // fresh "rescaffold failed" message so the user isn't
+                    // looking at a stale message from a prior launch.
+                    self?.appState.corveilSkillInstallWarning =
+                        "Re-scaffold failed: \(error.localizedDescription)"
                 }
             }
         )
