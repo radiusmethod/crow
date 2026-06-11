@@ -227,7 +227,12 @@ struct Scaffolder {
     /// window drawn yet. The hard wall-clock timeout bounds the worst case:
     /// after `corveilInstallTimeout` seconds the process is sent SIGTERM and
     /// the install reports a warning rather than blocking forever.
-    private func installCorveilSkill(_ corveilBinaryPath: String?) -> String? {
+    ///
+    /// Settings can also call this directly (CROW-490) when the user picks a
+    /// new corveil binary, to avoid the "must restart" gap. Those callers
+    /// dispatch the call off the main thread (`Task.detached`) so the 5s
+    /// worst-case doesn't freeze the Settings window.
+    func installCorveilSkill(_ corveilBinaryPath: String?) -> String? {
         guard let path = corveilBinaryPath?.trimmingCharacters(in: .whitespacesAndNewlines),
               !path.isEmpty else {
             return nil

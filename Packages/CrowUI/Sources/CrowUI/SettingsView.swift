@@ -27,15 +27,24 @@ public struct SettingsView: View {
 
     public var onSave: ((String, AppConfig) -> Void)?
     public var onRescaffold: ((String) -> Void)?
+    /// Fired when the user commits a new value into the corveil picker
+    /// (Browse confirm or Enter on the TextField), so AppDelegate can
+    /// re-run just `Scaffolder.installCorveilSkill` instead of waiting for
+    /// the next app restart (CROW-490). `nil` argument means "the user
+    /// cleared the field" — the install is a no-op then but the caller
+    /// still gets the signal to clear any stale warning banner.
+    public var onCorveilReinstall: ((String?) -> Void)?
 
     public init(appState: AppState, devRoot: String, config: AppConfig,
                 onSave: ((String, AppConfig) -> Void)? = nil,
-                onRescaffold: ((String) -> Void)? = nil) {
+                onRescaffold: ((String) -> Void)? = nil,
+                onCorveilReinstall: ((String?) -> Void)? = nil) {
         self.appState = appState
         self._devRoot = State(initialValue: devRoot)
         self._config = State(initialValue: config)
         self.onSave = onSave
         self.onRescaffold = onRescaffold
+        self.onCorveilReinstall = onCorveilReinstall
     }
 
     /// Names of all workspaces except the one currently being edited.
@@ -266,7 +275,7 @@ public struct SettingsView: View {
                 HStack {
                     TextField("Path to corveil binary", text: corveilBinding)
                         .textFieldStyle(.roundedBorder)
-                        .onSubmit { save() }
+                        .onSubmit { commitCorveilPath() }
                     Button("Browse...") {
                         let panel = NSOpenPanel()
                         panel.canChooseFiles = true
@@ -274,9 +283,9 @@ public struct SettingsView: View {
                         panel.allowsMultipleSelection = false
                         if panel.runModal() == .OK, let url = panel.url {
                             corveilBinding.wrappedValue = url.path
-                            save()
                             // Clear stale verify result — it's about a previous binary.
                             corveilVerifyResult = nil
+                            commitCorveilPath()
                         }
                     }
                     Button(corveilVerifying ? "Verifying…" : "Verify") { verifyCorveil() }
@@ -592,6 +601,21 @@ public struct SettingsView: View {
 
     private func save() {
         onSave?(devRoot, config)
+    }
+
+    /// Commit a corveil picker change: persist the config and hot-trigger
+    /// the `/query-corveil` install for the new path (CROW-490). Both
+    /// commit sites (Browse confirm and TextField `onSubmit`) funnel
+    /// through here so the "persist → reinstall" pair stays atomic and
+    /// the `nil`-on-empty rule has a single source of truth. We read the
+    /// path through `corveilBinding.wrappedValue` rather than the raw
+    /// input so the binding's whitespace-trim normalization wins — the
+    /// install closure sees the same string that the next launch's
+    /// scaffolder would see.
+    private func commitCorveilPath() {
+        save()
+        let path = corveilBinding.wrappedValue
+        onCorveilReinstall?(path.isEmpty ? nil : path)
     }
 
     /// Two-way binding into `config.defaults.binaries["corveil"]` that treats
