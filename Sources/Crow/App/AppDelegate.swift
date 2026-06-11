@@ -306,7 +306,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             _ = try scaffolder.scaffold(
                 workspaceNames: config.workspaces.map(\.name),
                 managerAgentKind: config.agentKind(for: .manager),
-                corveilBinaryPath: nil
+                corveilBinaryPath: nil,
+                binaryOverrides: config.defaults.binaries
             )
 
             // Save config
@@ -394,7 +395,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let tmpdir = ProcessInfo.processInfo.environment["TMPDIR"] ?? "/tmp"
             let socketPath = (tmpdir as NSString)
                 .appendingPathComponent("crow-tmux.sock")
-            TmuxBackend.shared.configure(tmuxBinary: tmuxBinary, socketPath: socketPath)
+            TmuxBackend.shared.configure(
+                tmuxBinary: tmuxBinary,
+                socketPath: socketPath,
+                crowBinDir: (devRoot as NSString).appendingPathComponent(".claude/bin")
+            )
             TmuxBackend.shared.onUnresponsive = { [weak self] error in
                 Task { @MainActor in self?.handleTmuxUnresponsive(error: error) }
             }
@@ -410,7 +415,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let result = try scaffolder.scaffold(
                 workspaceNames: config.workspaces.map(\.name),
                 managerAgentKind: config.agentKind(for: .manager),
-                corveilBinaryPath: config.defaults.binaries["corveil"]
+                corveilBinaryPath: config.defaults.binaries["corveil"],
+                binaryOverrides: config.defaults.binaries
             )
             appState.corveilSkillInstallWarning = result.warning
         } catch {
@@ -1078,7 +1084,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let result = try scaffolder.scaffold(
                         workspaceNames: cfg?.workspaces.map(\.name) ?? [],
                         managerAgentKind: cfg?.agentKind(for: .manager) ?? .claudeCode,
-                        corveilBinaryPath: cfg?.defaults.binaries["corveil"]
+                        corveilBinaryPath: cfg?.defaults.binaries["corveil"],
+                        binaryOverrides: cfg?.defaults.binaries ?? [:]
                     )
                     // Always assign — clears a stale warning from a prior
                     // launch when the install now succeeds (`result.warning`
