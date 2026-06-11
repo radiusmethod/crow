@@ -319,6 +319,15 @@ public final class TmuxBackend {
     /// auto-respond prompts (which fire when the terminal has been idle) can
     /// race: the Enter arrives before the TUI finishes handling the paste,
     /// causing it to be silently dropped (#272).
+    ///
+    /// We also pre-cancel copy-mode on the pane before any delivery (#486).
+    /// The bundled `crow-tmux.conf` keeps `mouse on` so wheel scrollback
+    /// works (#452), but the default `WheelUpPane` puts the pane into
+    /// copy-mode, where both `paste-buffer` and `send-keys Enter` are
+    /// silently consumed by copy-mode key bindings instead of reaching the
+    /// underlying shell. Without the cancel, every programmatic send into
+    /// a pane the user has scrolled (Manager paste, auto-respond, quick
+    /// actions, bare-Enter submits) is dropped.
     public func sendText(id: UUID, text: String) throws {
         guard let windowIndex = bindings[id] else {
             throw TmuxBackendError.unknownTerminal(id)
@@ -328,6 +337,14 @@ public final class TmuxBackend {
             let target = "\(ctrl.sessionName):\(windowIndex)"
             let endsWithNewline = text.hasSuffix("\n")
             let payload = endsWithNewline ? String(text.dropLast()) : text
+
+            // Cancel copy-mode if the user scrolled the pane into it before
+            // we deliver anything. Covers both the paste-buffer path (which
+            // is a no-op in copy-mode) and the bare-Enter path (where
+            // `send-keys Enter` would otherwise hit the copy-mode key table
+            // — default emacs `copy-selection-and-cancel`, vi `cancel` —
+            // exiting copy-mode without delivering a CR to the shell (#486).
+            try ctrl.cancelCopyModeIfActive(target: target)
 
             var didPaste = false
             if !payload.isEmpty {
