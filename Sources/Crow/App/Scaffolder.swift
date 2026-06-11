@@ -143,6 +143,13 @@ struct Scaffolder {
     /// when the path is set and points at an executable. Returns a short
     /// user-facing warning string on failure; `nil` on success or when the
     /// feature is unconfigured (empty/nil path).
+    ///
+    /// `Scaffolder.scaffold(...)` runs on the main thread during
+    /// `applicationDidFinishLaunching`, so a hung corveil binary (wrong
+    /// executable, stdin prompt, etc.) would freeze app startup with no
+    /// window drawn yet. The hard wall-clock timeout bounds the worst case:
+    /// after `corveilInstallTimeout` seconds the process is sent SIGTERM and
+    /// the install reports a warning rather than blocking forever.
     private func installCorveilSkill(_ corveilBinaryPath: String?) -> String? {
         guard let path = corveilBinaryPath?.trimmingCharacters(in: .whitespaces),
               !path.isEmpty else {
@@ -177,7 +184,27 @@ struct Scaffolder {
             NSLog("[Scaffolder] corveil launch failed: %@", error.localizedDescription)
             return "Corveil skill install failed — \(error.localizedDescription). Check path in Settings."
         }
-        proc.waitUntilExit()
+
+        // Wall-clock timeout: poll for completion in short slices so a hung
+        // process gets SIGTERM'd instead of blocking app launch indefinitely.
+        // `waitUntilExit()` has no timeout overload; this is the standard
+        // Foundation workaround.
+        let deadline = Date().addingTimeInterval(Self.corveilInstallTimeout)
+        while proc.isRunning {
+            if Date() >= deadline {
+                proc.terminate()
+                // Give the process up to 500ms to honor SIGTERM before
+                // returning the warning, so we don't leave a zombie behind.
+                let graceDeadline = Date().addingTimeInterval(0.5)
+                while proc.isRunning, Date() < graceDeadline {
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+                NSLog("[Scaffolder] corveil skill install timed out after %.1fs", Self.corveilInstallTimeout)
+                return "Corveil skill install timed out after \(Int(Self.corveilInstallTimeout))s — binary may be hung. Check path in Settings."
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+
         if proc.terminationStatus != 0 {
             let stderr = (try? stderrPipe.fileHandleForReading.readToEnd())
                 .flatMap { String(data: $0, encoding: .utf8) }?
@@ -190,6 +217,13 @@ struct Scaffolder {
         NSLog("[Scaffolder] corveil skill installed at %@", target)
         return nil
     }
+
+    /// Wall-clock budget for the per-launch `corveil skill install` run. Tight
+    /// because `Scaffolder.scaffold(...)` runs on the main thread before the
+    /// app window is shown — a hung corveil binary delays first paint by this
+    /// many seconds. 5s is generous for a local subprocess that only writes
+    /// one ~10KB file.
+    static let corveilInstallTimeout: TimeInterval = 5.0
 
     // MARK: - Bundled Templates
 

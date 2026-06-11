@@ -298,14 +298,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Save devRoot pointer
             try ConfigStore.saveDevRoot(devRoot)
 
-            // Scaffold directory structure
+            // Scaffold directory structure. Don't run the corveil skill install
+            // here — `launchMainApp()` runs `scaffold(...)` again immediately
+            // below, so doing it twice on first-time setup just fires the
+            // subprocess twice with the second result winning.
             let scaffolder = Scaffolder(devRoot: devRoot)
-            let result = try scaffolder.scaffold(
+            _ = try scaffolder.scaffold(
                 workspaceNames: config.workspaces.map(\.name),
                 managerAgentKind: config.agentKind(for: .manager),
-                corveilBinaryPath: config.defaults.binaries["corveil"]
+                corveilBinaryPath: nil
             )
-            appState.corveilSkillInstallWarning = result.warning
 
             // Save config
             try ConfigStore.saveConfig(config, devRoot: devRoot)
