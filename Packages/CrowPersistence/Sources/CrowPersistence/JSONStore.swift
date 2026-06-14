@@ -5,18 +5,27 @@ import CrowCore
 /// without re-firing already-handled PR transitions (CROW-456).
 ///
 /// `previousPRStatus` is keyed by session UUID string so the on-disk shape
-/// stays plain JSON. `emittedTransitionKeys` is serialized as an array because
-/// `Set` is not a stable JSON type — the in-memory load converts back.
+/// stays plain JSON. `emittedTransitionKeys` is the legacy array of dedup
+/// keys retained for backward read; CROW-505 introduced the richer
+/// `emittedTransitionMeta` map, which is now the source of truth on write.
+/// Older `store.json` files lacking the map are migrated lazily in
+/// `IssueTracker.hydratePersistedState`.
 public struct PersistedIssueTrackerState: Codable, Sendable, Equatable {
     public var previousPRStatus: [String: PRStatus]
     public var emittedTransitionKeys: [String]
+    /// Optional for backward compat: pre-CROW-505 stores only wrote
+    /// `emittedTransitionKeys`. Newer stores populate this map and leave
+    /// `emittedTransitionKeys` empty.
+    public var emittedTransitionMeta: [String: EmittedTransitionMeta]?
 
     public init(
         previousPRStatus: [String: PRStatus] = [:],
-        emittedTransitionKeys: [String] = []
+        emittedTransitionKeys: [String] = [],
+        emittedTransitionMeta: [String: EmittedTransitionMeta]? = nil
     ) {
         self.previousPRStatus = previousPRStatus
         self.emittedTransitionKeys = emittedTransitionKeys
+        self.emittedTransitionMeta = emittedTransitionMeta
     }
 }
 

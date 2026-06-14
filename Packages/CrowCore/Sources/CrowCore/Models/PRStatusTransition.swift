@@ -74,6 +74,23 @@ public struct PRStatusTransition: Sendable, Equatable {
     }
 }
 
+/// Per-emitted-transition metadata persisted alongside the dedup key.
+///
+/// `emittedAt` lets the stalled-re-fire pass (CROW-505) enforce a quiet
+/// window before re-prompting; `headShaAtEmit` is the head SHA observed at
+/// dispatch, which preserves the anti-loop guarantee — a real agent push
+/// advances the head SHA, so re-fire only triggers when the author has not
+/// pushed since the original prompt fired.
+public struct EmittedTransitionMeta: Codable, Sendable, Equatable {
+    public var emittedAt: Date
+    public var headShaAtEmit: String?
+
+    public init(emittedAt: Date, headShaAtEmit: String?) {
+        self.emittedAt = emittedAt
+        self.headShaAtEmit = headShaAtEmit
+    }
+}
+
 extension PRStatus {
     /// Compute the transitions implied by moving from `old` to `new`.
     ///

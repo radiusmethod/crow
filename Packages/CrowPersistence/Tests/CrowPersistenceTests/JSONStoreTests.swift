@@ -214,9 +214,11 @@ import Testing
         latestReviewID: "R_kgD0_1"
     )
     let dedupKey = "\(sessionID.uuidString)|changesRequested|R_kgD0_1"
+    let emittedAt = Date(timeIntervalSince1970: 1_700_000_000)
     let state = PersistedIssueTrackerState(
         previousPRStatus: [sessionID.uuidString: pr],
-        emittedTransitionKeys: [dedupKey]
+        emittedTransitionKeys: [dedupKey],
+        emittedTransitionMeta: [dedupKey: EmittedTransitionMeta(emittedAt: emittedAt, headShaAtEmit: "abc123")]
     )
 
     let store = JSONStore(directory: dir)
@@ -226,6 +228,8 @@ import Testing
     #expect(reloaded == state)
     #expect(reloaded?.previousPRStatus[sessionID.uuidString]?.latestReviewID == "R_kgD0_1")
     #expect(reloaded?.emittedTransitionKeys == [dedupKey])
+    #expect(reloaded?.emittedTransitionMeta?[dedupKey]?.headShaAtEmit == "abc123")
+    #expect(reloaded?.emittedTransitionMeta?[dedupKey]?.emittedAt == emittedAt)
 }
 
 @Test func storeDataDecodesWithoutIssueTrackerStateField() throws {

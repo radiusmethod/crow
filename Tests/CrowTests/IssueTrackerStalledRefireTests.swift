@@ -1,0 +1,259 @@
+import Foundation
+import Testing
+import CrowCore
+import CrowProvider
+@testable import Crow
+
+/// CROW-505: `IssueTracker` re-fires `.changesRequested` transitions whose
+/// auto-respond prompt has stalled (agent idle, head SHA unchanged, quiet
+/// window elapsed). These tests cover the pure
+/// `shouldReFireStalledChangesRequested` predicate plus the dedup-key
+/// parse helpers that drive the wiring layer.
+@Suite("IssueTracker stalled re-fire predicate (CROW-505)")
+struct IssueTrackerStalledRefireTests {
+
+    private let quietWindow: TimeInterval = 10 * 60
+    private let now = Date(timeIntervalSince1970: 1_700_000_000)
+    private let shaA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    private let shaB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+    private func meta(emittedSecondsAgo: TimeInterval = 11 * 60, headShaAtEmit: String? = nil) -> EmittedTransitionMeta {
+        EmittedTransitionMeta(
+            emittedAt: now.addingTimeInterval(-emittedSecondsAgo),
+            headShaAtEmit: headShaAtEmit ?? shaA
+        )
+    }
+
+    private func status(
+        review: PRStatus.ReviewStatus = .changesRequested,
+        sha: String? = nil,
+        reviewID: String? = "R_1"
+    ) -> PRStatus {
+        PRStatus(
+            checksPass: .pending,
+            reviewStatus: review,
+            mergeable: .unknown,
+            failedCheckNames: [],
+            headSha: sha ?? shaA,
+            latestReviewID: reviewID
+        )
+    }
+
+    // MARK: - Bug repro (Test 1)
+
+    @Test
+    func reFiresWhenAllConditionsMet() {
+        // The CROW-505 bug repro: PR still in CHANGES_REQUESTED, agent went
+        // idle without addressing all findings, head SHA hasn't advanced
+        // (agent didn't push), and quiet window has elapsed.
+        #expect(IssueTracker.shouldReFireStalledChangesRequested(
+            meta: meta(emittedSecondsAgo: quietWindow + 1, headShaAtEmit: shaA),
+            currentStatus: status(sha: shaA),
+            agentActivity: .idle,
+            terminalReadiness: .agentLaunched,
+            now: now,
+            quietWindow: quietWindow
+        ))
+    }
+
+    // MARK: - Anti-loop guarantee (Test 2)
+
+    @Test
+    func doesNotReFireWhenAgentPushedNewCommit() {
+        // The single most important invariant: a real agent push advances the
+        // head SHA, which kills the re-fire. This preserves the CROW-456
+        // anti-loop guarantee — the agent's own response push doesn't
+        // re-trigger the prompt that told it to push.
+        #expect(!IssueTracker.shouldReFireStalledChangesRequested(
+            meta: meta(emittedSecondsAgo: quietWindow + 1, headShaAtEmit: shaA),
+            currentStatus: status(sha: shaB),  // SHA advanced
+            agentActivity: .idle,
+            terminalReadiness: .agentLaunched,
+            now: now,
+            quietWindow: quietWindow
+        ))
+    }
+
+    // MARK: - Round-2 reviewer review still fires (Test 3)
+
+    @Test
+    func roundTwoFromReviewerProducesDistinctDedupKey() {
+        // Reviewer submitting a fresh formal review rotates `latestReviewID`,
+        // which produces a different `dedupeKey`. The existing
+        // `applyPRStatuses` path emits unconditionally on a new key — the
+        // re-fire predicate is never consulted for this case. Sanity check
+        // by computing the two keys and asserting they differ.
+        let sid = UUID()
+        let r1 = PRStatusTransition(
+            kind: .changesRequested, sessionID: sid, prURL: "https://example/1",
+            prNumber: 1, headSha: shaA, latestReviewID: "R_1"
+        )
+        let r2 = PRStatusTransition(
+            kind: .changesRequested, sessionID: sid, prURL: "https://example/1",
+            prNumber: 1, headSha: shaA, latestReviewID: "R_2"
+        )
+        #expect(r1.dedupeKey != r2.dedupeKey)
+    }
+
+    // MARK: - Agent busy — no re-fire (Test 4)
+
+    @Test
+    func doesNotReFireWhileAgentWorking() {
+        // Don't interrupt an agent that's actively working — they may already
+        // be addressing the feedback.
+        #expect(!IssueTracker.shouldReFireStalledChangesRequested(
+            meta: meta(emittedSecondsAgo: quietWindow + 1, headShaAtEmit: shaA),
+            currentStatus: status(sha: shaA),
+            agentActivity: .working,
+            terminalReadiness: .agentLaunched,
+            now: now,
+            quietWindow: quietWindow
+        ))
+    }
+
+    @Test
+    func doesNotReFireWhileAgentWaiting() {
+        // `.waiting` means the agent is blocked on user input — re-firing now
+        // would push another prompt into a queue the user is about to answer.
+        #expect(!IssueTracker.shouldReFireStalledChangesRequested(
+            meta: meta(emittedSecondsAgo: quietWindow + 1, headShaAtEmit: shaA),
+            currentStatus: status(sha: shaA),
+            agentActivity: .waiting,
+            terminalReadiness: .agentLaunched,
+            now: now,
+            quietWindow: quietWindow
+        ))
+    }
+
+    @Test
+    func doesNotReFireWhileAgentDone() {
+        // `.done` is the terminal "completed a turn" state — it's followed by
+        // a hook reset to `.idle`. Re-firing on `.done` would race.
+        #expect(!IssueTracker.shouldReFireStalledChangesRequested(
+            meta: meta(emittedSecondsAgo: quietWindow + 1, headShaAtEmit: shaA),
+            currentStatus: status(sha: shaA),
+            agentActivity: .done,
+            terminalReadiness: .agentLaunched,
+            now: now,
+            quietWindow: quietWindow
+        ))
+    }
+
+    // MARK: - Quiet window respected (Test 5)
+
+    @Test
+    func doesNotReFireBeforeQuietWindowElapsed() {
+        // Quiet window: agents can spend 5+ minutes thinking on a hard
+        // finding. Don't re-prompt before they've had a chance to act.
+        #expect(!IssueTracker.shouldReFireStalledChangesRequested(
+            meta: meta(emittedSecondsAgo: quietWindow - 1, headShaAtEmit: shaA),
+            currentStatus: status(sha: shaA),
+            agentActivity: .idle,
+            terminalReadiness: .agentLaunched,
+            now: now,
+            quietWindow: quietWindow
+        ))
+    }
+
+    // MARK: - Terminal not launched (Test 6)
+
+    @Test
+    func doesNotReFireWhenTerminalNotLaunched() {
+        // A pre-launch terminal (shellReady or earlier) can't be "stalled" —
+        // the agent never ran. Wait for the launch to finish first.
+        for readiness: TerminalReadiness in [.uninitialized, .surfaceCreated, .shellReady, .timedOut, .failed] {
+            #expect(!IssueTracker.shouldReFireStalledChangesRequested(
+                meta: meta(emittedSecondsAgo: quietWindow + 1, headShaAtEmit: shaA),
+                currentStatus: status(sha: shaA),
+                agentActivity: .idle,
+                terminalReadiness: readiness,
+                now: now,
+                quietWindow: quietWindow
+            ), "expected no re-fire at readiness \(readiness)")
+        }
+    }
+
+    @Test
+    func doesNotReFireWhenTerminalReadinessUnknown() {
+        // No managed terminal at all → no readiness entry. Can't re-fire.
+        #expect(!IssueTracker.shouldReFireStalledChangesRequested(
+            meta: meta(emittedSecondsAgo: quietWindow + 1, headShaAtEmit: shaA),
+            currentStatus: status(sha: shaA),
+            agentActivity: .idle,
+            terminalReadiness: nil,
+            now: now,
+            quietWindow: quietWindow
+        ))
+    }
+
+    // MARK: - PR no longer in CHANGES_REQUESTED
+
+    @Test
+    func doesNotReFireWhenPRLeftChangesRequestedBucket() {
+        // If the PR moved to APPROVED or the bucket cleared otherwise,
+        // re-firing is meaningless. The re-arm path in `applyPRStatuses`
+        // also drops the entry on this transition, but the predicate
+        // double-checks.
+        for review: PRStatus.ReviewStatus in [.approved, .reviewRequired, .unknown] {
+            #expect(!IssueTracker.shouldReFireStalledChangesRequested(
+                meta: meta(emittedSecondsAgo: quietWindow + 1, headShaAtEmit: shaA),
+                currentStatus: status(review: review, sha: shaA),
+                agentActivity: .idle,
+                terminalReadiness: .agentLaunched,
+                now: now,
+                quietWindow: quietWindow
+            ), "expected no re-fire at review status \(review)")
+        }
+    }
+
+    @Test
+    func doesNotReFireWhenCurrentStatusMissing() {
+        // No persisted PR status for the session → we can't reason about
+        // SHA equality or bucket membership. Refuse.
+        #expect(!IssueTracker.shouldReFireStalledChangesRequested(
+            meta: meta(emittedSecondsAgo: quietWindow + 1, headShaAtEmit: shaA),
+            currentStatus: nil,
+            agentActivity: .idle,
+            terminalReadiness: .agentLaunched,
+            now: now,
+            quietWindow: quietWindow
+        ))
+    }
+
+    @Test
+    func doesNotReFireWhenBaselineShaNil() {
+        // Migrated entries from before CROW-505 may have nil headShaAtEmit.
+        // Without a baseline we can't prove the author hasn't pushed —
+        // refuse rather than risk an unwanted re-fire.
+        #expect(!IssueTracker.shouldReFireStalledChangesRequested(
+            meta: EmittedTransitionMeta(emittedAt: now.addingTimeInterval(-(quietWindow + 1)), headShaAtEmit: nil),
+            currentStatus: status(sha: shaA),
+            agentActivity: .idle,
+            terminalReadiness: .agentLaunched,
+            now: now,
+            quietWindow: quietWindow
+        ))
+    }
+
+    // MARK: - Dedup-key parsers
+
+    @Test
+    func parsesSessionIDAndKindFromDedupKey() {
+        let sid = UUID()
+        let crKey = "\(sid.uuidString)|changesRequested|R_1"
+        let cfKey = "\(sid.uuidString)|checksFailing|\(shaA)"
+
+        #expect(IssueTracker.parseSessionID(fromDedupKey: crKey) == sid)
+        #expect(IssueTracker.parseSessionID(fromDedupKey: cfKey) == sid)
+        #expect(IssueTracker.parseKind(fromDedupKey: crKey) == .changesRequested)
+        #expect(IssueTracker.parseKind(fromDedupKey: cfKey) == .checksFailing)
+    }
+
+    @Test
+    func parsersReturnNilForMalformedKeys() {
+        #expect(IssueTracker.parseSessionID(fromDedupKey: "not-a-uuid|changesRequested|R_1") == nil)
+        #expect(IssueTracker.parseSessionID(fromDedupKey: "no-pipe-anywhere") == nil)
+        #expect(IssueTracker.parseKind(fromDedupKey: "\(UUID().uuidString)|unknownKind|x") == nil)
+        #expect(IssueTracker.parseKind(fromDedupKey: "missing-discriminator") == nil)
+    }
+}
