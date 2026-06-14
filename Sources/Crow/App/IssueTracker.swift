@@ -76,6 +76,17 @@ final class IssueTracker {
     /// watcher is inert until AppDelegate wires it (CROW-318).
     var autoRebaseWatcherEnabledProvider: () -> Bool = { false }
 
+    /// Reads the latest `AutoRespondSettings.respondToChangesRequested`
+    /// snapshot on every poll. Used solely to gate the stalled-`.changesRequested`
+    /// re-fire pass (CROW-505): without this gate an opted-out user would still
+    /// see a fresh "Changes Requested" macOS notification every quiet window
+    /// (via `onPRStatusTransitions` → `notifyPRTransition`), even though
+    /// `AutoRespondCoordinator` correctly suppresses the actual dispatch —
+    /// pure notification noise that defeats their opt-out. Defaults to a
+    /// closure returning `false` so the re-fire path stays inert until
+    /// AppDelegate wires it.
+    var respondToChangesRequestedProvider: () -> Bool = { false }
+
     /// Fires after Crow rebased a PR branch and force-pushed it. Wired in
     /// AppDelegate to post a notification.
     var onAutoRebasePushed: ((UUID, String, Int) -> Void)?
@@ -152,7 +163,9 @@ final class IssueTracker {
     /// Populated lazily on first observation; that first poll never fires
     /// transitions (matches the `previousReviewRequestIDs` first-fetch
     /// behavior so existing PR state isn't replayed at startup).
-    private var previousPRStatus: [UUID: PRStatus] = [:]
+    /// Internal (not private) so `@testable` tests can seed it when driving the
+    /// stalled-re-fire pass (CROW-505) without going through a full poll.
+    var previousPRStatus: [UUID: PRStatus] = [:]
 
     /// Per-emitted-transition metadata keyed by `PRStatusTransition.dedupeKey`,
     /// used to suppress duplicates across the in-process lifetime and to power
@@ -161,7 +174,9 @@ final class IssueTracker {
     /// guarantee — re-fire only when the author hasn't pushed since dispatch).
     /// Cleared per-session when we observe the rule "re-arm" (e.g. checks
     /// move back to passing/pending) so subsequent transitions still fire.
-    private var emittedTransitionMeta: [String: EmittedTransitionMeta] = [:]
+    /// Internal (not private) for the same `@testable` seeding reason as
+    /// `previousPRStatus`.
+    var emittedTransitionMeta: [String: EmittedTransitionMeta] = [:]
 
     /// Minimum elapsed time before a stalled `.changesRequested` transition can
     /// re-fire (CROW-505). 10 min ≈ 10 poll cycles — covers Claude Code's
@@ -1640,7 +1655,18 @@ final class IssueTracker {
     /// - `emittedTransitionMeta[key].emittedAt` is bumped to `now` so the next
     ///   quiet-window clock starts fresh.
     /// - `NSLog`'d distinctive line so operators can grep for the behavior.
-    private func reFireStalledChangesRequested(now: Date) -> [PRStatusTransition] {
+    func reFireStalledChangesRequested(now: Date) -> [PRStatusTransition] {
+        // Gate on the user-facing `AutoRespondSettings.respondToChangesRequested`
+        // toggle. Without this gate a user who explicitly opted out would still
+        // get a fresh `Changes Requested` macOS notification every quiet window
+        // (`onPRStatusTransitions` → `notifyPRTransition` posts unconditionally;
+        // only the actual prompt dispatch is gated downstream in
+        // `AutoRespondCoordinator.handle`) — pure notification noise that
+        // defeats their opt-out. New configs default to `true` post-CROW-505,
+        // so this gate only suppresses behavior for users who deliberately
+        // disabled it.
+        guard respondToChangesRequestedProvider() else { return [] }
+
         var out: [PRStatusTransition] = []
         for (key, meta) in emittedTransitionMeta {
             // Only `.changesRequested` keys re-fire. Checks-failing already

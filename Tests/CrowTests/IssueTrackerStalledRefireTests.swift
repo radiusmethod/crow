@@ -257,3 +257,149 @@ struct IssueTrackerStalledRefireTests {
         #expect(IssueTracker.parseKind(fromDedupKey: "missing-discriminator") == nil)
     }
 }
+
+/// Integration coverage for `IssueTracker.reFireStalledChangesRequested`: the
+/// map-walking pass that consults the predicate, builds synthetic transitions,
+/// and bumps the dedup-meta timestamp. The predicate is covered above in
+/// isolation; these tests catch wiring drift — gate-off behavior, terminal
+/// resolution, and the `emittedAt` refresh that prevents same-poll re-fires.
+@Suite("IssueTracker stalled re-fire wiring (CROW-505)")
+@MainActor
+struct IssueTrackerStalledRefireWiringTests {
+
+    private let shaA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+    /// Build an `IssueTracker` whose appState contains a single work session
+    /// with a PR link, a managed terminal at `.agentLaunched`, an idle hook
+    /// state, and a prior PRStatus in CHANGES_REQUESTED on `shaA`. Seeds an
+    /// `emittedTransitionMeta` entry that has been sitting for ~2× the quiet
+    /// window — so the pure predicate would say "re-fire".
+    private func makeStalledTracker(
+        toggleOn: Bool,
+        sessionKind: SessionKind = .work,
+        agentActivity: AgentActivityState = .idle,
+        readiness: TerminalReadiness? = .agentLaunched
+    ) -> (IssueTracker, UUID, String) {
+        let state = AppState()
+        let sid = UUID()
+        let session = Session(id: sid, name: "feature-test", kind: sessionKind)
+        state.sessions = [session]
+
+        let prLink = SessionLink(
+            sessionID: sid,
+            label: "PR #1",
+            url: "https://github.com/radiusmethod/crow/pull/1",
+            linkType: .pr
+        )
+        state.links[sid] = [prLink]
+
+        let terminal = SessionTerminal(
+            sessionID: sid,
+            name: "Claude Code",
+            cwd: "/tmp",
+            isManaged: true
+        )
+        state.terminals[sid] = [terminal]
+        if let readiness {
+            state.terminalReadiness[terminal.id] = readiness
+        }
+        state.hookState(for: sid).activityState = agentActivity
+
+        let tracker = IssueTracker(appState: state, providerManager: ProviderManager())
+        tracker.respondToChangesRequestedProvider = { toggleOn }
+
+        let status = PRStatus(
+            checksPass: .pending,
+            reviewStatus: .changesRequested,
+            mergeable: .unknown,
+            failedCheckNames: [],
+            headSha: shaA,
+            latestReviewID: "R_1"
+        )
+        tracker.previousPRStatus[sid] = status
+
+        let key = "\(sid.uuidString)|changesRequested|R_1"
+        let now = Date()
+        tracker.emittedTransitionMeta[key] = EmittedTransitionMeta(
+            emittedAt: now.addingTimeInterval(-IssueTracker.stalledRefireQuietWindow * 2),
+            headShaAtEmit: shaA
+        )
+
+        return (tracker, sid, key)
+    }
+
+    // MARK: - The gate
+
+    @Test
+    func toggleOffSuppressesAllSyntheticTransitions() {
+        // Reviewer's regression catch (review on PR #507): an opted-out user
+        // must not see synthetic transitions, even when every predicate
+        // condition is satisfied. Without the gate, `onPRStatusTransitions`
+        // would fire `notifyPRTransition` every quiet window — pure macOS
+        // notification noise for zero useful action.
+        let (tracker, _, key) = makeStalledTracker(toggleOn: false)
+        let metaBefore = tracker.emittedTransitionMeta[key]
+
+        let transitions = tracker.reFireStalledChangesRequested(now: Date())
+
+        #expect(transitions.isEmpty)
+        // Meta must not be touched by the no-op path — bumping `emittedAt`
+        // when nothing fired would lose the original dispatch timestamp.
+        #expect(tracker.emittedTransitionMeta[key] == metaBefore)
+    }
+
+    @Test
+    func toggleOnPermitsSyntheticTransitionAndBumpsEmittedAt() {
+        let now = Date()
+        let (tracker, sid, key) = makeStalledTracker(toggleOn: true)
+        let originalEmittedAt = tracker.emittedTransitionMeta[key]?.emittedAt
+
+        let transitions = tracker.reFireStalledChangesRequested(now: now)
+
+        #expect(transitions.count == 1)
+        #expect(transitions[0].kind == .changesRequested)
+        #expect(transitions[0].sessionID == sid)
+        #expect(transitions[0].headSha == shaA)
+        #expect(transitions[0].latestReviewID == "R_1")
+        // emittedAt bumped to `now` so the next poll inside the quiet window
+        // doesn't immediately re-fire again.
+        #expect(tracker.emittedTransitionMeta[key]?.emittedAt == now)
+        #expect(tracker.emittedTransitionMeta[key]?.emittedAt != originalEmittedAt)
+    }
+
+    // MARK: - Review-session gate
+
+    @Test
+    func reviewSessionsAreSkippedEvenWhenToggleOn() {
+        // Mirrors the `AutoRespondCoordinator.shouldSkipReviewSession` policy:
+        // never commit on behalf of a reviewer. The map-walking pass checks
+        // `session.kind != .review` so the synthetic transition never reaches
+        // the notification fan-out either.
+        let (tracker, _, _) = makeStalledTracker(toggleOn: true, sessionKind: .review)
+        let transitions = tracker.reFireStalledChangesRequested(now: Date())
+        #expect(transitions.isEmpty)
+    }
+
+    // MARK: - Activity / readiness gates (integration view of the predicate)
+
+    @Test
+    func agentWorkingSuppressesSyntheticTransition() {
+        let (tracker, _, _) = makeStalledTracker(toggleOn: true, agentActivity: .working)
+        #expect(tracker.reFireStalledChangesRequested(now: Date()).isEmpty)
+    }
+
+    @Test
+    func unlaunchedTerminalSuppressesSyntheticTransition() {
+        let (tracker, _, _) = makeStalledTracker(toggleOn: true, readiness: .shellReady)
+        #expect(tracker.reFireStalledChangesRequested(now: Date()).isEmpty)
+    }
+
+    @Test
+    func missingManagedTerminalSuppressesSyntheticTransition() {
+        // Edge: no terminal entry at all (e.g. session created but terminal
+        // never materialized). Predicate sees `terminalReadiness: nil` and
+        // refuses.
+        let (tracker, _, _) = makeStalledTracker(toggleOn: true, readiness: nil)
+        #expect(tracker.reFireStalledChangesRequested(now: Date()).isEmpty)
+    }
+}

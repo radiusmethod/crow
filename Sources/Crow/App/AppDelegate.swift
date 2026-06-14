@@ -803,6 +803,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tracker.autoRebaseWatcherEnabledProvider = { [weak self] in
             self?.appConfig?.autoRebaseWatcherEnabled ?? false
         }
+        tracker.respondToChangesRequestedProvider = { [weak self] in
+            self?.appConfig?.autoRespond.respondToChangesRequested ?? false
+        }
         tracker.onAutoRebasePushed = { [weak self] sessionID, _, number in
             self?.notificationManager?.notifyAutoRebasePushed(number: number, sessionID: sessionID)
         }
