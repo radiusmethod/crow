@@ -232,8 +232,16 @@ extension WorkspaceGateway {
 
 /// Opt-in settings that let Crow type instructions into a session's managed
 /// Claude Code terminal when a watched PR transitions into a state that
-/// usually requires action. Both flags default off — typing into a terminal
-/// unprompted is intrusive, so the user must explicitly enable each.
+/// usually requires action.
+///
+/// `respondToChangesRequested` defaults **on** as of CROW-505 — auto-refine
+/// is the answer to the user's complaint that a PR sitting in
+/// CHANGES_REQUESTED with an idle agent never re-prompts. Existing users'
+/// explicit choices stay sticky: `decodeIfPresent` returns whatever was
+/// previously written, so a user who turned this off keeps it off across
+/// the upgrade. `respondToFailedChecks` still defaults off — typing into a
+/// terminal unprompted is intrusive, and CI flakes shouldn't auto-trigger
+/// a fix-attempt.
 public struct AutoRespondSettings: Codable, Sendable, Equatable {
     /// Inject a "fix the review feedback" prompt when a PR transitions into
     /// `reviewStatus == .changesRequested`.
@@ -244,7 +252,7 @@ public struct AutoRespondSettings: Codable, Sendable, Equatable {
     public var respondToFailedChecks: Bool
 
     public init(
-        respondToChangesRequested: Bool = false,
+        respondToChangesRequested: Bool = true,
         respondToFailedChecks: Bool = false
     ) {
         self.respondToChangesRequested = respondToChangesRequested
@@ -253,7 +261,7 @@ public struct AutoRespondSettings: Codable, Sendable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        respondToChangesRequested = try c.decodeIfPresent(Bool.self, forKey: .respondToChangesRequested) ?? false
+        respondToChangesRequested = try c.decodeIfPresent(Bool.self, forKey: .respondToChangesRequested) ?? true
         respondToFailedChecks = try c.decodeIfPresent(Bool.self, forKey: .respondToFailedChecks) ?? false
     }
 

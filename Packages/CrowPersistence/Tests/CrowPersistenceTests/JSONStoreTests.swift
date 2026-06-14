@@ -214,9 +214,11 @@ import Testing
         latestReviewID: "R_kgD0_1"
     )
     let dedupKey = "\(sessionID.uuidString)|changesRequested|R_kgD0_1"
+    let emittedAt = Date(timeIntervalSince1970: 1_700_000_000)
     let state = PersistedIssueTrackerState(
         previousPRStatus: [sessionID.uuidString: pr],
-        emittedTransitionKeys: [dedupKey]
+        emittedTransitionKeys: [dedupKey],
+        emittedTransitionMeta: [dedupKey: EmittedTransitionMeta(emittedAt: emittedAt, headShaAtEmit: "abc123", reFireCount: 2)]
     )
 
     let store = JSONStore(directory: dir)
@@ -226,6 +228,26 @@ import Testing
     #expect(reloaded == state)
     #expect(reloaded?.previousPRStatus[sessionID.uuidString]?.latestReviewID == "R_kgD0_1")
     #expect(reloaded?.emittedTransitionKeys == [dedupKey])
+    #expect(reloaded?.emittedTransitionMeta?[dedupKey]?.headShaAtEmit == "abc123")
+    #expect(reloaded?.emittedTransitionMeta?[dedupKey]?.emittedAt == emittedAt)
+    // CROW-505 review #3: reFireCount survives the round trip so the
+    // per-emission cap persists across Crow restarts.
+    #expect(reloaded?.emittedTransitionMeta?[dedupKey]?.reFireCount == 2)
+}
+
+@Test func emittedTransitionMetaDecodesLegacyEntryWithoutReFireCount() throws {
+    // Backward compat: pre-cap stores wrote `EmittedTransitionMeta` without
+    // the `reFireCount` field. The decode must default it to 0 so an
+    // upgrade doesn't wedge the re-fire path by inheriting a stale count.
+    // Uses the same `.iso8601` date strategy as `JSONStore` so the test
+    // matches the real on-disk shape.
+    let legacyJSON = #"{"emittedAt": "2023-11-14T22:13:20Z", "headShaAtEmit": "abc123"}"#
+        .data(using: .utf8)!
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    let decoded = try decoder.decode(EmittedTransitionMeta.self, from: legacyJSON)
+    #expect(decoded.headShaAtEmit == "abc123")
+    #expect(decoded.reFireCount == 0)
 }
 
 @Test func storeDataDecodesWithoutIssueTrackerStateField() throws {
