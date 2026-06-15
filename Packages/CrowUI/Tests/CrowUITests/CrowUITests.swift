@@ -376,3 +376,39 @@ private let canonicalLabels: [(name: String, hex: String)] = [
     #expect(hsl.s == 0)
     #expect(abs(hsl.l - 0.5) < 1e-9)
 }
+
+// MARK: - TokenListEditor.adding (CROW-513)
+
+@Suite("TokenListEditor.adding")
+struct TokenListEditorAddingTests {
+    @Test func trimsWhitespace() {
+        #expect(TokenListEditor.adding("  foo  ", to: []) == ["foo"])
+    }
+
+    @Test func ignoresEmptyAndWhitespaceOnly() {
+        #expect(TokenListEditor.adding("   ", to: []) == [])
+        #expect(TokenListEditor.adding("", to: ["a"]) == ["a"])
+        #expect(TokenListEditor.adding(", ,", to: []) == [])
+    }
+
+    @Test func splitsOnCommas() {
+        #expect(TokenListEditor.adding("a, b, c", to: []) == ["a", "b", "c"])
+    }
+
+    @Test func dedupesAgainstExistingCaseSensitive() {
+        #expect(TokenListEditor.adding("a", to: ["a"]) == ["a"])
+        #expect(TokenListEditor.adding("A", to: ["a"]) == ["a", "A"])
+    }
+
+    @Test func dedupesWithinSameCommit() {
+        #expect(TokenListEditor.adding("x, x, y", to: []) == ["x", "y"])
+    }
+
+    @Test func appendsPreservingOrder() {
+        #expect(TokenListEditor.adding("b, c", to: ["a"]) == ["a", "b", "c"])
+    }
+
+    @Test func trailingCommaProducesOneToken() {
+        #expect(TokenListEditor.adding("foo,", to: []) == ["foo"])
+    }
+}

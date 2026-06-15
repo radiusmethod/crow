@@ -16,9 +16,6 @@ public struct AutomationSettingsView: View {
     @Binding var autoRebaseWatcherEnabled: Bool
     var onSave: (() -> Void)?
 
-    @State private var excludeReviewReposText: String
-    @State private var ignoreReviewLabelsText: String
-    @State private var excludeTicketReposText: String
     @State private var managerGatewayBaseURL: String
     @State private var managerGatewayHeadersText: String
 
@@ -44,9 +41,6 @@ public struct AutomationSettingsView: View {
         self._autoCreateWatcherEnabled = autoCreateWatcherEnabled
         self._autoRebaseWatcherEnabled = autoRebaseWatcherEnabled
         self.onSave = onSave
-        self._excludeReviewReposText = State(initialValue: defaults.wrappedValue.excludeReviewRepos.joined(separator: ", "))
-        self._ignoreReviewLabelsText = State(initialValue: defaults.wrappedValue.ignoreReviewLabels.joined(separator: ", "))
-        self._excludeTicketReposText = State(initialValue: defaults.wrappedValue.excludeTicketRepos.joined(separator: ", "))
         self._managerGatewayBaseURL = State(initialValue: managerGateway.wrappedValue?.baseURL ?? "")
         self._managerGatewayHeadersText = State(initialValue: managerGateway.wrappedValue.map {
             WorkspaceGateway.headerLines(from: $0.customHeaders)
@@ -81,49 +75,37 @@ public struct AutomationSettingsView: View {
     public var body: some View {
         Form {
             Section("Reviews") {
-                TextField("Excluded Repos", text: $excludeReviewReposText)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: excludeReviewReposText) { _, _ in
-                        defaults.excludeReviewRepos = excludeReviewReposText
-                            .split(separator: ",")
-                            .map { $0.trimmingCharacters(in: .whitespaces) }
-                            .filter { !$0.isEmpty }
-                        onSave?()
-                    }
-                Text("Comma-separated repos to hide from the review board. Supports wildcards (e.g., zarf-dev/*, bmlt-enabled/yap).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Text("Per-workspace auto-review opt-ins are configured in Workspaces → edit a workspace.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Excluded Repos")
+                    TokenListEditor(tokens: $defaults.excludeReviewRepos, placeholder: "owner/repo")
+                        .onChange(of: defaults.excludeReviewRepos) { _, _ in onSave?() }
+                    Text("Repos to hide from the review board. Supports wildcards (e.g., zarf-dev/*, bmlt-enabled/yap).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Per-workspace auto-review opt-ins are configured in Workspaces → edit a workspace.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
-                TextField("Ignored Labels", text: $ignoreReviewLabelsText)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: ignoreReviewLabelsText) { _, _ in
-                        defaults.ignoreReviewLabels = ignoreReviewLabelsText
-                            .split(separator: ",")
-                            .map { $0.trimmingCharacters(in: .whitespaces) }
-                            .filter { !$0.isEmpty }
-                        onSave?()
-                    }
-                Text("Comma-separated labels to ignore from the review board (e.g., dependencies, renovate, automated).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Ignored Labels")
+                    TokenListEditor(tokens: $defaults.ignoreReviewLabels, placeholder: "label")
+                        .onChange(of: defaults.ignoreReviewLabels) { _, _ in onSave?() }
+                    Text("Labels to ignore from the review board (e.g., dependencies, renovate, automated).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Tickets") {
-                TextField("Excluded Repos", text: $excludeTicketReposText)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: excludeTicketReposText) { _, _ in
-                        defaults.excludeTicketRepos = excludeTicketReposText
-                            .split(separator: ",")
-                            .map { $0.trimmingCharacters(in: .whitespaces) }
-                            .filter { !$0.isEmpty }
-                        onSave?()
-                    }
-                Text("Comma-separated repos to hide from the ticket board. Supports wildcards (e.g., zarf-dev/*, bmlt-enabled/yap).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Excluded Repos")
+                    TokenListEditor(tokens: $defaults.excludeTicketRepos, placeholder: "owner/repo")
+                        .onChange(of: defaults.excludeTicketRepos) { _, _ in onSave?() }
+                    Text("Repos to hide from the ticket board. Supports wildcards (e.g., zarf-dev/*, bmlt-enabled/yap).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Remote Control") {

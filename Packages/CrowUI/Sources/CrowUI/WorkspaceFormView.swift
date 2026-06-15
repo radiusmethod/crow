@@ -20,9 +20,9 @@ public struct WorkspaceFormView: View {
     @State private var jiraProjectKey: String
     @State private var jiraJQL: String
     @State private var corveilHost: String
-    @State private var alwaysIncludeText: String
-    @State private var autoReviewReposText: String
-    @State private var excludeReviewReposText: String
+    @State private var alwaysInclude: [String]
+    @State private var autoReviewRepos: [String]
+    @State private var excludeReviewRepos: [String]
     @State private var customInstructionsText: String
     @State private var gatewayBaseURL: String
     @State private var gatewayHeadersText: String
@@ -52,9 +52,9 @@ public struct WorkspaceFormView: View {
         self._jiraProjectKey = State(initialValue: workspace?.jiraProjectKey ?? "")
         self._jiraJQL = State(initialValue: workspace?.jiraJQL ?? "")
         self._corveilHost = State(initialValue: workspace?.corveilHost ?? "")
-        self._alwaysIncludeText = State(initialValue: workspace?.alwaysInclude.joined(separator: ", ") ?? "")
-        self._autoReviewReposText = State(initialValue: workspace?.autoReviewRepos.joined(separator: ", ") ?? "")
-        self._excludeReviewReposText = State(initialValue: workspace?.excludeReviewRepos.joined(separator: ", ") ?? "")
+        self._alwaysInclude = State(initialValue: workspace?.alwaysInclude ?? [])
+        self._autoReviewRepos = State(initialValue: workspace?.autoReviewRepos ?? [])
+        self._excludeReviewRepos = State(initialValue: workspace?.excludeReviewRepos ?? [])
         self._customInstructionsText = State(initialValue: workspace?.customInstructions ?? "")
         self._gatewayBaseURL = State(initialValue: workspace?.gateway?.baseURL ?? "")
         self._gatewayHeadersText = State(initialValue: workspace?.gateway.map {
@@ -179,23 +179,29 @@ public struct WorkspaceFormView: View {
             }
 
             Section("Repos") {
-                TextField("Always Include Repos", text: $alwaysIncludeText)
-                    .textFieldStyle(.roundedBorder)
-                Text("Comma-separated repo specs: owner/* lists all of an org's repos, or owner/repo for a single repo. Populates the Jobs repo picker.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Always Include Repos")
+                    TokenListEditor(tokens: $alwaysInclude, placeholder: "owner/repo or owner/*")
+                    Text("Repo specs: owner/* lists all of an org's repos, or owner/repo for a single repo. Populates the Jobs repo picker.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
-                TextField("Auto-Review Repos", text: $autoReviewReposText)
-                    .textFieldStyle(.roundedBorder)
-                Text("Comma-separated repos or patterns (e.g. org/repo, org/*). New review requests from matching repos will automatically create a review session.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Auto-Review Repos")
+                    TokenListEditor(tokens: $autoReviewRepos, placeholder: "owner/repo or owner/*")
+                    Text("Repos or patterns (e.g. org/repo, org/*). New review requests from matching repos will automatically create a review session.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
-                TextField("Excluded Review Repos", text: $excludeReviewReposText)
-                    .textFieldStyle(.roundedBorder)
-                Text("Comma-separated repos or patterns (e.g. org/repo, org/*). Review requests from matching repos are hidden from the review board and don't trigger notifications.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Excluded Review Repos")
+                    TokenListEditor(tokens: $excludeReviewRepos, placeholder: "owner/repo or owner/*")
+                    Text("Repos or patterns (e.g. org/repo, org/*). Review requests from matching repos are hidden from the review board and don't trigger notifications.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("Custom Instructions") {
@@ -254,9 +260,6 @@ public struct WorkspaceFormView: View {
     }
 
     private func buildWorkspace() -> WorkspaceInfo {
-        let alwaysInclude = parseCSV(alwaysIncludeText)
-        let autoReviewRepos = parseCSV(autoReviewReposText)
-        let excludeReviewRepos = parseCSV(excludeReviewReposText)
         let trimmedInstructions = customInstructionsText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Persist taskProvider only when it diverges from the code provider;
@@ -282,12 +285,6 @@ public struct WorkspaceFormView: View {
             corveilHost: isCorveil ? nonEmpty(corveilHost) : nil,
             gateway: gatewayForSave
         )
-    }
-
-    private func parseCSV(_ text: String) -> [String] {
-        text.split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
     }
 
     private func nonEmpty(_ text: String) -> String? {
