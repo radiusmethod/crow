@@ -200,6 +200,80 @@ struct IssueTrackerNeedsRefineTests {
         tracker.applyPRStatuses(viewerPRs: [pr])
         #expect(captured.changesRequestedCount == 0)
     }
+
+    // MARK: - Cooldown-re-fire notification dedup (review feedback)
+
+    @Test
+    func firstDispatchHasIsCooldownReFireFalse() {
+        // The first dispatch for a reviewer submission must NOT carry the
+        // notification-skip flag — the user is seeing the event for the
+        // first time and needs the macOS banner.
+        let (tracker, _, captured) = makeTracker()
+        tracker.seenPRs.insert(prURL)
+        let pr = makeViewerPR(lastChangesRequestedAt: reviewAt, lastSubstantiveCommitAt: beforeReview)
+        tracker.applyPRStatuses(viewerPRs: [pr])
+        #expect(captured.changesRequestedCount == 1)
+        #expect(captured.all.first?.isCooldownReFire == false)
+    }
+
+    @Test
+    func cooldownReFireSetsTheFlagForSameReviewerSubmission() {
+        // Same review, agent went back to idle without committing, cooldown
+        // elapsed → re-prompt is useful (agent is stuck) but the macOS
+        // banner is redundant. Carry the flag so AppDelegate skips it.
+        let (tracker, _, captured) = makeTracker()
+        tracker.seenPRs.insert(prURL)
+        let pr = makeViewerPR(lastChangesRequestedAt: reviewAt, lastSubstantiveCommitAt: beforeReview)
+        tracker.applyPRStatuses(viewerPRs: [pr])
+        // Backdate the cooldown clock so the next call dispatches again.
+        tracker.lastRefineDispatchAt[prURL] = Date().addingTimeInterval(-IssueTracker.needsRefineCooldown - 1)
+        tracker.applyPRStatuses(viewerPRs: [pr])
+        #expect(captured.changesRequestedCount == 2)
+        #expect(captured.all[0].isCooldownReFire == false)
+        #expect(captured.all[1].isCooldownReFire == true)
+    }
+
+    @Test
+    func newReviewerSubmissionClearsTheFlag() {
+        // A fresh CHANGES_REQUESTED review from the reviewer advances
+        // `lastChangesRequestedAt`. The next dispatch IS a new event and
+        // must notify — flag must flip back to false.
+        let (tracker, _, captured) = makeTracker()
+        tracker.seenPRs.insert(prURL)
+        let pr1 = makeViewerPR(lastChangesRequestedAt: reviewAt, lastSubstantiveCommitAt: beforeReview)
+        tracker.applyPRStatuses(viewerPRs: [pr1])
+        tracker.lastRefineDispatchAt[prURL] = Date().addingTimeInterval(-IssueTracker.needsRefineCooldown - 1)
+
+        let laterReviewAt = reviewAt.addingTimeInterval(3600)
+        let pr2 = makeViewerPR(lastChangesRequestedAt: laterReviewAt, lastSubstantiveCommitAt: beforeReview)
+        tracker.applyPRStatuses(viewerPRs: [pr2])
+        #expect(captured.changesRequestedCount == 2)
+        #expect(captured.all[1].isCooldownReFire == false)
+    }
+
+    // MARK: - Stale-entry prune (review feedback)
+
+    @Test
+    func prunesEphemeralStateForPRsWithoutLiveSession() {
+        // A PR linked to a deleted (or never-existed) session must NOT
+        // linger in `seenPRs` / `lastRefineDispatchAt` /
+        // `lastNotifiedChangesRequestedAt`. Otherwise the maps grow
+        // unboundedly across the process's lifetime.
+        let (tracker, _, _) = makeTracker()
+        let stalePRURL = "https://github.com/foo/bar/pull/999"
+        tracker.seenPRs.insert(stalePRURL)
+        tracker.lastRefineDispatchAt[stalePRURL] = Date()
+        tracker.lastNotifiedChangesRequestedAt[stalePRURL] = reviewAt
+
+        let livePR = makeViewerPR(lastChangesRequestedAt: reviewAt, lastSubstantiveCommitAt: beforeReview)
+        tracker.applyPRStatuses(viewerPRs: [livePR])
+
+        #expect(!tracker.seenPRs.contains(stalePRURL))
+        #expect(tracker.lastRefineDispatchAt[stalePRURL] == nil)
+        #expect(tracker.lastNotifiedChangesRequestedAt[stalePRURL] == nil)
+        // The live PR still gets recorded normally.
+        #expect(tracker.seenPRs.contains(prURL))
+    }
 }
 
 /// Captures emitted transitions across multiple polls. Class so the test's

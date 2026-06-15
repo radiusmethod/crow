@@ -712,9 +712,17 @@ final class BackendsTests: XCTestCase {
     /// Merge commits (parents.totalCount >= 2) and rebase-style commits
     /// matching the merge-message prefix list must NOT advance the
     /// "agent substantively responded" timestamp. Otherwise pressing
-    /// GitHub's "Update branch" button or rebasing onto main would fool
-    /// the rule into thinking the agent pushed a fix.
-    func testParseMonitoredPRsLastSubstantiveCommitExcludesMergesAndRebases() throws {
+    /// GitHub's "Update branch" button (default merge mode) or rebasing
+    /// onto main with a merge commit would fool the rule into thinking the
+    /// agent pushed a fix.
+    ///
+    /// Known gap (documented in `parsePRNode`): a real `git rebase` rewrites
+    /// the *committer* date of the feature commits themselves. Those commits
+    /// are not merge commits, so they pass the filter and DO advance
+    /// `lastSubstantiveCommitAt`. This test does not cover that path; the
+    /// stateless rule accepts the false negative as the cost of not paying
+    /// for a tree-equals-parents API call per PR per poll.
+    func testParseMonitoredPRsLastSubstantiveCommitExcludesMergeCommits() throws {
         let json = """
         {
           "data": {

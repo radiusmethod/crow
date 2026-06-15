@@ -179,6 +179,17 @@ final class IssueTracker {
     /// is one extra prompt, then the cooldown re-applies).
     var lastRefineDispatchAt: [String: Date] = [:]
 
+    /// Per-PR record of the `lastChangesRequestedAt` we most recently posted
+    /// a macOS notification for. When a cooldown re-fire dispatches for the
+    /// same reviewer submission (same timestamp), the emitted transition
+    /// carries `isCooldownReFire = true` so `AppDelegate.onPRStatusTransitions`
+    /// skips the notification — the agent re-prompt is still useful, but a
+    /// fresh banner every 7 min for the same review is pure noise. A new
+    /// reviewer submission advances `lastChangesRequestedAt`, so the very
+    /// next dispatch is `isCooldownReFire = false` and notifies again.
+    /// Ephemeral; restart cost is one duplicate banner per PR, bounded.
+    var lastNotifiedChangesRequestedAt: [String: Date] = [:]
+
     /// Minimum gap between consecutive "needs refine" dispatches for the same
     /// PR (CROW-508). 7 min is a deliberate middle of the 5–10 min range the
     /// ticket suggested: long enough that an agent thinking through a hard
@@ -1517,10 +1528,17 @@ final class IssueTracker {
         let now = Date()
         let respondToChangesRequested = respondToChangesRequestedProvider()
         let sessionsWithPRs = appState.sessions.filter { !$0.isManager }
+        // Collect live PR URLs as we go so we can drop stale entries at the
+        // end of the pass. Without this, deleting a session (or its `.pr`
+        // link) leaves its PR URL in `seenPRs`/`lastRefineDispatchAt`/
+        // `lastNotifiedChangesRequestedAt` for the rest of the process —
+        // bounded but not strictly clean.
+        var livePRURLs: Set<String> = []
         for session in sessionsWithPRs {
             let links = appState.links(for: session.id)
             guard let prLink = links.first(where: { $0.linkType == .pr }) else { continue }
             guard let pr = byURL[prLink.url] else { continue }
+            livePRURLs.insert(prLink.url)
 
             let newStatus = buildPRStatus(from: pr)
             let oldStatus = previousPRStatus[session.id]
@@ -1549,25 +1567,45 @@ final class IssueTracker {
                ),
                cooldownElapsed(prURL: prLink.url, now: now) {
                 lastRefineDispatchAt[prLink.url] = now
+                // Same-review cooldown re-fire suppresses the macOS
+                // notification (the dispatch + agent prompt are still
+                // valuable; the banner duplicates info the user already
+                // saw). A new reviewer submission advances
+                // `lastChangesRequestedAt`, flipping the flag back off so
+                // the next dispatch notifies.
+                let isCooldownReFire = lastNotifiedChangesRequestedAt[prLink.url] == newStatus.lastChangesRequestedAt
+                if !isCooldownReFire {
+                    lastNotifiedChangesRequestedAt[prLink.url] = newStatus.lastChangesRequestedAt
+                }
                 transitions.append(PRStatusTransition(
                     kind: .changesRequested,
                     sessionID: session.id,
                     prURL: prLink.url,
                     prNumber: pr.number,
                     headSha: newStatus.headSha,
-                    failedCheckNames: []
+                    failedCheckNames: [],
+                    isCooldownReFire: isCooldownReFire
                 ))
-                NSLog("[IssueTracker] needs-refine fired — session=%@, sha=%@, lastCR=%@, lastCommit=%@",
+                NSLog("[IssueTracker] needs-refine fired — session=%@, sha=%@, lastCR=%@, lastCommit=%@, reFire=%@",
                       session.id.uuidString as NSString,
                       (newStatus.headSha ?? "") as NSString,
                       Self.iso(newStatus.lastChangesRequestedAt) as NSString,
-                      Self.iso(newStatus.lastSubstantiveCommitAt) as NSString)
+                      Self.iso(newStatus.lastSubstantiveCommitAt) as NSString,
+                      (isCooldownReFire ? "yes" : "no") as NSString)
             }
             seenPRs.insert(prLink.url)
 
             previousPRStatus[session.id] = newStatus
             appState.prStatus[session.id] = newStatus
         }
+
+        // Prune ephemeral state for PRs no longer linked to any live
+        // session. Cheap (Set intersection / dictionary filter) and keeps
+        // the maps bounded by current PR count rather than lifetime
+        // process activity.
+        if !seenPRs.isEmpty { seenPRs.formIntersection(livePRURLs) }
+        lastRefineDispatchAt = lastRefineDispatchAt.filter { livePRURLs.contains($0.key) }
+        lastNotifiedChangesRequestedAt = lastNotifiedChangesRequestedAt.filter { livePRURLs.contains($0.key) }
 
         if !transitions.isEmpty {
             onPRStatusTransitions?(transitions)

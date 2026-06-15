@@ -322,7 +322,7 @@ public struct GitHubCodeBackend: CodeBackend {
                 }
               }
             }
-            latestReviews(first: 20) { nodes { id state submittedAt } }
+            latestReviews(first: 20) { nodes { state submittedAt } }
             commits(last: 30) {
               nodes {
                 commit {
@@ -463,9 +463,17 @@ public struct GitHubCodeBackend: CodeBackend {
         // non-rebase commit timestamp anchors "has the agent substantively
         // responded since the review?". A merge commit (parent count >= 2)
         // or a commit whose subject starts with `Merge branch|remote-tracking|
-        // pull request` is excluded so the GitHub "Update branch" button and
-        // routine rebases can't trick the rule into thinking the agent
-        // pushed a fix.
+        // pull request` is excluded so the GitHub "Update branch" button
+        // (default merge mode) and routine merges from main can't trick the
+        // rule into thinking the agent pushed a fix.
+        //
+        // Known gap: a real `git rebase` (or "Update with rebase" on the
+        // Update-branch dropdown) rewrites the *committer* date of the
+        // existing feature commits to ~now. Those commits are not merge
+        // commits, so they pass the filter and DO advance
+        // `lastSubstantiveCommitAt` — a false negative the rule accepts as
+        // the cost of avoiding a tree-equals-parents API call per PR per
+        // poll. The ticket calls the tree check optional; we skip it in v1.
         let commitNodes = (node["commits"] as? [String: Any])?["nodes"] as? [[String: Any]] ?? []
         let lastSubstantiveCommitAt = commitNodes
             .compactMap { node -> Date? in

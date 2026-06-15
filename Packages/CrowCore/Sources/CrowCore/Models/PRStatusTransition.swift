@@ -27,6 +27,14 @@ public struct PRStatusTransition: Sendable, Equatable {
     public let headSha: String?
     /// Names of failing checks (empty for `.changesRequested`).
     public let failedCheckNames: [String]
+    /// True when this `.changesRequested` is the second-or-later dispatch
+    /// for the same reviewer submission (cooldown re-fire on a stuck-idle
+    /// agent). The re-prompt to the agent is still useful — that's the
+    /// whole point of the cooldown — but a fresh macOS notification every
+    /// cooldown window for the same review id is pure noise, so
+    /// `AppDelegate.onPRStatusTransitions` skips `notifyPRTransition` when
+    /// this flag is set. Always `false` for `.checksFailing`.
+    public let isCooldownReFire: Bool
 
     public init(
         kind: Kind,
@@ -34,7 +42,8 @@ public struct PRStatusTransition: Sendable, Equatable {
         prURL: String,
         prNumber: Int? = nil,
         headSha: String? = nil,
-        failedCheckNames: [String] = []
+        failedCheckNames: [String] = [],
+        isCooldownReFire: Bool = false
     ) {
         self.kind = kind
         self.sessionID = sessionID
@@ -42,6 +51,7 @@ public struct PRStatusTransition: Sendable, Equatable {
         self.prNumber = prNumber
         self.headSha = headSha
         self.failedCheckNames = failedCheckNames
+        self.isCooldownReFire = isCooldownReFire
     }
 }
 

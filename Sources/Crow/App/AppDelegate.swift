@@ -778,6 +778,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tracker.onPRStatusTransitions = { [weak self] transitions in
             guard let self else { return }
             for transition in transitions {
+                // Skip the macOS banner on cooldown re-fires: the dispatch
+                // re-prompts the agent (the useful part), but a fresh
+                // banner every 7 min for the same reviewer submission is
+                // pure noise the user already saw the first time.
+                if transition.isCooldownReFire { continue }
                 if let session = self.appState.sessions.first(where: { $0.id == transition.sessionID }) {
                     self.notificationManager?.notifyPRTransition(transition, session: session)
                 }
