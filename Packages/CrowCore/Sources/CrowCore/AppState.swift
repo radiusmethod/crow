@@ -158,9 +158,10 @@ public final class AppState {
     public var onPromoteToGlobal: ((Set<String>) -> Void)?
 
     /// Lists the repos available to a workspace, as `owner/repo` slugs, by
-    /// expanding its `alwaysInclude` specs against the provider. Wired in
-    /// AppDelegate; used by the Jobs form's repo picker.
-    public var onListWorkspaceRepos: ((WorkspaceInfo) async -> [String])?
+    /// expanding its `alwaysInclude` specs against the provider — along with any
+    /// specs that couldn't be resolved. Wired in AppDelegate; used by the Jobs
+    /// form's repo picker.
+    public var onListWorkspaceRepos: ((WorkspaceInfo) async -> WorkspaceRepoListing)?
 
     /// Called when the user clicks the gear icon in the sidebar toolbar.
     /// AppDelegate wires this to its `showSettings()` method.

@@ -115,7 +115,7 @@ public struct SettingsView: View {
             JobFormView(
                 workspaces: config.workspaces,
                 existingNames: otherJobNames(),
-                listRepos: { ws in await appState.onListWorkspaceRepos?(ws) ?? [] }
+                listRepos: { ws in await appState.onListWorkspaceRepos?(ws) ?? .empty }
             ) { job in
                 config.jobs.append(job)
                 save()
@@ -126,7 +126,7 @@ public struct SettingsView: View {
                 job: job,
                 workspaces: config.workspaces,
                 existingNames: otherJobNames(excluding: job.id),
-                listRepos: { ws in await appState.onListWorkspaceRepos?(ws) ?? [] }
+                listRepos: { ws in await appState.onListWorkspaceRepos?(ws) ?? .empty }
             ) { updated in
                 if let idx = config.jobs.firstIndex(where: { $0.id == updated.id }) {
                     config.jobs[idx] = updated
@@ -140,7 +140,7 @@ public struct SettingsView: View {
                 isDuplicate: true,
                 workspaces: config.workspaces,
                 existingNames: otherJobNames(),
-                listRepos: { ws in await appState.onListWorkspaceRepos?(ws) ?? [] }
+                listRepos: { ws in await appState.onListWorkspaceRepos?(ws) ?? .empty }
             ) { newJob in
                 config.jobs.append(newJob)
                 save()

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import CrowCore
 @testable import CrowProvider
 
 @Suite("ProviderManager")
@@ -277,7 +278,8 @@ struct ProviderManagerTests {
     }
 
     @Test func classifySpecBareNameIsInvalid() {
-        // No owner — can't list or clone it.
+        // No owner — can't list or clone it. Bare names stay invalid; rather than
+        // coerce them to a glob, `reposForSpecs` surfaces them with a suggested fix.
         #expect(ProviderManager.classifySpec("api") == .invalid)
     }
 
@@ -300,13 +302,48 @@ struct ProviderManagerTests {
     }
 
     @Test func reposForSpecsKeepsExplicitSlugsSortedAndDeduped() async {
-        // Explicit-only specs need no provider call, so this exercises the
-        // merge/dedup/sort path without shelling out.
+        // Explicit + invalid specs need no provider call, so this exercises the
+        // merge/dedup/sort path (and invalid-spec surfacing) without shelling out.
         let result = await manager.reposForSpecs(
             ["org/zeta", "org/alpha", "org/alpha", "bare"],
             provider: .github, host: nil
         )
-        #expect(result == ["org/alpha", "org/zeta"])
+        #expect(result.repos == ["org/alpha", "org/zeta"])
+        // The bare token is surfaced (not silently dropped) with a suggested fix.
+        #expect(result.invalidSpecs == [.init(raw: "bare", suggestion: "bare/*")])
+    }
+
+    @Test func reposForSpecsSurfacesBareOrgTokenWithSuggestion() async {
+        // A bare org name (the CROW-516 repro) is surfaced as invalid with a
+        // "did you mean owner/*" hint while valid explicit slugs still resolve.
+        let result = await manager.reposForSpecs(
+            ["securityscorecard", "org/repo"],
+            provider: .github, host: nil
+        )
+        #expect(result.repos == ["org/repo"])
+        #expect(result.invalidSpecs == [
+            .init(raw: "securityscorecard", suggestion: "securityscorecard/*"),
+        ])
+    }
+
+    @Test func reposForSpecsSkipsWhitespaceOnlySpecs() async {
+        // Empty/whitespace entries aren't user-meaningful, so they're dropped
+        // rather than surfaced as "'' is invalid".
+        let result = await manager.reposForSpecs(
+            ["   ", "org/repo"],
+            provider: .github, host: nil
+        )
+        #expect(result.repos == ["org/repo"])
+        #expect(result.invalidSpecs.isEmpty)
+    }
+
+    @Test func suggestionForInvalidSpecGlobsBareOrgName() {
+        #expect(ProviderManager.suggestion(forInvalidSpec: "securityscorecard") == "securityscorecard/*")
+        #expect(ProviderManager.suggestion(forInvalidSpec: "  acme  ") == "acme/*")
+        // No clean fix for these.
+        #expect(ProviderManager.suggestion(forInvalidSpec: "foo*") == nil)
+        #expect(ProviderManager.suggestion(forInvalidSpec: "/*") == nil)
+        #expect(ProviderManager.suggestion(forInvalidSpec: "") == nil)
     }
 
     // MARK: - ProviderError

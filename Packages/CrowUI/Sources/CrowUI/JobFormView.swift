@@ -23,13 +23,15 @@ public struct JobFormView: View {
 
     /// Repo slugs for the selected workspace, loaded via `listRepos`.
     @State private var repoOptions: [String] = []
+    /// `alwaysInclude` specs that couldn't be resolved, surfaced in the empty state.
+    @State private var invalidSpecs: [WorkspaceRepoListing.InvalidSpec] = []
     @State private var isLoadingRepos = false
     @State private var didLoadRepos = false
     /// Bumped on each load so a stale slow response can't clobber a newer one.
     @State private var loadGeneration = 0
 
     private let workspaces: [WorkspaceInfo]
-    private let listRepos: (WorkspaceInfo) async -> [String]
+    private let listRepos: (WorkspaceInfo) async -> WorkspaceRepoListing
     private let existingID: UUID?
     private let existingLastRunAt: Date?
     private let existingCreatedAt: Date
@@ -70,7 +72,7 @@ public struct JobFormView: View {
         isDuplicate: Bool = false,
         workspaces: [WorkspaceInfo] = [],
         existingNames: [String] = [],
-        listRepos: @escaping (WorkspaceInfo) async -> [String] = { _ in [] },
+        listRepos: @escaping (WorkspaceInfo) async -> WorkspaceRepoListing = { _ in .empty },
         onSave: @escaping (JobConfig) -> Void
     ) {
         self.workspaces = workspaces
@@ -137,6 +139,25 @@ public struct JobFormView: View {
         return choices
     }
 
+    /// Message shown when the repo picker has no options, distinguishing
+    /// "nothing configured" from "invalid spec(s)" from "valid specs that
+    /// returned nothing" (e.g. gh/glab not authenticated).
+    private var repoEmptyStateMessage: String {
+        if selectedWorkspace?.alwaysInclude.isEmpty != false {
+            return "No repos configured for this workspace. In Workspaces settings, set this workspace's Always Include Repos to e.g. owner/* or owner/repo."
+        }
+        if !invalidSpecs.isEmpty {
+            let lines = invalidSpecs.map { spec -> String in
+                if let suggestion = spec.suggestion {
+                    return "“\(spec.raw)” isn’t a valid repo spec — did you mean \(suggestion)?"
+                }
+                return "“\(spec.raw)” isn’t a valid repo spec — use owner/* or owner/repo."
+            }
+            return lines.joined(separator: "\n")
+        }
+        return "No repos found. Check that gh/glab is authenticated and that the configured specs match repos."
+    }
+
     private var isValid: Bool {
         nameValidationError == nil
             && !workspace.isEmpty
@@ -150,6 +171,7 @@ public struct JobFormView: View {
     private func loadRepos() async {
         guard let ws = selectedWorkspace else {
             repoOptions = []
+            invalidSpecs = []
             return
         }
         loadGeneration += 1
@@ -158,7 +180,8 @@ public struct JobFormView: View {
         let result = await listRepos(ws)
         // A newer load started while we were awaiting — drop this stale result.
         guard generation == loadGeneration else { return }
-        repoOptions = result
+        repoOptions = result.repos
+        invalidSpecs = result.invalidSpecs
         isLoadingRepos = false
         didLoadRepos = true
     }
@@ -192,7 +215,7 @@ public struct JobFormView: View {
                     }
                 }
                 if didLoadRepos, !isLoadingRepos, repoOptions.isEmpty {
-                    Text("No repos found. In Workspaces settings, set this workspace's Always Include Repos to e.g. owner/* or owner/repo — and check that gh/glab is authenticated.")
+                    Text(repoEmptyStateMessage)
                         .font(.caption).foregroundStyle(.secondary)
                 }
 

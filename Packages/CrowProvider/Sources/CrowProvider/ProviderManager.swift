@@ -228,15 +228,18 @@ public actor ProviderManager {
 
     // MARK: - Repo listing (Jobs repo picker)
 
-    /// Expand a workspace's repo specs into a sorted, de-duplicated list of
-    /// `owner/repo` slugs.
+    /// Expand a workspace's repo specs into resolved `owner/repo` slugs plus any
+    /// specs that couldn't be resolved.
     ///
     /// Each spec is either a glob (`owner/*` — list every repo owned by `owner`
-    /// via the provider) or an explicit slug (`owner/repo` — passed through
-    /// verbatim). Used to populate the Jobs form's repo picker from a
-    /// workspace's `alwaysInclude` entries.
-    public func reposForSpecs(_ specs: [String], provider: Provider, host: String?) async -> [String] {
+    /// via the provider), an explicit slug (`owner/repo` — passed through
+    /// verbatim), or invalid. Invalid specs (e.g. a bare org name like
+    /// `securityscorecard`) are *surfaced* in `invalidSpecs` — with a suggested
+    /// fix when there is one — rather than silently dropped, so the Jobs form's
+    /// repo picker can explain why it's empty.
+    public func reposForSpecs(_ specs: [String], provider: Provider, host: String?) async -> WorkspaceRepoListing {
         var slugs: Set<String> = []
+        var invalid: [WorkspaceRepoListing.InvalidSpec] = []
         for spec in specs {
             switch Self.classifySpec(spec) {
             case .glob(let owner):
@@ -246,10 +249,14 @@ public actor ProviderManager {
             case .explicit(let slug):
                 slugs.insert(slug)
             case .invalid:
-                continue
+                // Skip whitespace-only entries so the UI never shows "'' is invalid".
+                guard !spec.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+                invalid.append(
+                    .init(raw: spec, suggestion: Self.suggestion(forInvalidSpec: spec))
+                )
             }
         }
-        return slugs.sorted()
+        return WorkspaceRepoListing(repos: slugs.sorted(), invalidSpecs: invalid)
     }
 
     /// List every repo owned by `owner` as `owner/repo` slugs.
@@ -308,6 +315,15 @@ public actor ProviderManager {
         // A usable explicit entry needs an owner and a repo (at least one "/").
         guard spec.contains("/"), !spec.contains("*") else { return .invalid }
         return .explicit(slug: spec)
+    }
+
+    /// Suggest a clean fix for an invalid spec, or `nil` if there isn't an
+    /// obvious one. A bare org name (no `/`, no `*`) is almost always meant as
+    /// "every repo in this org", so we suggest `<name>/*`.
+    nonisolated static func suggestion(forInvalidSpec raw: String) -> String? {
+        let spec = raw.trimmingCharacters(in: .whitespaces)
+        guard !spec.isEmpty, !spec.contains("/"), !spec.contains("*") else { return nil }
+        return "\(spec)/*"
     }
 
     private static func nonEmptyLines(_ output: String) -> [String] {
