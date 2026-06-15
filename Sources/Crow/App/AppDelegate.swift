@@ -43,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Cache of expanded `alwaysInclude` repo lists, keyed by workspace name +
     /// its specs, with a short TTL so repeated form opens don't re-hit the
     /// provider CLI.
-    private var workspaceRepoCache: [String: (fetchedAt: Date, repos: [String])] = [:]
+    private var workspaceRepoCache: [String: (fetchedAt: Date, listing: WorkspaceRepoListing)] = [:]
     private let workspaceRepoCacheTTL: TimeInterval = 300
 
     /// Tail of the serial review-kickoff queue. Each call to
@@ -902,7 +902,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // owner/repo) into the repos available from its provider. Results are
         // cached per (workspace, specs) with a short TTL.
         appState.onListWorkspaceRepos = { [weak self] ws in
-            guard let self else { return [] }
+            guard let self else { return .empty }
             let provider: Provider
             if let p = Provider(rawValue: ws.provider) {
                 provider = p
@@ -918,13 +918,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ].joined(separator: "\u{1}")
             if let cached = self.workspaceRepoCache[key],
                Date().timeIntervalSince(cached.fetchedAt) < self.workspaceRepoCacheTTL {
-                return cached.repos
+                return cached.listing
             }
-            let repos = await self.providerManager.reposForSpecs(
+            let listing = await self.providerManager.reposForSpecs(
                 ws.alwaysInclude, provider: provider, host: ws.host
             )
-            self.workspaceRepoCache[key] = (Date(), repos)
-            return repos
+            self.workspaceRepoCache[key] = (Date(), listing)
+            return listing
         }
 
         // Hydrate mute state from config and wire toggle
