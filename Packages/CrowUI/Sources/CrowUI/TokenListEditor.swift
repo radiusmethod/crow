@@ -117,7 +117,10 @@ public struct TokenListEditor: View {
     /// `existing`, skipping case-sensitive exact duplicates (against both the
     /// existing array and tokens added earlier in the same call). Pure — never
     /// mutates its arguments.
-    static func adding(_ input: String, to existing: [String]) -> [String] {
+    ///
+    /// `nonisolated` so the (main-actor-isolated, via `View`) type's helper stays
+    /// callable from synchronous nonisolated contexts such as the test suite.
+    nonisolated static func adding(_ input: String, to existing: [String]) -> [String] {
         var result = existing
         for piece in input.split(separator: ",", omittingEmptySubsequences: true) {
             let trimmed = piece.trimmingCharacters(in: .whitespaces)
