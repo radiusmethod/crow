@@ -378,3 +378,111 @@ struct IssueTrackerReconcileKeyFanOutTests {
         #expect(fanned[0].number == 1)
     }
 }
+
+@Suite("IssueTracker reconcile cross-session de-dup")
+struct IssueTrackerReconcileDedupTests {
+
+    private func match(_ sid: UUID, number: Int, url: String, state: String = "OPEN")
+        -> IssueTracker.ReconcileBranchMatch {
+        IssueTracker.ReconcileBranchMatch(
+            sessionID: sid, number: number, url: url, state: state, updatedAt: nil
+        )
+    }
+
+    @Test func dropsPRContestedAcrossDistinctTickets() {
+        // One PR claimed by two sessions with different ticket keys can't be
+        // attributed to one of them → attach to neither (#520: MAXX-6854 has no
+        // PR yet was shown #171).
+        let s7035 = UUID(); let s6854 = UUID()
+        let url = "https://github.com/rm/max-monorepo/pull/171"
+        let out = IssueTracker.dedupeContestedPRs(
+            [match(s7035, number: 171, url: url), match(s6854, number: 171, url: url)],
+            identityBySession: [s7035: "MAXX-7035", s6854: "MAXX-6854"]
+        )
+        #expect(out.isEmpty)
+    }
+
+    @Test func keepsPRSharedByDuplicateSessionsWithSameIdentity() {
+        // Two sessions on the *same* ticket (a duplicated Jira session) both
+        // legitimately link the same PR.
+        let a = UUID(); let b = UUID()
+        let url = "https://github.com/rm/max-monorepo/pull/52"
+        let out = IssueTracker.dedupeContestedPRs(
+            [match(a, number: 52, url: url), match(b, number: 52, url: url)],
+            identityBySession: [a: "MAXX-6859", b: "MAXX-6859"]
+        )
+        #expect(out.count == 2)
+        #expect(Set(out.map(\.sessionID)) == [a, b])
+    }
+
+    @Test func keepsDistinctPRsForDistinctSessions() {
+        let s1 = UUID(); let s2 = UUID()
+        let out = IssueTracker.dedupeContestedPRs(
+            [
+                match(s1, number: 131, url: "https://github.com/rm/max-monorepo/pull/131"),
+                match(s2, number: 132, url: "https://github.com/rm/max-monorepo/pull/132"),
+            ],
+            identityBySession: [s1: "MAXX-6971", s2: "MAXX-6972"]
+        )
+        #expect(out.count == 2)
+    }
+}
+
+// Regression for the exact #520 max-monorepo scenario, exercised end-to-end at
+// the pure-function level: worktree branch `feature/{repo}-{ticket}-{slug}` vs
+// PR head `feature/{ticket}-{slug}`. The key (e.g. MAXX-7035) is derived from
+// the branch; the backend post-filters matches to head/title (no body), so a
+// no-PR session resolves to nothing rather than a phantom PR.
+@Suite("IssueTracker reconcile key scenario (#520)")
+struct IssueTrackerReconcileKeyScenarioTests {
+
+    private func keyCandidate(_ sid: UUID, _ key: String) -> IssueTracker.ReconcileKeyCandidate {
+        IssueTracker.ReconcileKeyCandidate(
+            sessionID: sid, provider: .github, repoSlug: "rm/max-monorepo", key: key, gitlabHost: nil
+        )
+    }
+
+    @Test func branchDerivedKeyResolvesCorrectPRAndNoPRSessionGetsNone() {
+        let s7035 = UUID()  // citations-chain-of-custody → PR #171
+        let s7031 = UUID()  // documents-observability-ui → PR #168
+        let s6854 = UUID()  // ut-cascade-dual-write → NO PR exists
+
+        // The branch ticket key MAXX-7035 is what `Validation.ticketKey` pulls
+        // from `feature/max-monorepo-maxx-7035-citations-chain-of-custody`.
+        #expect(
+            Validation.ticketKey(fromBranch: "feature/max-monorepo-maxx-7035-citations-chain-of-custody")
+                == "MAXX-7035"
+        )
+
+        let candidates = [
+            keyCandidate(s7035, "MAXX-7035"),
+            keyCandidate(s7031, "MAXX-7031"),
+            keyCandidate(s6854, "MAXX-6854"),
+        ]
+
+        // Backend matches are already post-filtered to head/title. #171's title
+        // carries MAXX-7035; #168's carries MAXX-7031. MAXX-6854 has no PR — and
+        // #171 only *mentions* it in its body, which the backend no longer
+        // matches, so MAXX-6854 produces no match.
+        let kc7035 = KeyCandidate(repoSlug: "rm/max-monorepo", key: "MAXX-7035")
+        let kc7031 = KeyCandidate(repoSlug: "rm/max-monorepo", key: "MAXX-7031")
+        let backendMatches = [
+            KeyPRMatch(candidate: kc7035, number: 171,
+                       url: "https://github.com/rm/max-monorepo/pull/171", state: "OPEN", updatedAt: nil),
+            KeyPRMatch(candidate: kc7031, number: 168,
+                       url: "https://github.com/rm/max-monorepo/pull/168", state: "OPEN", updatedAt: nil),
+        ]
+
+        let fanned = IssueTracker.fanOutKeyMatches(backendMatches, across: candidates)
+        let decided = IssueTracker.decideReconcileLinks(matches: fanned)
+        let identity = [s7035: "MAXX-7035", s7031: "MAXX-7031", s6854: "MAXX-6854"]
+        let final = IssueTracker.dedupeContestedPRs(decided, identityBySession: identity)
+
+        let bySession = Dictionary(grouping: final, by: { $0.sessionID })
+        #expect(bySession[s7035]?.map(\.number) == [171])
+        #expect(bySession[s7031]?.map(\.number) == [168])
+        #expect(bySession[s6854] == nil)  // no PR — never a phantom one
+        // No PR attaches to two distinct sessions.
+        #expect(Set(final.map(\.url)).count == final.count)
+    }
+}

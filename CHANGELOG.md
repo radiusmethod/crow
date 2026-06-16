@@ -37,6 +37,7 @@ Backfill of merged PRs since the 0.1.0 release, grouped by theme.
 - #220 — Filtering for the tickets list.
 - #226 — Per-section select all and icon-only cancel button in selection mode.
 - #231 — Quick action buttons on the session detail header.
+- #520 — PR-link reconcile no longer attaches the wrong PR when the worktree branch carries a repo-name prefix the PR head drops (`feature/max-monorepo-maxx-7035-…` vs `feature/maxx-7035-…`). The ticket key is derived from the worktree branch, key matching ignores body-only mentions, and a PR can attach to at most one session — a session whose ticket has no PR now gets none.
 
 ### Terminal Runtime
 

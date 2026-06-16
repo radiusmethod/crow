@@ -442,11 +442,17 @@ final class BackendsTests: XCTestCase {
 
     func testGitHubCodeBackendFindPRsMatchingKeysParsesAndFilters() async throws {
         let fake = FakeShellRunner()
-        // Two PRs returned by gh search: one references MAXX-6859 in its title,
-        // one is a fuzzy match that mentions it nowhere — only the first counts.
+        // Four PRs returned by gh search:
+        //  #52 — key in title AND head → kept
+        //  #53 — key in head only (title/body unrelated) → kept
+        //  #41 — key in body ONLY → rejected (#520: a body mention belongs to a
+        //        different ticket; matching it attached phantom PRs)
+        //  #40 — key nowhere → rejected
         let json = """
         [
           {"number":52,"url":"https://github.com/a/b/pull/52","state":"OPEN","updatedAt":"2026-01-02T00:00:00Z","title":"feat: thing. MAXX-6859","headRefName":"feature/maxx-6859-thing","body":"closes MAXX-6859"},
+          {"number":53,"url":"https://github.com/a/b/pull/53","state":"OPEN","updatedAt":"2026-01-03T00:00:00Z","title":"feat: unrelated title","headRefName":"feature/maxx-6859-other","body":"no mention"},
+          {"number":41,"url":"https://github.com/a/b/pull/41","state":"MERGED","updatedAt":"2026-01-01T00:00:00Z","title":"different ticket","headRefName":"feature/other-work","body":"related to MAXX-6859"},
           {"number":40,"url":"https://github.com/a/b/pull/40","state":"MERGED","updatedAt":"2026-01-01T00:00:00Z","title":"unrelated","headRefName":"feature/other","body":"no key here"}
         ]
         """
@@ -455,11 +461,10 @@ final class BackendsTests: XCTestCase {
         let matches = try await backend.findPRsMatchingKeys([
             KeyCandidate(repoSlug: "a/b", key: "MAXX-6859")
         ])
-        XCTAssertEqual(matches.count, 1)
-        XCTAssertEqual(matches[0].number, 52)
-        XCTAssertEqual(matches[0].state, "OPEN")
-        XCTAssertEqual(matches[0].candidate.key, "MAXX-6859")
-        // Command shape: gh pr list --search "<key> in:title,body".
+        XCTAssertEqual(Set(matches.map(\.number)), [52, 53])
+        XCTAssertTrue(matches.allSatisfy { $0.candidate.key == "MAXX-6859" })
+        // Command shape: gh pr list --search "<key> in:title,body" (broad recall;
+        // results are post-filtered to title/head only).
         let args = fake.calls[0].args
         XCTAssertEqual(Array(args.prefix(3)), ["gh", "pr", "list"])
         XCTAssertTrue(args.contains("--search"))
