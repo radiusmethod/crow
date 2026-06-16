@@ -224,9 +224,11 @@ public struct GitHubCodeBackend: CodeBackend {
     }
 
     /// Parse `gh pr list --json …` output into `KeyPRMatch`es. Post-filters to
-    /// PRs where the key actually appears (case-insensitively) in the title,
-    /// body, or head branch — `gh`'s search can be fuzzy, and we only want PRs
-    /// that genuinely reference the ticket.
+    /// PRs where the key actually appears (case-insensitively) in the **title or
+    /// head branch** — `gh`'s search can be fuzzy, and a key mentioned only in a
+    /// PR's *body* (e.g. "related to MAXX-6854") belongs to a different ticket.
+    /// Matching on body attached phantom PRs to sessions whose ticket had none
+    /// (#520), so it is deliberately excluded.
     static func parseKeyPRMatches(_ output: String, candidate: KeyCandidate) -> [KeyPRMatch] {
         guard let data = output.data(using: .utf8),
               let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
@@ -239,9 +241,8 @@ public struct GitHubCodeBackend: CodeBackend {
                   let url = node["url"] as? String,
                   let state = node["state"] as? String else { continue }
             let title = (node["title"] as? String ?? "").lowercased()
-            let body = (node["body"] as? String ?? "").lowercased()
             let head = (node["headRefName"] as? String ?? "").lowercased()
-            guard title.contains(needle) || body.contains(needle) || head.contains(needle) else { continue }
+            guard title.contains(needle) || head.contains(needle) else { continue }
             let updatedAt = (node["updatedAt"] as? String).flatMap { dateFmt.date(from: $0) }
             matches.append(KeyPRMatch(
                 candidate: candidate, number: number, url: url, state: state, updatedAt: updatedAt

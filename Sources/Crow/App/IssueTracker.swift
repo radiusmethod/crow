@@ -1084,6 +1084,26 @@ final class IssueTracker {
         return picks
     }
 
+    /// Enforce that a single PR attaches to at most one work item. Groups the
+    /// final per-session picks by PR URL; if a URL is claimed by sessions with
+    /// more than one distinct work-item identity (ticket key, else branch), the
+    /// PR can't be attributed to one of them with confidence, so it is dropped
+    /// from all of them — never guess (#520). Duplicate sessions sharing one
+    /// identity (same key/branch) keep the link. Pure — no appState, no I/O.
+    nonisolated static func dedupeContestedPRs(
+        _ picks: [ReconcileBranchMatch],
+        identityBySession: [UUID: String]
+    ) -> [ReconcileBranchMatch] {
+        let byURL = Dictionary(grouping: picks, by: { $0.url })
+        var out: [ReconcileBranchMatch] = []
+        for (_, group) in byURL {
+            let identities = Set(group.compactMap { identityBySession[$0.sessionID] })
+            if identities.count > 1 { continue }   // contested across tickets → none
+            out.append(contentsOf: group)
+        }
+        return out
+    }
+
     /// Route a reconcile candidate to a *code* backend. A task-only provider
     /// (`.jira`/`.corveil`) has no code surface, so a session tracked by one
     /// resolves PRs through its `codeProvider` — mirroring the
@@ -1130,7 +1150,15 @@ final class IssueTracker {
         // session resolve to a single best pick.
         matches.append(contentsOf: await fetchPRsByKeyForReconcile(candidates: keyCandidates))
 
-        applyReconciledPRLinks(Self.decideReconcileLinks(matches: matches))
+        // Each session's work-item identity (key preferred, else branch) so the
+        // de-dup pass can tell a legitimate duplicate-session match from one PR
+        // being claimed by two different tickets.
+        var identityBySession: [UUID: String] = [:]
+        for c in candidates { identityBySession[c.sessionID] = c.branch }
+        for c in keyCandidates { identityBySession[c.sessionID] = c.key }
+
+        let decided = Self.decideReconcileLinks(matches: matches)
+        applyReconciledPRLinks(Self.dedupeContestedPRs(decided, identityBySession: identityBySession))
     }
 
     /// Walk appState and build the set of sessions needing a reconcile pass.
@@ -1191,13 +1219,25 @@ final class IssueTracker {
             let links = appState.links(for: session.id)
             guard !links.contains(where: { $0.linkType == .pr }) else { continue }
 
-            // Only task-only trackers whose PR branch won't match the worktree.
-            guard let ticketURL = session.ticketURL,
-                  Validation.isJiraSpec(ticketURL),
-                  let key = Validation.jiraKey(from: ticketURL) else { continue }
-
             let wts = appState.worktrees(for: session.id)
             guard let primaryWt = wts.first(where: { $0.isPrimary }) ?? wts.first else { continue }
+
+            // Resolve the ticket key: prefer a Jira ticket URL, else derive it
+            // from the worktree branch (e.g. `feature/max-monorepo-maxx-7035-…`
+            // → `MAXX-7035`). The branch fallback covers the prefix-drop case
+            // where the PR head loses the repo prefix the worktree carries (#520).
+            //
+            // The branch fallback is gated to task-only trackers (Jira/Corveil):
+            // a lowercased branch can't distinguish a real Jira project ("maxx")
+            // from an ordinary word/repo segment ("api"), so a GitHub/GitLab
+            // issue branch like `feature/acme-api-197-fix` would yield a bogus
+            // "API-197" key. Those sessions resolve via the branch path instead.
+            let urlKey = session.ticketURL.flatMap {
+                Validation.isJiraSpec($0) ? Validation.jiraKey(from: $0) : nil
+            }
+            let branchKey = (session.provider?.isTaskOnly == true)
+                ? Validation.ticketKey(fromBranch: primaryWt.branch) : nil
+            guard let key = urlKey ?? branchKey else { continue }
 
             let info = resolveRepoInfo(worktree: primaryWt)
             guard !info.slug.isEmpty else { continue }

@@ -78,4 +78,18 @@ public enum Validation {
     public static func jiraKey(from spec: String) -> String? {
         parseJiraKey(spec)?.key
     }
+
+    /// Extract a ticket key (e.g. `MAXX-7035`) embedded in a git branch name such
+    /// as `feature/max-monorepo-maxx-7035-citations`. Returns the first
+    /// LETTERS-DIGITS token that validates as a Jira-style key, uppercased.
+    ///
+    /// The character class excludes `-`, so on `…-max-monorepo-maxx-7035-…` the
+    /// first complete LETTERS-DIGITS match is `maxx-7035` → `MAXX-7035`. Numeric
+    /// GitHub-issue branches like `feature/acme-api-197-fix` yield `api-197`,
+    /// which fails `parseJiraKey`'s uppercase-project rule → `nil`.
+    public static func ticketKey(fromBranch branch: String) -> String? {
+        guard let r = branch.range(of: "[A-Za-z][A-Za-z0-9]+-[0-9]+", options: .regularExpression)
+        else { return nil }
+        return parseJiraKey(String(branch[r]).uppercased())?.key
+    }
 }
