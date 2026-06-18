@@ -41,6 +41,22 @@ PR #228 split every automation toggle out of General into its own tab. Open **Se
 
   Turn this off if your account reports auto mode as unavailable. Worker sessions and CLI-spawned terminals are unaffected. Takes effect on next app launch — the Manager's stored command is rebuilt on hydration.
 
+### Atlassian MCP (Jira)
+
+`acli` cannot set a Jira assignee (at create or after) and its transitions are unreliable, so every ticket Crow filed landed unassigned. PR #522 routes the **agent-side** Jira flow (create-with-assignee, assign/reassign, transition, fetch, link) through the official **Atlassian Remote MCP Server** instead. Crow's in-app issue-board polling and auto-complete still use `acli` (that path works); only the agent flow moved.
+
+- **Atlassian MCP (Jira)** — set the endpoint (defaults to `https://mcp.atlassian.com/v1/mcp`), your Atlassian account **email**, and an **API token** (`op://` reference recommended, or plaintext). Crow builds an HTTP Basic `Authorization` header and injects the MCP server into launched Jira-task sessions, the Manager, and cron jobs.
+
+How injection works: for a session whose workspace uses `taskProvider: "jira"` (and the Manager/cron at the dev root), Crow writes a project-root `.mcp.json` registering an `http` server named `atlassian`, pre-trusts it via `enabledMcpjsonServers` in `.claude/settings.local.json`, and stores the resolved `Authorization` value in that file's `env` block (`ATLASSIAN_MCP_AUTHORIZATION`, chmod `0600`) — the `.mcp.json` header is a `${…}` reference, so no secret lands in it. The launched agent (and the migrated `/crow-create-ticket`, `/crow-workspace`, `/crow-batch-workspace` skills) use the MCP tools — `getJiraIssue`, `createJiraIssue`, `editJiraIssue`, `transitionJiraIssue`, `lookupJiraAccountId` — instead of `acli`. Backed by `AppConfig.atlassianMCP`. `gh`/`glab` GitHub/GitLab task paths are untouched.
+
+<a id="atlassian-mcp-headless-auth"></a>
+**Headless auth — one-time setup.** The Manager and cron jobs run without a browser, so they use API-token auth (no OAuth consent screen). Two prerequisites:
+
+1. An Atlassian **org admin enables API-token auth for the Rovo MCP Server** (organization security settings → Rovo MCP Server). Without this, calls return 401.
+2. Create a **personal API token** at <https://id.atlassian.com> → Security → API tokens, then store it in **Settings → Automation → Atlassian MCP (Jira)** as an `op://` reference (preferred) or plaintext.
+
+Crow sends `Authorization: Basic base64(email:token)`. (A service-account `Bearer` key works too if you'd rather not attribute tickets to a personal account, but the Settings UI is geared to the personal-token Basic flow.)
+
 ### Auto-respond
 
 PR #214 added two opt-in toggles that let Crow type a follow-up instruction into a session's Claude Code terminal when a PR signal arrives. Both are off by default — typing into a running terminal unprompted is intrusive.

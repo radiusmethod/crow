@@ -1,8 +1,11 @@
 # Crow Create Ticket
 
-Create a new ticket (GitHub issue via `gh`, or GitLab issue via `glab`) for a repo in
-the current Crow workspace, assigned to the invoking user and labeled `crow:auto` so
-Crow's auto-pickup queue implements it.
+Create a new ticket (GitHub issue via `gh`, GitLab issue via `glab`, or Jira work item
+via the **Atlassian MCP server**) for a repo/project in the current Crow workspace,
+assigned to the invoking user and labeled `crow:auto`. For GitHub/GitLab, Crow's
+auto-pickup queue then implements it. (Jira's auto-pickup isn't wired — the label is
+for parity/board visibility — but the work item is created **with an assignee in one
+step**, which `acli` could never do; CROW-522.)
 
 ## Important: Sandbox Bypass
 
@@ -47,10 +50,15 @@ same file used by `/crow-workspace`. It maps each workspace to a provider/cli/ho
 
 ### Provider Detection
 
-| Workspace `provider` | CLI  | GITLAB_HOST          |
-|----------------------|------|----------------------|
-| `github`             | gh   | —                    |
-| `gitlab`             | glab | workspace `host`     |
+| Workspace `taskProvider` | Tool         | Notes                       |
+|--------------------------|--------------|-----------------------------|
+| `github` (or unset)      | gh           | —                           |
+| `gitlab`                 | glab         | workspace `host`            |
+| `jira`                   | Atlassian MCP | project `jiraProjectKey`   |
+
+When a workspace sets `taskProvider: "jira"`, tasks live in Jira (code/PRs still on the
+workspace's GitHub/GitLab repo). Use the Atlassian MCP tools instead of `gh`/`glab` for
+the steps below.
 
 ## Instructions
 
@@ -100,6 +108,10 @@ gh api user --jq .login
 GITLAB_HOST={host} glab api user --jq '.username'
 ```
 
+**Jira (Atlassian MCP):** resolve your own Atlassian `accountId` via the MCP — call
+`atlassianUserInfo` (current user) or `lookupJiraAccountId`. You'll pass this
+`accountId` as the assignee when creating the work item.
+
 ### Step 4: Create the issue (assigned + labeled `crow:auto`)
 
 In both commands below, `BODY` is the user-provided body followed by the required
@@ -130,6 +142,14 @@ GITLAB_HOST={host} glab issue create --repo {org/repo} \
   --yes
 ```
 
+**Jira (Atlassian MCP):** call `createJiraIssue` with your resolved `cloudId`
+(`getAccessibleAtlassianResources`), the workspace's `jiraProjectKey`, issue type
+`Task`, the `TITLE` as summary, `BODY` (including the attribution footer) as
+description, the `crow:auto` label, **and the assignee `accountId` from Step 3** so the
+work item is created already assigned — the core fix in CROW-522. There is no
+missing-label fallback to run (Step 5 is GitHub/GitLab-only); Jira accepts arbitrary
+labels.
+
 ### Step 4b: Attribution (REQUIRED)
 
 See `.claude/skills/crow-attribution/FOOTER.md` for the full rules. The body passed to
@@ -143,7 +163,7 @@ followed by:
 - Crow filled in the agent name for this session before this skill reached you — paste the line literally; do not re-introduce `${…}` shell parameter expansion of your own (it silently fails inside single-quoted heredocs and the literal text leaks into the issue body).
 - Do not modify the URL — the link target is always `https://github.com/radiusmethod/crow`, never a fork or a derived value from the local git remote.
 - Do not wrap the line in additional formatting (no blockquote, no extra brackets, no surrounding text).
-- This line MUST appear in every issue body, whether GitHub or GitLab, and whether or not the user supplied any body text.
+- This line MUST appear in every issue body — GitHub, GitLab, or Jira — and whether or not the user supplied any body text.
 
 ### Step 5: Missing-label fallback
 
@@ -172,6 +192,6 @@ the repo, assignee, and `crow:auto` label so they can confirm Crow will pick it 
 - This skill only creates the ticket. Crow's auto-pickup queue (driven by the
   `crow:auto` label) is responsible for starting implementation — do not also set up a
   worktree or session here. Use `/crow-workspace` for that.
-- Assignee is resolved dynamically (`gh api user` / `glab api user`); never hardcode a
-  login.
+- Assignee is resolved dynamically (`gh api user` / `glab api user` / the Atlassian MCP
+  `atlassianUserInfo` accountId); never hardcode a login or accountId.
 - All `gh`, `glab`, and `git` commands require `dangerouslyDisableSandbox: true`.

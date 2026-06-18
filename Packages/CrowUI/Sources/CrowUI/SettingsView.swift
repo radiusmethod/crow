@@ -73,6 +73,7 @@ public struct SettingsView: View {
                 remoteControlEnabled: $config.remoteControlEnabled,
                 managerAutoPermissionMode: $config.managerAutoPermissionMode,
                 managerGateway: $config.managerGateway,
+                atlassianMCP: $config.atlassianMCP,
                 autoRespond: $config.autoRespond,
                 attributionTrailers: $config.attributionTrailers,
                 autoMergeWatcherEnabled: $config.autoMergeWatcherEnabled,
