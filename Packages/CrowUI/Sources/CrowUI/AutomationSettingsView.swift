@@ -9,6 +9,7 @@ public struct AutomationSettingsView: View {
     @Binding var remoteControlEnabled: Bool
     @Binding var managerAutoPermissionMode: Bool
     @Binding var managerGateway: WorkspaceGateway?
+    @Binding var atlassianMCP: AtlassianMCPConfig?
     @Binding var autoRespond: AutoRespondSettings
     @Binding var attributionTrailers: Bool
     @Binding var autoMergeWatcherEnabled: Bool
@@ -19,11 +20,16 @@ public struct AutomationSettingsView: View {
     @State private var managerGatewayBaseURL: String
     @State private var managerGatewayHeadersText: String
 
+    @State private var atlassianMCPEndpoint: String
+    @State private var atlassianMCPEmail: String
+    @State private var atlassianMCPToken: String
+
     public init(
         defaults: Binding<ConfigDefaults>,
         remoteControlEnabled: Binding<Bool>,
         managerAutoPermissionMode: Binding<Bool>,
         managerGateway: Binding<WorkspaceGateway?>,
+        atlassianMCP: Binding<AtlassianMCPConfig?>,
         autoRespond: Binding<AutoRespondSettings>,
         attributionTrailers: Binding<Bool>,
         autoMergeWatcherEnabled: Binding<Bool>,
@@ -35,6 +41,7 @@ public struct AutomationSettingsView: View {
         self._remoteControlEnabled = remoteControlEnabled
         self._managerAutoPermissionMode = managerAutoPermissionMode
         self._managerGateway = managerGateway
+        self._atlassianMCP = atlassianMCP
         self._autoRespond = autoRespond
         self._attributionTrailers = attributionTrailers
         self._autoMergeWatcherEnabled = autoMergeWatcherEnabled
@@ -45,6 +52,9 @@ public struct AutomationSettingsView: View {
         self._managerGatewayHeadersText = State(initialValue: managerGateway.wrappedValue.map {
             WorkspaceGateway.headerLines(from: $0.customHeaders)
         } ?? "")
+        self._atlassianMCPEndpoint = State(initialValue: atlassianMCP.wrappedValue?.endpoint ?? AtlassianMCPConfig.defaultEndpoint)
+        self._atlassianMCPEmail = State(initialValue: atlassianMCP.wrappedValue?.email ?? "")
+        self._atlassianMCPToken = State(initialValue: atlassianMCP.wrappedValue?.tokenRef ?? "")
     }
 
     /// Reject a half-filled Manager gateway (base URL xor headers), matching the
@@ -66,6 +76,36 @@ public struct AutomationSettingsView: View {
             managerGateway = nil
         } else if managerGatewayValidationError == nil {
             managerGateway = WorkspaceGateway(baseURL: trimmedURL, customHeaders: headers)
+        } else {
+            return  // half-filled — don't persist until valid
+        }
+        onSave?()
+    }
+
+    /// Reject a half-filled Atlassian MCP block (email xor token). Basic auth
+    /// needs both; the endpoint falls back to the default when blank.
+    private var atlassianMCPValidationError: String? {
+        let hasEmail = !atlassianMCPEmail.trimmingCharacters(in: .whitespaces).isEmpty
+        let hasToken = !atlassianMCPToken.trimmingCharacters(in: .whitespaces).isEmpty
+        if hasEmail && !hasToken { return "Add an API token, or clear the account email." }
+        if hasToken && !hasEmail { return "Add the account email, or clear the API token." }
+        return nil
+    }
+
+    /// Push the editor fields back into the `atlassianMCP` binding (nil when both
+    /// email and token are empty, or while half-filled so an invalid block isn't
+    /// persisted).
+    private func commitAtlassianMCP() {
+        let email = atlassianMCPEmail.trimmingCharacters(in: .whitespaces)
+        let token = atlassianMCPToken.trimmingCharacters(in: .whitespaces)
+        let endpoint = atlassianMCPEndpoint.trimmingCharacters(in: .whitespaces)
+        if email.isEmpty && token.isEmpty {
+            atlassianMCP = nil
+        } else if atlassianMCPValidationError == nil {
+            atlassianMCP = AtlassianMCPConfig(
+                endpoint: endpoint.isEmpty ? AtlassianMCPConfig.defaultEndpoint : endpoint,
+                email: email,
+                tokenRef: token)
         } else {
             return  // half-filled — don't persist until valid
         }
@@ -148,6 +188,36 @@ public struct AutomationSettingsView: View {
                 }
 
                 Text("The Manager sits at the dev root and isn't tied to one workspace, so it has its own gateway. Per-workspace gateways are set under Workspaces. Leave empty to use the vanilla Anthropic API. Takes effect on next app launch.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Atlassian MCP (Jira)") {
+                TextField("Endpoint", text: $atlassianMCPEndpoint)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .onChange(of: atlassianMCPEndpoint) { _, _ in commitAtlassianMCP() }
+
+                TextField("Account email", text: $atlassianMCPEmail)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .onChange(of: atlassianMCPEmail) { _, _ in commitAtlassianMCP() }
+
+                TextField("API token (op:// reference or plaintext)", text: $atlassianMCPToken)
+                    .textFieldStyle(.roundedBorder)
+                    .autocorrectionDisabled()
+                    .onChange(of: atlassianMCPToken) { _, _ in commitAtlassianMCP() }
+                Text("Personal API token from id.atlassian.com, sent as HTTP Basic (base64 of email:token). A value starting with `op://` is resolved at launch via the 1Password CLI and kept out of config.json (the resolved Authorization header is cached owner-only in settings.local.json); any other value is stored in plain text in config.json — prefer an `op://` reference.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let error = atlassianMCPValidationError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                Text("When set, Crow injects the official Atlassian Remote MCP Server into launched Jira-task sessions (and the Manager + cron jobs) so they create/assign/transition/fetch work items via MCP instead of acli. Requires an Atlassian org admin to first enable API-token auth for the Rovo MCP Server. Takes effect on next session launch.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

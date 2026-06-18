@@ -65,6 +65,15 @@ public struct AppConfig: Codable, Sendable, Equatable {
     /// global `~/.zshrc` export doesn't bleed in). Per-workspace `gateway` blocks
     /// apply to non-Manager sessions only (CROW-402).
     public var managerGateway: WorkspaceGateway?
+    /// Optional Atlassian Remote MCP Server credential, shared org-wide (one
+    /// Atlassian account). When set and a session's task provider is Jira — or
+    /// for the Manager/cron sessions — Crow injects the Atlassian MCP server
+    /// into the launched session's `.mcp.json` and pre-trusts it, replacing the
+    /// `acli` agent flow for create/assign/transition/fetch (CROW-522). The API
+    /// token is stored as an `op://` reference (resolved at launch) so it never
+    /// lands at rest in `config.json`. When nil, no MCP is injected and Jira
+    /// sessions fall back to `acli`.
+    public var atlassianMCP: AtlassianMCPConfig?
 
     /// Effective review-exclude patterns: the global `defaults.excludeReviewRepos`
     /// unioned with every workspace's per-workspace `excludeReviewRepos`. A repo
@@ -92,7 +101,8 @@ public struct AppConfig: Codable, Sendable, Equatable {
         jobs: [JobConfig] = [],
         defaultAgentKind: AgentKind = .claudeCode,
         agentsByKind: [String: AgentKind] = [:],
-        managerGateway: WorkspaceGateway? = nil
+        managerGateway: WorkspaceGateway? = nil,
+        atlassianMCP: AtlassianMCPConfig? = nil
     ) {
         self.workspaces = workspaces
         self.defaults = defaults
@@ -112,6 +122,7 @@ public struct AppConfig: Codable, Sendable, Equatable {
         self.defaultAgentKind = defaultAgentKind
         self.agentsByKind = agentsByKind
         self.managerGateway = managerGateway
+        self.atlassianMCP = atlassianMCP
     }
 
     public init(from decoder: Decoder) throws {
@@ -134,10 +145,11 @@ public struct AppConfig: Codable, Sendable, Equatable {
         defaultAgentKind = try container.decodeIfPresent(AgentKind.self, forKey: .defaultAgentKind) ?? .claudeCode
         agentsByKind = try container.decodeIfPresent([String: AgentKind].self, forKey: .agentsByKind) ?? [:]
         managerGateway = try container.decodeIfPresent(WorkspaceGateway.self, forKey: .managerGateway)
+        atlassianMCP = try container.decodeIfPresent(AtlassianMCPConfig.self, forKey: .atlassianMCP)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, jobsAutoPermissionMode, telemetry, autoRespond, attributionTrailers, autoMergeWatcherEnabled, autoCreateWatcherEnabled, autoRebaseWatcherEnabled, cleanup, jobs, defaultAgentKind, agentsByKind, managerGateway
+        case workspaces, defaults, notifications, sidebar, remoteControlEnabled, managerAutoPermissionMode, jobsAutoPermissionMode, telemetry, autoRespond, attributionTrailers, autoMergeWatcherEnabled, autoCreateWatcherEnabled, autoRebaseWatcherEnabled, cleanup, jobs, defaultAgentKind, agentsByKind, managerGateway, atlassianMCP
     }
 
     /// Resolve the agent that should drive a newly-created session of the
@@ -227,6 +239,62 @@ extension WorkspaceGateway {
             .sorted { $0.key < $1.key }
             .map { "\($0.key): \($0.value)" }
             .joined(separator: "\n")
+    }
+}
+
+/// Atlassian Remote MCP Server credential (CROW-522). Drives the agent-side Jira
+/// flow (create-with-assignee, assign, transition, fetch, link) via the official
+/// MCP server instead of `acli`, in launched sessions, the Manager, and cron jobs.
+///
+/// Auth is a **personal API token** sent as HTTP Basic: the launch-time resolver
+/// builds `Authorization: Basic base64("\(email):\(token)")`. `tokenRef` is an
+/// `op://…` 1Password reference (resolved at launch via `op read`) so the token
+/// never lands at rest in `config.json`; a non-`op://` value is treated as a
+/// plaintext token (stored in `config.json`, so warn in the UI).
+///
+/// Note: the Atlassian org admin must first **enable API-token auth for the Rovo
+/// MCP Server**, otherwise the headless calls 401.
+public struct AtlassianMCPConfig: Codable, Sendable, Equatable {
+    /// The remote MCP endpoint. Defaults to Atlassian's recommended `/v1/mcp`.
+    public var endpoint: String
+    /// The Atlassian account email used for HTTP Basic auth.
+    public var email: String
+    /// The API token, as an `op://…` reference (preferred) or plaintext.
+    public var tokenRef: String
+
+    /// Atlassian's recommended streamable-HTTP endpoint (the legacy `/v1/sse`
+    /// is deprecated after 2026-06-30).
+    public static let defaultEndpoint = "https://mcp.atlassian.com/v1/mcp"
+
+    public init(endpoint: String = AtlassianMCPConfig.defaultEndpoint, email: String, tokenRef: String) {
+        self.endpoint = endpoint
+        self.email = email
+        self.tokenRef = tokenRef
+    }
+
+    /// Whether this config has enough to inject a server. Both an email and a
+    /// token are required for Basic auth; a blank endpoint falls back to the
+    /// default at resolve time.
+    public var isEmpty: Bool {
+        email.trimmingCharacters(in: .whitespaces).isEmpty
+            && tokenRef.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// The effective endpoint, falling back to the default when blank.
+    public var resolvedEndpoint: String {
+        let trimmed = endpoint.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? Self.defaultEndpoint : trimmed
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        endpoint = try container.decodeIfPresent(String.self, forKey: .endpoint) ?? Self.defaultEndpoint
+        email = try container.decodeIfPresent(String.self, forKey: .email) ?? ""
+        tokenRef = try container.decodeIfPresent(String.self, forKey: .tokenRef) ?? ""
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case endpoint, email, tokenRef
     }
 }
 

@@ -92,20 +92,23 @@ GITLAB_HOST=gitlab.example.com glab issue view {number} --repo {org/repo} --comm
 GITLAB_HOST=gitlab.example.com glab mr view {number} --repo {org/repo} --comments
 ```
 
-### Jira (acli)
-`acli` is already authenticated against a single Atlassian site, so it takes a
-bare key (not a URL). Pass the full key (`PROJ-NNN`), not just the numeric suffix.
-```bash
-acli jira workitem view {key} --json   # {key} = MAXX-6859
-```
-The summary is at `.fields.summary`; use it as `{ticket_title}`.
+### Jira (Atlassian MCP)
+Jira work items are fetched via the **official Atlassian Remote MCP Server**, not
+`acli` (CROW-522). When a workspace is configured for Jira and the Atlassian MCP
+credential is set in Settings → Automation, Crow pre-registers and auto-trusts the
+`atlassian` MCP server in the launched session. Resolve your `cloudId` once with
+`getAccessibleAtlassianResources`, then call `getJiraIssue` for the full key
+(`PROJ-NNN`, e.g. `MAXX-6859`). The summary field is the `{ticket_title}`. Use the
+same MCP tools (`createJiraIssue`, `editJiraIssue`, `transitionJiraIssue`,
+`lookupJiraAccountId`) for any create/assign/transition. (If the MCP isn't
+configured in this environment, fall back to `acli jira workitem view {key} --json`.)
 
 ### Provider Detection from URL
 
 | URL Contains | Provider | CLI | GITLAB_HOST |
 |---|---|---|---|
 | `github.com` | github | gh | - |
-| `atlassian.net` / `/browse/` / bare `PROJ-123` | jira | acli | - |
+| `atlassian.net` / `/browse/` / bare `PROJ-123` | jira | Atlassian MCP | - |
 | `gitlab.example.com` | gitlab | glab | gitlab.example.com |
 | `gitlab.com` | gitlab | glab | gitlab.com |
 | `gitlab-il2.example.com` | gitlab | glab | gitlab-il2.example.com |
@@ -248,12 +251,13 @@ gh api repos/{owner}/{repo}/issues/{number}/comments
 GITLAB_HOST={host} glab issue view {number} --repo {org/repo} --comments
 ```
 
-**Jira (acli — task-only):**
-```bash
-acli jira workitem view {key} --json   # {key} = MAXX-6859 (full key, not the suffix)
-```
-Use `.fields.summary` for `{ticket_title}`. The code provider/PR detection below
-still runs against the workspace's configured GitHub/GitLab repo, not Jira.
+**Jira (Atlassian MCP — task-only):**
+Fetch the work item via the `atlassian` MCP server: resolve `cloudId` with
+`getAccessibleAtlassianResources`, then `getJiraIssue` for `{key}` (full key, e.g.
+`MAXX-6859` — not the numeric suffix). Use the work item's summary as
+`{ticket_title}`. The code provider/PR detection below still runs against the
+workspace's configured GitHub/GitLab repo, not Jira. (Fallback when MCP is
+unconfigured: `acli jira workitem view {key} --json`, summary at `.fields.summary`.)
 
 **If an existing PR was detected for this ticket**, also fetch the PR view so it can be embedded:
 ```bash

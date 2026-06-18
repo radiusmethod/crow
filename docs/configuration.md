@@ -125,6 +125,37 @@ The Manager session sits at the dev root and isn't bound to a single workspace, 
 
 Same shape, same secret-storage rules, same two-way injection (written to `{devRoot}/.claude/settings.local.json`). Configure it under **Settings → Automation → Manager AI Gateway**. Takes effect on the next app launch.
 
+## Atlassian MCP (Jira)
+
+For workspaces with `taskProvider: "jira"`, Crow drives the **agent-side** Jira flow (create-with-assignee, assign/reassign, transition, fetch, link) through the official **Atlassian Remote MCP Server** instead of `acli`. `acli` cannot set an assignee at create time, so every ticket it filed landed unassigned; the MCP `createJiraIssue` tool sets the assignee in one step. (Crow's in-app issue-board polling and auto-complete still use `acli` — only the agent flow moved.)
+
+Configure one org-wide credential under **Settings → Automation → Atlassian MCP (Jira)**. It is stored top-level in `config.json`:
+
+```jsonc
+{
+  "atlassianMCP": {
+    "endpoint": "https://mcp.atlassian.com/v1/mcp",
+    "email": "you@example.com",
+    // op:// reference — resolved at launch via the 1Password CLI; kept out of config.json
+    "tokenRef": "op://Private/Atlassian/api_token"
+  }
+}
+```
+
+- **Auth** is a **personal API token** (from <https://id.atlassian.com>) sent as HTTP Basic — Crow builds `Authorization: Basic base64(email:token)` at launch.
+- **`tokenRef`** follows the same secret rules as gateway keys: an `op://` reference (recommended — never written to `config.json`) or a plaintext token (stored `0600`, with a UI warning). The resolved `Authorization` value is cached in the session's owner-only `.claude/settings.local.json` `env` block (`ATLASSIAN_MCP_AUTHORIZATION`) and never logged.
+
+When set, Crow injects the server into launched Jira-task sessions (and the Manager + cron jobs at the dev root) by writing a project-root `.mcp.json` and pre-trusting it via `enabledMcpjsonServers`:
+
+```jsonc
+// {worktree-or-devRoot}/.mcp.json — the Authorization references the env var, so no secret lands here
+{ "mcpServers": { "atlassian": { "type": "http",
+    "url": "https://mcp.atlassian.com/v1/mcp",
+    "headers": { "Authorization": "${ATLASSIAN_MCP_AUTHORIZATION}" } } } }
+```
+
+> **Prerequisite:** an Atlassian **org admin must enable API-token auth for the Rovo MCP Server** for your org, otherwise the headless calls return 401. See [docs/automation.md](automation.md#atlassian-mcp-headless-auth) for the one-time setup. `gh`/`glab` GitHub/GitLab task paths are unaffected.
+
 ## Manager Terminal
 
 The Manager tab runs Claude Code at the dev root and drives workspace orchestration. Its behavior is controlled by these top-level keys in `{devRoot}/.claude/config.json`:

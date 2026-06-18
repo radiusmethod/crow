@@ -485,6 +485,8 @@ struct Scaffolder {
               "Bash(acli jira workitem edit:*)",
               "Bash(acli jira workitem create:*)",
               "Bash(acli jira auth status:*)",
+              "mcp__atlassian",
+              "mcp__atlassian__*",
               "Bash(git -C:*)",
               "Write(.claude/prompts/**)",
               "Bash(git fetch:*)",

@@ -11,8 +11,9 @@ public actor ClaudeLauncher {
     ///     "study the ticket" fetch command.
     ///   - codeProvider: the **code** provider (where the PR lives) — drives the
     ///     "open a PR/MR" step. Defaults to `provider` when `nil`. For a Jira-task
-    ///     + GitHub-code session these differ: the ticket is fetched with `acli`
-    ///     while the PR is still opened with `gh` (ADR 0005 cross-backend pairing).
+    ///     + GitHub-code session these differ: the ticket is fetched via the
+    ///     Atlassian MCP server while the PR is still opened with `gh` (ADR 0005
+    ///     cross-backend pairing; CROW-522 migrated Jira off `acli`).
     public func generatePrompt(
         session: Session,
         worktrees: [SessionWorktree],
@@ -54,11 +55,9 @@ public actor ClaudeLauncher {
             case .jira:
                 lines.append("")
                 if let key = Validation.jiraKey(from: url) {
-                    lines.append("```bash")
-                    lines.append("acli jira workitem view \(key) --fields summary,status,description,comment")
-                    lines.append("```")
+                    lines.append("Fetch this work item via the **Atlassian MCP server** (pre-configured for this session): resolve your cloudId with `getAccessibleAtlassianResources`, then call `getJiraIssue` for key `\(key)`. Use the MCP tools — not `acli` — for any Jira create/assign/transition/comment as well.")
                 } else {
-                    lines.append("URL: \(url)")
+                    lines.append("URL: \(url) — fetch it via the Atlassian MCP server (`getJiraIssue`).")
                 }
             case .corveil, nil:
                 lines.append("URL: \(url)")
