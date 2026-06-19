@@ -127,6 +127,13 @@ public struct CorveilTaskBackend: TaskBackend {
         ])
     }
 
+    public func closeTask(url: String) async throws {
+        // Corveil's terminal state is the `closed` status. Reuse
+        // `setTaskStatus(.done)`, which maps `.done` → `"closed"` via
+        // `corveilStatusName`.
+        try await setTaskStatus(url: url, status: .done)
+    }
+
     public func assign(url: String, to login: String) async throws {
         guard let parsed = CorveilTaskID.parse(url) else { throw ProviderError.invalidURL(url) }
         _ = try await run([

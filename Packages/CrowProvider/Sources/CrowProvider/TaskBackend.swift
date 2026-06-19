@@ -47,6 +47,16 @@ public protocol TaskBackend: Sendable {
     /// mutation here — no more legacy escape-hatch through IssueTracker.
     func setTaskStatus(url: String, status: TicketStatus) async throws
 
+    /// Move a task to its terminal done/closed state.
+    /// Distinct from `setTaskStatus(.done)`: for GitHub that sets a Projects-v2
+    /// board column and does **not** close the issue — this actually closes it
+    /// (`gh issue close`). GitLab closes the issue (`glab issue close`); Jira
+    /// transitions to the mapped completed status (#523's `jiraStatusMap`, "Done"
+    /// fallback); Corveil sets `closed`. Required across all backends (every
+    /// provider can close), so it is **not** capability-gated on
+    /// `.projectBoardStatus`. See ADR 0005.
+    func closeTask(url: String) async throws
+
     /// Assign an issue to `login` (e.g. `@me` for the authenticated user).
     /// Used by session setup to claim a ticket and by skill flows.
     func assign(url: String, to login: String) async throws

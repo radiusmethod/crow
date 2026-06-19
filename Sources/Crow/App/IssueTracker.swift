@@ -2481,6 +2481,54 @@ final class IssueTracker {
         appState.onSetSessionInReview?(sessionID)
     }
 
+    // MARK: - Mark Issue Done
+
+    /// Move a session's linked issue to its done/closed state on the provider
+    /// (GitHub/GitLab close the issue; Jira/Corveil transition to the mapped
+    /// completed status), then flip the Crow session to `.completed`. Best-effort:
+    /// auth / transition-not-allowed / already-closed failures are logged and
+    /// swallowed (no crash). Mirrors `markInReview`'s in-flight/error handling.
+    func markIssueDone(sessionID: UUID) async {
+        guard let session = appState.sessions.first(where: { $0.id == sessionID }),
+              let ticketURL = session.ticketURL,
+              let taskProvider = session.provider else { return }
+
+        // For Jira, thread the matching workspace's per-project status-name map
+        // (#523) so the transition targets a renamed "Done" workflow status. For
+        // every other provider, resolve provider + host straight from the URL so
+        // GitLab/Corveil self-hosted instances are targeted correctly.
+        let backend: TaskBackend
+        if taskProvider == .jira {
+            let cfg = JiraConfig(statusMap: Self.jiraStatusMap(forTicket: ticketURL))
+            backend = providerManager.taskBackend(for: .jira, jira: cfg)
+        } else {
+            backend = providerManager.taskBackend(forURL: ticketURL)
+        }
+
+        appState.isMarkingIssueDone[sessionID] = true
+        defer { appState.isMarkingIssueDone[sessionID] = false }
+
+        do {
+            try await backend.closeTask(url: ticketURL)
+        } catch ProviderError.unimplemented(let msg) {
+            print("[IssueTracker] markIssueDone: \(msg)")
+            return
+        } catch {
+            print("[IssueTracker] markIssueDone failed for \(ticketURL): \(error.localizedDescription.prefix(200))")
+            return
+        }
+
+        // Reflect locally — match by URL so it works regardless of provider.
+        if let idx = appState.assignedIssues.firstIndex(where: { $0.url == ticketURL }) {
+            appState.assignedIssues[idx].projectStatus = .done
+        }
+
+        print("[IssueTracker] Marked issue done: \(ticketURL)")
+
+        // Flip the Crow session to .completed so the row reflects the closed issue.
+        appState.onCompleteSession?(sessionID)
+    }
+
     /// Add the `crow:merge` auto-merge label to a session's PR, ensuring the
     /// label exists in the repo first. Capability-gated on `.autoMergeLabel`
     /// (GitHub only today). Mirrors `markInReview`'s in-flight/error handling.
