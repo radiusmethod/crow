@@ -202,6 +202,14 @@ final class CorveilTaskBackendTests: XCTestCase {
         XCTAssertEqual(args[args.firstIndex(of: "--status")! + 1], "in_progress")
     }
 
+    func testCloseTaskSetsClosedStatus() async throws {
+        let fake = FakeShellRunner()
+        try await backend(fake).closeTask(url: "https://corveil.io/dashboard/tasks/42")
+        let args = fake.calls.first?.args ?? []
+        XCTAssertEqual(Array(args.prefix(4)), ["corveil", "task", "update", "42"])
+        XCTAssertEqual(args[args.firstIndex(of: "--status")! + 1], "closed")
+    }
+
     func testStatusNameMappingCoversAllCases() {
         XCTAssertEqual(CorveilTaskBackend.corveilStatusName(for: .backlog), "open")
         XCTAssertEqual(CorveilTaskBackend.corveilStatusName(for: .ready), "open")

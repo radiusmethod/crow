@@ -192,6 +192,25 @@ final class JiraTaskBackendTests: XCTestCase {
         XCTAssertEqual(args[args.firstIndex(of: "--status")! + 1], "Code Review")
     }
 
+    // MARK: - closeTask
+
+    func testCloseTaskTransitionsToDefaultDone() async throws {
+        let fake = FakeShellRunner()
+        try await backend(fake).closeTask(url: "https://acme.atlassian.net/browse/PROJ-5")
+        let args = fake.calls.first?.args ?? []
+        XCTAssertEqual(Array(args.prefix(4)), ["acli", "jira", "workitem", "transition"])
+        XCTAssertEqual(args[args.firstIndex(of: "--key")! + 1], "PROJ-5")
+        XCTAssertEqual(args[args.firstIndex(of: "--status")! + 1], "Done")
+    }
+
+    func testCloseTaskUsesMappedDoneName() async throws {
+        let fake = FakeShellRunner()
+        let cfg = JiraConfig(statusMap: ["Done": "Resolved"])
+        try await backend(fake, config: cfg).closeTask(url: "https://acme.atlassian.net/browse/PROJ-5")
+        let args = fake.calls.first?.args ?? []
+        XCTAssertEqual(args[args.firstIndex(of: "--status")! + 1], "Resolved")
+    }
+
     // MARK: - assign
 
     func testAssignInvokesAcliAssign() async throws {

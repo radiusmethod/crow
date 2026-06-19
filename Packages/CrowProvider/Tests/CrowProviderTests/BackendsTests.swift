@@ -292,6 +292,40 @@ final class BackendsTests: XCTestCase {
         XCTAssertTrue(fake.calls[0].args.contains("@me"))
     }
 
+    func testGitHubTaskBackendCloseTaskRunsGhIssueClose() async throws {
+        let fake = FakeShellRunner()
+        let backend = GitHubTaskBackend(shellRunner: fake)
+        try await backend.closeTask(url: "https://github.com/acme/api/issues/42")
+        XCTAssertEqual(fake.calls.count, 1)
+        XCTAssertEqual(fake.calls[0].args, ["gh", "issue", "close", "https://github.com/acme/api/issues/42"])
+    }
+
+    func testGitHubTaskBackendCloseTaskRejectsInvalidURL() async {
+        let backend = GitHubTaskBackend(shellRunner: FakeShellRunner())
+        do {
+            try await backend.closeTask(url: "not-a-url")
+            XCTFail("expected throw")
+        } catch ProviderError.invalidURL {
+            // expected
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+    }
+
+    func testGitHubTaskBackendCloseTaskSurfacesCommandFailure() async {
+        let fake = FakeShellRunner()
+        fake.responses = [.failure(ShellRunnerError.nonZeroExit(exitCode: 1, output: "gh: not authenticated"))]
+        let backend = GitHubTaskBackend(shellRunner: fake)
+        do {
+            try await backend.closeTask(url: "https://github.com/acme/api/issues/42")
+            XCTFail("expected throw")
+        } catch ProviderError.commandFailed(let msg) {
+            XCTAssertTrue(msg.contains("not authenticated"))
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+    }
+
     func testGitHubTaskBackendCreateTaskReturnsParsedURL() async throws {
         let fake = FakeShellRunner()
         fake.responses = [.success("Creating issue in acme/api\n\nhttps://github.com/acme/api/issues/99\n")]
@@ -545,6 +579,15 @@ final class BackendsTests: XCTestCase {
         XCTAssertEqual(fake.calls.count, 1)
         XCTAssertTrue(fake.calls[0].args.contains("--assignee"))
         XCTAssertTrue(fake.calls[0].args.contains("alice"))
+    }
+
+    func testGitLabTaskBackendCloseTaskRunsGlabIssueClose() async throws {
+        let fake = FakeShellRunner()
+        let backend = GitLabTaskBackend(shellRunner: fake, host: "gitlab.example.com")
+        try await backend.closeTask(url: "https://gitlab.example.com/g/p/-/issues/7")
+        XCTAssertEqual(fake.calls.count, 1)
+        XCTAssertEqual(fake.calls[0].args, ["glab", "issue", "close", "7", "--repo", "g/p"])
+        XCTAssertEqual(fake.calls[0].env["GITLAB_HOST"], "gitlab.example.com")
     }
 
     func testGitLabTaskBackendSetTaskStatusThrowsUnimplemented() async {

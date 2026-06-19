@@ -112,6 +112,19 @@ public struct GitLabTaskBackend: TaskBackend {
         throw ProviderError.unimplemented("GitLabTaskBackend.setTaskStatus: no projectBoardStatus capability")
     }
 
+    public func closeTask(url: String) async throws {
+        guard let parsed = ProviderManager.parseTicketURLComponents(url) else {
+            throw ProviderError.invalidURL(url)
+        }
+        let repoSlug = "\(parsed.org)/\(parsed.repo)"
+        // `glab issue close` is idempotent — closing an already-closed issue exits 0.
+        _ = try await shellRunner.run(
+            args: ["glab", "issue", "close", "\(parsed.number)", "--repo", repoSlug],
+            env: env(),
+            cwd: NSHomeDirectory()
+        )
+    }
+
     public func assign(url: String, to login: String) async throws {
         guard let parsed = ProviderManager.parseTicketURLComponents(url) else {
             throw ProviderError.invalidURL(url)

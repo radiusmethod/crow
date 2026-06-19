@@ -310,6 +310,16 @@ public struct SessionListView: View {
             .disabled(appState.isMarkingInReview[session.id] == true || deleting)
         }
 
+        if (session.status == .active || session.status == .inReview),
+           session.ticketURL != nil {
+            Button {
+                appState.onMarkIssueDone?(session.id)
+            } label: {
+                Label(Self.markIssueDoneTitle(for: session.provider), systemImage: "checkmark.seal")
+            }
+            .disabled(appState.isMarkingIssueDone[session.id] == true || deleting)
+        }
+
         if session.status == .active || session.status == .inReview {
             Button {
                 appState.onCompleteSession?(session.id)
@@ -327,6 +337,16 @@ public struct SessionListView: View {
             Label("Delete", systemImage: "trash")
         }
         .disabled(deleting)
+    }
+
+    /// Provider-flavored title for the "mark issue done" item: GitHub/GitLab
+    /// *close* the issue, while Jira/Corveil *transition* it to a done status.
+    private static func markIssueDoneTitle(for provider: Provider?) -> String {
+        switch provider {
+        case .github, .gitlab: return "Close Issue"
+        case .jira, .corveil:  return "Mark Issue Done"
+        case .none:            return "Mark Issue Done"
+        }
     }
 
     /// "Add label crow:merge to PR" — shown only when the session has a PR link

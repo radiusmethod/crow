@@ -853,6 +853,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await tracker?.markInReview(sessionID: id) }
         }
 
+        appState.onMarkIssueDone = { [weak tracker] id in
+            Task { await tracker?.markIssueDone(sessionID: id) }
+        }
+
         appState.canAddMergeLabelResolver = { [providerManager] session in
             guard let provider = session.provider else { return false }
             return providerManager

@@ -348,6 +348,11 @@ public final class AppState {
     /// Called to mark a session's ticket as "In Review" on the GitHub Project board.
     public var onMarkInReview: ((UUID) -> Void)?
 
+    /// Called to move a session's linked issue to its done/closed state on the
+    /// provider (GitHub close, GitLab close, Jira/Corveil transition to the
+    /// mapped completed status). On success also flips the session to `.completed`.
+    public var onMarkIssueDone: ((UUID) -> Void)?
+
     /// Called to add the `crow:merge` auto-merge label to a session's PR.
     public var onAddMergeLabel: ((UUID) -> Void)?
 
@@ -360,6 +365,10 @@ public final class AppState {
     /// Whether a given session is currently being marked as "In Review" (loading state).
     /// Must be cleaned up when a session is deleted (see `SessionService.deleteSession`).
     public var isMarkingInReview: [UUID: Bool] = [:]
+
+    /// Whether a session's linked issue is currently being closed/transitioned to
+    /// done (loading state). Cleaned up when a session is deleted.
+    public var isMarkingIssueDone: [UUID: Bool] = [:]
 
     /// Whether a session's PR is currently being labeled with `crow:merge` (loading state).
     /// Must be cleaned up when a session is deleted (see `SessionService.deleteSession`).

@@ -136,6 +136,14 @@ public struct JiraTaskBackend: TaskBackend {
         ])
     }
 
+    public func closeTask(url: String) async throws {
+        // Jira has no "close" verb — the terminal state is a workflow transition
+        // to the mapped completed status. Reuse `setTaskStatus(.done)`, which
+        // resolves `jiraStatusName(for: .done)` honoring `JiraConfig.statusMap`
+        // (#523) with the "Done" default.
+        try await setTaskStatus(url: url, status: .done)
+    }
+
     public func assign(url: String, to login: String) async throws {
         guard let parsed = JiraKey.parse(url) else { throw ProviderError.invalidURL(url) }
         _ = try await run([

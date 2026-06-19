@@ -192,6 +192,18 @@ public struct GitHubTaskBackend: TaskBackend {
         }
     }
 
+    public func closeTask(url: String) async throws {
+        guard ProviderManager.parseTicketURLComponents(url) != nil else {
+            throw ProviderError.invalidURL(url)
+        }
+        // `gh issue close` is idempotent — closing an already-closed issue exits 0.
+        do {
+            _ = try await shellRunner.run("gh", "issue", "close", url)
+        } catch ShellRunnerError.nonZeroExit(_, let output) {
+            throw ProviderError.commandFailed(output)
+        }
+    }
+
     public func assign(url: String, to login: String) async throws {
         _ = try await shellRunner.run(
             "gh", "issue", "edit", url, "--add-assignee", login
