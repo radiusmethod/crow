@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import CrowCore
+import CrowProvider
 @testable import Crow
 
 @Suite("IssueTracker auto-merge watcher (crow:merge label)")
@@ -242,5 +243,50 @@ struct IssueTrackerAutoMergeTests {
             "later commit\n\nCrow-Session: \(known.uuidString)\n"      // known — wins
         ]
         #expect(IssueTracker.crowAuthored(commitMessages: messages, knownSessionIDs: [known]))
+    }
+}
+
+/// CROW-532: the "Add label crow:merge to PR" affordance must gate on the
+/// session's **code** backend, not its **task** provider — so a Jira-tasked
+/// session whose PR lives on GitHub gets the action, while a GitLab-code
+/// session (no `.autoMergeLabel` capability) does not.
+@Suite("canAddMergeLabel — gates on code backend, not task provider")
+struct CanAddMergeLabelTests {
+    private let providerManager = ProviderManager()
+
+    private func session(provider: Provider?, codeProvider: Provider? = nil) -> Session {
+        Session(id: UUID(), name: "s", provider: provider, codeProvider: codeProvider)
+    }
+
+    @Test func jiraTaskWithGitHubCodeShowsAffordance() {
+        // The bug being fixed: task is Jira but the PR is on GitHub.
+        let s = session(provider: .jira, codeProvider: .github)
+        #expect(IssueTracker.canAddMergeLabel(session: s, providerManager: providerManager))
+    }
+
+    @Test func gitHubTaskStillShowsAffordance() {
+        // No regression for the original GitHub-tasked case.
+        let s = session(provider: .github)
+        #expect(IssueTracker.canAddMergeLabel(session: s, providerManager: providerManager))
+    }
+
+    @Test func jiraTaskWithGitLabCodeHidesAffordance() {
+        // GitLab declares no `.autoMergeLabel` capability — stays hidden
+        // regardless of task provider.
+        let s = session(provider: .jira, codeProvider: .gitlab)
+        #expect(!IssueTracker.canAddMergeLabel(session: s, providerManager: providerManager))
+    }
+
+    @Test func gitLabTaskHidesAffordance() {
+        let s = session(provider: .gitlab)
+        #expect(!IssueTracker.canAddMergeLabel(session: s, providerManager: providerManager))
+    }
+
+    @Test func taskOnlyWithoutCodeProviderHidesAffordance() {
+        // Defensive: a `.jira` task with no resolved `codeProvider` falls to
+        // `.jira` (a task-only provider with no code backend) → hidden. In
+        // practice `SessionService.resolvedCodeProvider` populates this field.
+        let s = session(provider: .jira, codeProvider: nil)
+        #expect(!IssueTracker.canAddMergeLabel(session: s, providerManager: providerManager))
     }
 }

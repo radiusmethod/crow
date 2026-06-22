@@ -1121,6 +1121,16 @@ final class IssueTracker {
         return (.gitlab, host)
     }
 
+    /// Whether `session` may add the `crow:merge` label to its PR — i.e. its
+    /// **code** backend declares `.autoMergeLabel`. Resolves the code provider
+    /// via the `codeProvider ?? provider ?? .github` convention (ADR 0005) so a
+    /// Jira/Corveil-tasked GitHub-code session is gated on GitHub, not on its
+    /// task provider (CROW-532). Pure — easily unit-tested.
+    nonisolated static func canAddMergeLabel(session: Session, providerManager: ProviderManager) -> Bool {
+        let provider = session.codeProvider ?? session.provider ?? .github
+        return providerManager.codeBackend(for: provider)?.capabilities.contains(.autoMergeLabel) ?? false
+    }
+
     /// For each non-archived, non-review session missing a `.pr` link with a
     /// resolvable (repoSlug, branch), query the provider directly and upsert
     /// a link when a PR exists on that branch. Runs once per refresh cycle
@@ -1797,20 +1807,32 @@ final class IssueTracker {
         }
     }
 
+    /// Resolve the `CodeBackend` for a session's PR/merge actions, following the
+    /// `codeProvider ?? provider ?? .github` convention (ADR 0005) so a
+    /// Jira/Corveil-tasked GitHub-code session routes to GitHub rather than its
+    /// task provider (CROW-532). `nil` only for a task-only resolution with no
+    /// code surface — callers must bow out.
+    private func codeBackend(for session: Session) -> CodeBackend? {
+        providerManager.codeBackend(for: session.codeProvider ?? session.provider ?? .github)
+    }
+
     /// Verify Crow authorship, lazily ensure the label exists, then enable
     /// auto-merge with squash + delete branch. Idempotent: success persists
     /// `Session.autoMergeEnabledAt`; failure clears the in-flight marker so
     /// the next poll retries.
     private func attemptEnableAutoMerge(session: Session, pr: ViewerPR) async {
-        guard await prHasCrowAuthoredCommit(pr: pr) else {
+        guard let backend = codeBackend(for: session) else {
+            autoMergeInFlight.remove(pr.url)
+            return
+        }
+        guard await prHasCrowAuthoredCommit(pr: pr, backend: backend) else {
             NSLog("[Crow] crow:merge ignored on %@ — no Crow-Session trailer matching a known session",
                   pr.url as NSString)
             return
         }
 
-        await ensureMergeLabel(repo: pr.repoNameWithOwner)
+        await ensureMergeLabel(repo: pr.repoNameWithOwner, backend: backend)
 
-        let backend = providerManager.codeBackend(for: .github)!
         guard backend.capabilities.contains(.autoMerge) else {
             // Capability gate: don't even try if the backend can't enable auto-merge.
             autoMergeInFlight.remove(pr.url)
@@ -1849,13 +1871,13 @@ final class IssueTracker {
     /// caller) is left in place so a failed/no-op update isn't retried until
     /// the head commit changes.
     private func attemptUpdateBranch(session: Session, pr: ViewerPR) async {
-        guard await prHasCrowAuthoredCommit(pr: pr) else {
+        guard let backend = codeBackend(for: session) else { return }
+        guard await prHasCrowAuthoredCommit(pr: pr, backend: backend) else {
             NSLog("[Crow] crow:merge update-branch skipped on %@ — no Crow-Session trailer matching a known session",
                   pr.url as NSString)
             return
         }
 
-        let backend = providerManager.codeBackend(for: .github)!
         defer { autoMergeInFlight.remove(pr.url) }
         guard backend.capabilities.contains(.updateBranch) else { return }
         do {
@@ -1870,8 +1892,7 @@ final class IssueTracker {
 
     /// Fetch the PR's commits and return true iff at least one carries a
     /// `Crow-Session: <uuid>` trailer matching a known session.
-    private func prHasCrowAuthoredCommit(pr: ViewerPR) async -> Bool {
-        let backend = providerManager.codeBackend(for: .github)!
+    private func prHasCrowAuthoredCommit(pr: ViewerPR, backend: CodeBackend) async -> Bool {
         let commits: [CommitInfo]
         do {
             commits = try await backend.fetchCrowAuthoredCommits(
@@ -1892,9 +1913,8 @@ final class IssueTracker {
     /// Best-effort: ensure the `crow:merge` label exists in the repo so
     /// repo owners don't need to pre-create it. The backend swallows the
     /// "already exists" failure.
-    private func ensureMergeLabel(repo: String) async {
+    private func ensureMergeLabel(repo: String, backend: CodeBackend) async {
         guard !repo.isEmpty else { return }
-        let backend = providerManager.codeBackend(for: .github)!
         guard backend.capabilities.contains(.autoMergeLabel) else { return }
         do {
             try await backend.ensureMergeLabel(repo: repo)
@@ -1979,7 +1999,8 @@ final class IssueTracker {
             return
         }
 
-        guard await prHasCrowAuthoredCommit(pr: pr) else {
+        guard let backend = codeBackend(for: session) else { return }
+        guard await prHasCrowAuthoredCommit(pr: pr, backend: backend) else {
             NSLog("[Crow] auto-rebase skipped on %@ — no Crow-Session trailer matching a known session",
                   pr.url as NSString)
             return
@@ -2624,8 +2645,7 @@ final class IssueTracker {
     func addMergeLabel(sessionID: UUID) async {
         guard let session = appState.sessions.first(where: { $0.id == sessionID }),
               let prLink = appState.links(for: sessionID).first(where: { $0.linkType == .pr }),
-              let provider = session.provider,
-              let backend = providerManager.codeBackend(for: provider),
+              let backend = codeBackend(for: session),
               backend.capabilities.contains(.autoMergeLabel) else { return }
 
         appState.isAddingMergeLabel[sessionID] = true
