@@ -559,15 +559,39 @@ public final class AppState {
         return result
     }
 
-    /// Find the active session linked to a given issue (by matching ticket URL).
-    public func activeSession(for issue: AssignedIssue) -> Session? {
-        activeSessions.first { $0.ticketURL == issue.url }
+    /// Work sessions eligible to be shown as "linked" on the ticket board: every
+    /// non-terminal session (`.active`, `.paused`, `.inReview`), excluding the
+    /// terminal `.completed`/`.archived`. Broader than ``activeSessions`` so a
+    /// ticket whose session has moved to In Review still shows as linked (#533).
+    public var linkableSessions: [Session] {
+        sessions.filter { $0.kind == .work && $0.status != .completed && $0.status != .archived }
     }
 
-    /// Find the assigned issue linked to a given session (by matching ticket URL).
+    /// Whether `session` is the Crow session for `issue`. Exact `ticketURL` match
+    /// for all providers, plus a Jira-key fallback (`PROJ-123`) so Jira browse-URL
+    /// variants still link (#533). GitHub/GitLab keep exact-URL matching only.
+    private func ticketMatches(session: Session, issue: AssignedIssue) -> Bool {
+        guard let url = session.ticketURL else { return false }
+        if url == issue.url { return true }
+        guard issue.provider == .jira,
+              let sessionKey = Validation.jiraKey(from: url),
+              let issueKey = Validation.jiraKey(from: issue.url) else { return false }
+        return sessionKey.caseInsensitiveCompare(issueKey) == .orderedSame
+    }
+
+    /// Find the non-terminal session linked to a given issue. Considers Active,
+    /// Paused, and In-Review sessions and matches Jira tickets robustly (#533) —
+    /// the board uses this to show the linked-session indicator vs "Start Working".
+    public func linkedSession(for issue: AssignedIssue) -> Session? {
+        linkableSessions.first { ticketMatches(session: $0, issue: issue) }
+    }
+
+    /// Find the assigned issue linked to a given session. Matches exact ticket
+    /// URL, plus a Jira-key fallback so labels/metadata resolve for In-Review and
+    /// browse-URL-variant Jira sessions (#533).
     public func assignedIssue(for session: Session) -> AssignedIssue? {
-        guard let url = session.ticketURL else { return nil }
-        return assignedIssues.first { $0.url == url }
+        guard session.ticketURL != nil else { return nil }
+        return assignedIssues.first { ticketMatches(session: session, issue: $0) }
     }
 
     /// Find the review request linked to a given session (by matching PR link URL).

@@ -44,6 +44,90 @@ import Testing
     #expect(appState.assignedIssue(for: session) == nil)
 }
 
+// MARK: - linkedSession(for:) — broadened matching (#533)
+
+@MainActor @Test func linkedSessionMatchesActiveGitHubByExactURL() {
+    let appState = AppState()
+    let issue = AssignedIssue(
+        id: "github:org/repo#42", number: 42, title: "Bug",
+        state: "open", url: "https://github.com/org/repo/issues/42",
+        repo: "org/repo", provider: .github
+    )
+    let session = Session(name: "fix", status: .active, ticketURL: "https://github.com/org/repo/issues/42", provider: .github)
+    appState.sessions = [session]
+    #expect(appState.linkedSession(for: issue)?.id == session.id)
+}
+
+@MainActor @Test func linkedSessionMatchesInReviewAndPausedSessions() {
+    let appState = AppState()
+    let issue = AssignedIssue(
+        id: "github:org/repo#7", number: 7, title: "T",
+        state: "open", url: "https://github.com/org/repo/issues/7",
+        repo: "org/repo", provider: .github
+    )
+    // In Review session — would NOT match under the old `.active`-only scan.
+    let inReview = Session(name: "ir", status: .inReview, ticketURL: "https://github.com/org/repo/issues/7", provider: .github)
+    appState.sessions = [inReview]
+    #expect(appState.linkedSession(for: issue)?.id == inReview.id)
+
+    let paused = Session(name: "p", status: .paused, ticketURL: "https://github.com/org/repo/issues/7", provider: .github)
+    appState.sessions = [paused]
+    #expect(appState.linkedSession(for: issue)?.id == paused.id)
+}
+
+@MainActor @Test func linkedSessionExcludesTerminalSessions() {
+    let appState = AppState()
+    let issue = AssignedIssue(
+        id: "github:org/repo#7", number: 7, title: "T",
+        state: "open", url: "https://github.com/org/repo/issues/7",
+        repo: "org/repo", provider: .github
+    )
+    let completed = Session(name: "c", status: .completed, ticketURL: "https://github.com/org/repo/issues/7", provider: .github)
+    let archived = Session(name: "a", status: .archived, ticketURL: "https://github.com/org/repo/issues/7", provider: .github)
+    appState.sessions = [completed, archived]
+    #expect(appState.linkedSession(for: issue) == nil)
+}
+
+@MainActor @Test func linkedSessionMatchesJiraByKeyAcrossURLVariants() {
+    let appState = AppState()
+    let issue = AssignedIssue(
+        id: "jira:MAXX-10", number: 10, title: "Jira one",
+        state: "open", url: "https://acme.atlassian.net/browse/MAXX-10",
+        repo: "MAXX", provider: .jira, projectStatus: .inProgress
+    )
+    // Session stored a browse URL with extra path/query — exact match fails, key matches.
+    let session = Session(name: "jira", status: .inReview, ticketURL: "https://acme.atlassian.net/browse/MAXX-10?focusedCommentId=99", provider: .jira)
+    appState.sessions = [session]
+    #expect(appState.linkedSession(for: issue)?.id == session.id)
+}
+
+@MainActor @Test func linkedSessionDoesNotKeyMatchNonJiraProviders() {
+    let appState = AppState()
+    // Two different GitHub issues that share no exact URL must not link via key.
+    let issue = AssignedIssue(
+        id: "github:org/repo#1", number: 1, title: "T",
+        state: "open", url: "https://github.com/org/repo/issues/1",
+        repo: "org/repo", provider: .github
+    )
+    let session = Session(name: "other", status: .active, ticketURL: "https://github.com/org/repo/issues/2", provider: .github)
+    appState.sessions = [session]
+    #expect(appState.linkedSession(for: issue) == nil)
+}
+
+@MainActor @Test func assignedIssueMatchesJiraByKey() {
+    let appState = AppState()
+    appState.assignedIssues = [
+        AssignedIssue(
+            id: "jira:MAXX-10", number: 10, title: "Jira one",
+            state: "open", url: "https://acme.atlassian.net/browse/MAXX-10",
+            repo: "MAXX", labels: [LabelInfo(name: "bug")], provider: .jira, projectStatus: .inReview
+        )
+    ]
+    let session = Session(name: "jira", status: .inReview, ticketURL: "MAXX-10", provider: .jira)
+    #expect(appState.assignedIssue(for: session)?.id == "jira:MAXX-10")
+    #expect(appState.labels(forSession: session) == [LabelInfo(name: "bug")])
+}
+
 @MainActor @Test func reviewRequestForSessionMatchesByPRLink() {
     let appState = AppState()
     let session = Session(name: "review-repo-123", kind: .review)

@@ -136,6 +136,82 @@ final class JiraTaskBackendTests: XCTestCase {
         XCTAssertTrue(listing.closed.isEmpty)
     }
 
+    // MARK: - Status read-back mapping (inverse of jiraStatusMap, #533)
+
+    func testTicketStatusInverseHonorsStatusMap() {
+        let map = ["In Progress": "In Development", "In Review": "Code Review", "Done": "Resolved"]
+        XCTAssertEqual(JiraTaskBackend.ticketStatus(forJiraName: "In Development", statusMap: map), .inProgress)
+        XCTAssertEqual(JiraTaskBackend.ticketStatus(forJiraName: "code review", statusMap: map), .inReview) // case-insensitive
+        XCTAssertEqual(JiraTaskBackend.ticketStatus(forJiraName: "Resolved", statusMap: map), .done)
+    }
+
+    func testTicketStatusInverseFallsBackToAliasTable() {
+        // A name neither mapped nor a pipeline default still resolves via the
+        // built-in alias table; a truly unknown name is `.unknown`.
+        XCTAssertEqual(JiraTaskBackend.ticketStatus(forJiraName: "Doing", statusMap: nil), .inProgress)
+        XCTAssertEqual(JiraTaskBackend.ticketStatus(forJiraName: "Closed", statusMap: nil), .done)
+        XCTAssertEqual(JiraTaskBackend.ticketStatus(forJiraName: "Parking Lot", statusMap: nil), .unknown)
+    }
+
+    func testTicketStatusInverseDefaultNamesUnchanged() {
+        // No override: the default Jira names round-trip to their pipeline status.
+        XCTAssertEqual(JiraTaskBackend.ticketStatus(forJiraName: "In Progress", statusMap: nil), .inProgress)
+        XCTAssertEqual(JiraTaskBackend.ticketStatus(forJiraName: "In Review", statusMap: nil), .inReview)
+        XCTAssertEqual(JiraTaskBackend.ticketStatus(forJiraName: "To Do", statusMap: nil), .ready)
+    }
+
+    /// The acli read path threads `config.statusMap` so a renamed status lands in
+    /// the right column instead of collapsing to Backlog (#533).
+    func testListAssignedAcliAppliesStatusMapInverse() async throws {
+        let fake = FakeShellRunner()
+        fake.responses = [.success(#"[{"key":"MAXX-1","fields":{"summary":"Dev one","status":{"name":"In Development","statusCategory":{"key":"indeterminate"}}}}]"#)]
+        let cfg = JiraConfig(site: "acme.atlassian.net", statusMap: ["In Progress": "In Development"])
+        let listing = try await backend(fake, config: cfg).listAssigned(includeClosed: false)
+        XCTAssertEqual(listing.open.first?.projectStatus, .inProgress)
+    }
+
+    // MARK: - listAssigned over REST (#533)
+
+    /// With an Authorization header + site, the read goes via REST — `acli` is
+    /// never shelled out — and the mapped status name is read back correctly.
+    func testListAssignedUsesRESTWhenCredentialed() async throws {
+        let fake = FakeShellRunner()
+        let sawGET = Box<Bool>(false)
+        let cfg = JiraConfig(
+            site: "acme.atlassian.net",
+            statusMap: ["In Progress": "In Development"],
+            authorization: "Basic creds"
+        )
+        let payload = #"{"issues":[{"key":"MAXX-1","fields":{"summary":"Dev one","status":{"name":"In Development","statusCategory":{"key":"indeterminate"}},"labels":["bug"]}}]}"#.data(using: .utf8)!
+        let b = JiraTaskBackend(shellRunner: fake, config: cfg, transport: { request in
+            sawGET.set(true)
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Basic creds")
+            XCTAssertEqual(request.url?.path, "/rest/api/3/search/jql")
+            return (payload, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        })
+        let listing = try await b.listAssigned(includeClosed: false)
+        XCTAssertTrue(sawGET.get())
+        XCTAssertTrue(fake.calls.isEmpty, "REST path must not shell out to acli")
+        XCTAssertEqual(listing.open.count, 1)
+        XCTAssertEqual(listing.open[0].id, "jira:MAXX-1")
+        XCTAssertEqual(listing.open[0].projectStatus, .inProgress)
+        XCTAssertEqual(listing.open[0].url, "https://acme.atlassian.net/browse/MAXX-1")
+        XCTAssertEqual(listing.open[0].labels.map(\.name), ["bug"])
+    }
+
+    /// A REST failure degrades to an empty listing (like GitLab) without throwing.
+    func testListAssignedRESTDegradesToEmptyOnHTTPError() async throws {
+        let fake = FakeShellRunner()
+        let cfg = JiraConfig(site: "acme.atlassian.net", authorization: "Basic creds")
+        let b = JiraTaskBackend(shellRunner: fake, config: cfg, transport: { request in
+            (Data(), HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
+        })
+        let listing = try await b.listAssigned(includeClosed: false)
+        XCTAssertTrue(listing.open.isEmpty)
+        XCTAssertTrue(listing.closed.isEmpty)
+    }
+
     // MARK: - setLabels
 
     func testSetLabelsAddsAndRemoves() async throws {
