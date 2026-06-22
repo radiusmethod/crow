@@ -858,11 +858,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         appState.canAddMergeLabelResolver = { [providerManager] session in
-            guard let provider = session.provider else { return false }
-            return providerManager
-                .codeBackend(for: provider)?
-                .capabilities
-                .contains(.autoMergeLabel) ?? false
+            IssueTracker.canAddMergeLabel(session: session, providerManager: providerManager)
         }
 
         appState.onAddMergeLabel = { [weak tracker] id in
