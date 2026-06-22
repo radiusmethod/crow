@@ -100,11 +100,42 @@ public struct JiraTaskBackend: TaskBackend {
     }
 
     public func listAssigned(includeClosed: Bool) async throws -> AssignedListing {
-        let jql = config.jql ?? Self.defaultOpenJQL
+        let openJQL = config.jql ?? Self.defaultOpenJQL
+
+        // REST-preferred (#533): when a Jira Cloud credential is configured, read
+        // assigned issues over the REST API — same auth the transition write path
+        // (#529) uses — so the board read-back doesn't depend on a separately
+        // installed/authenticated `acli`. Degrades to empty on failure, matching
+        // GitLab's semantics. Falls back to `acli` when no REST credential is set.
+        if let authorization = config.authorization, let site = config.site, !site.isEmpty {
+            let open: [AssignedIssue]
+            switch await JiraSearchClient.fetchAssigned(site: site, jql: openJQL, authorization: authorization, transport: transport) {
+            case .success(let items):
+                open = Self.parseAssigned(items: items, site: config.site, statusOverride: nil, statusMap: config.statusMap)
+            case .failure(let error):
+                NSLog("[JiraTaskBackend] REST listAssigned failed for %@: %@", site, String(describing: error))
+                return AssignedListing(open: [], closed: [])
+            }
+
+            guard includeClosed else {
+                return AssignedListing(open: open, closed: [])
+            }
+
+            let closed: [AssignedIssue]
+            switch await JiraSearchClient.fetchAssigned(site: site, jql: Self.closedJQL, authorization: authorization, maxResults: 50, transport: transport) {
+            case .success(let items):
+                closed = Self.parseAssigned(items: items, site: config.site, statusOverride: .done, statusMap: config.statusMap)
+            case .failure:
+                return AssignedListing(open: open, closed: [])
+            }
+            return AssignedListing(open: open, closed: closed)
+        }
+
+        // Legacy fallback: `acli` (no REST credential configured).
         let open: [AssignedIssue]
         do {
-            let openOut = try await search(jql: jql, limit: 100)
-            open = Self.parseAssigned(openOut, site: config.site, statusOverride: nil)
+            let openOut = try await search(jql: openJQL, limit: 100)
+            open = Self.parseAssigned(openOut, site: config.site, statusOverride: nil, statusMap: config.statusMap)
         } catch {
             // Match GitLab's degrade-to-empty semantics rather than throwing.
             return AssignedListing(open: [], closed: [])
@@ -117,7 +148,7 @@ public struct JiraTaskBackend: TaskBackend {
         let closed: [AssignedIssue]
         do {
             let closedOut = try await search(jql: Self.closedJQL, limit: 50)
-            closed = Self.parseAssigned(closedOut, site: config.site, statusOverride: .done)
+            closed = Self.parseAssigned(closedOut, site: config.site, statusOverride: .done, statusMap: config.statusMap)
         } catch {
             return AssignedListing(open: open, closed: [])
         }
@@ -322,9 +353,36 @@ public struct JiraTaskBackend: TaskBackend {
         return String(output[range])
     }
 
-    static func parseAssigned(_ output: String, site: String?, statusOverride: TicketStatus?) -> [AssignedIssue] {
+    /// Resolve a Jira workflow **status name** back to a Crow ``TicketStatus`` —
+    /// the inverse of ``jiraStatusName(for:)`` (the #529 write path), honoring the
+    /// per-workspace ``JiraConfig/statusMap`` (#523). For each pipeline status,
+    /// resolve the Jira name it maps to (override or default) and match
+    /// case-insensitively; otherwise fall back to the built-in alias table
+    /// (`TicketStatus(projectBoardName:)`, which handles "Doing"/"Closed"/etc.).
+    /// This is what makes a renamed status (e.g. "In Development" → In Progress)
+    /// land in the right board column instead of collapsing to Backlog (#533).
+    static func ticketStatus(forJiraName name: String, statusMap: [String: String]?) -> TicketStatus {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return .unknown }
+        for status in TicketStatus.pipelineStatuses {
+            let jiraName = statusMap?[status.rawValue]?.nonBlank ?? Self.defaultJiraStatusName(for: status)
+            if jiraName.caseInsensitiveCompare(trimmed) == .orderedSame {
+                return status
+            }
+        }
+        return TicketStatus(projectBoardName: trimmed)
+    }
+
+    /// Decode `acli`'s top-level-array JSON output, then map via the shared
+    /// `parseAssigned(items:…)` core. The REST path passes its unwrapped `issues`
+    /// array directly to that core instead.
+    static func parseAssigned(_ output: String, site: String?, statusOverride: TicketStatus?, statusMap: [String: String]?) -> [AssignedIssue] {
         guard let data = output.data(using: .utf8),
               let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return [] }
+        return parseAssigned(items: items, site: site, statusOverride: statusOverride, statusMap: statusMap)
+    }
+
+    static func parseAssigned(items: [[String: Any]], site: String?, statusOverride: TicketStatus?, statusMap: [String: String]?) -> [AssignedIssue] {
         return items.compactMap { item -> AssignedIssue? in
             guard let key = item["key"] as? String,
                   let parsed = JiraKey.parse(key) else { return nil }
@@ -333,7 +391,7 @@ public struct JiraTaskBackend: TaskBackend {
             let statusDict = fields?["status"] as? [String: Any]
             let statusName = statusDict?["name"] as? String ?? ""
             let categoryKey = (statusDict?["statusCategory"] as? [String: Any])?["key"] as? String ?? ""
-            let status = statusOverride ?? TicketStatus(projectBoardName: statusName)
+            let status = statusOverride ?? Self.ticketStatus(forJiraName: statusName, statusMap: statusMap)
             let state = (statusOverride == .done || categoryKey == "done") ? "closed" : "open"
             // Jira labels are plain strings (no color); surface them so
             // label-driven flows (e.g. auto-create) work for Jira too.

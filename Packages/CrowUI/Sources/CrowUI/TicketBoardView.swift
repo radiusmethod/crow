@@ -410,7 +410,7 @@ struct TicketCard: View {
     var onToggleSelection: (() -> Void)?
 
     private var linkedSession: Session? {
-        appState.activeSession(for: issue)
+        appState.linkedSession(for: issue)
     }
 
     private var isSelectable: Bool {

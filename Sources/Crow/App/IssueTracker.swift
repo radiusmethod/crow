@@ -384,11 +384,14 @@ final class IssueTracker {
                 gitLabHosts.append(host)
             }
         }
-        // Collect distinct Jira queries (acli is authed to a single site, so the
-        // site/JQL/project triple is what actually varies).
+        // Collect distinct Jira queries (the site/JQL/project triple is what
+        // actually varies). Resolve the shared Jira REST credential once (it may
+        // shell `op read`) and thread it into every config so the board read-back
+        // can list assigned issues over REST instead of acli (#533).
+        let jiraAuthorization = config.jiraCredential.flatMap { JiraCredentialResolver.resolve($0) }
         var jiraConfigs: [JiraConfig] = []
         for ws in config.workspaces where ws.derivedTaskProvider == "jira" {
-            let cfg = JiraConfig(site: ws.jiraSite, projectKey: ws.jiraProjectKey, jql: ws.jiraJQL, statusMap: ws.jiraStatusMap)
+            let cfg = JiraConfig(site: ws.jiraSite, projectKey: ws.jiraProjectKey, jql: ws.jiraJQL, statusMap: ws.jiraStatusMap, authorization: jiraAuthorization)
             if !jiraConfigs.contains(cfg) { jiraConfigs.append(cfg) }
         }
         // Collect distinct Corveil configs. The corveil CLI is authed to one
@@ -574,7 +577,7 @@ final class IssueTracker {
             guard labeled else { continue }
             guard !autoCreateInFlight.contains(issue.url) else { continue }
 
-            if appState.activeSession(for: issue) != nil {
+            if appState.linkedSession(for: issue) != nil {
                 // Stale label — work already picked up elsewhere. Best-effort cleanup.
                 Task { [weak self] in await self?.removeAutoCreateLabel(from: issue) }
                 continue

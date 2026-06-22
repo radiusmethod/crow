@@ -176,9 +176,16 @@ public struct WorkspaceFormView: View {
                     .foregroundStyle(.secondary)
 
                 if jiraAvailability != nil, jiraAvailability != .ready {
-                    Label(jiraAvailability?.fixHint ?? "Jira (acli) is not available.", systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(jiraSelected ? .red : .secondary)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label(jiraAvailability?.fixHint ?? "Jira (acli) is not available.", systemImage: "exclamationmark.triangle")
+                        // The board's status read-back uses the Jira REST credential
+                        // (Settings → Automation), not acli (#533); acli gates only
+                        // task creation/editing here.
+                        Text("acli gates task creation/editing. The ticket board reads Jira status over REST using the Settings → Automation credential.")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(jiraSelected ? .red : .secondary)
                 }
 
                 if jiraSelected {
