@@ -59,6 +59,16 @@ WS_GATEWAY_RESOLVED=false
 TASK_PROVIDER=""
 TASK_PROVIDER_RESOLVED=false
 
+# Resolved per-session env injection for this workspace (CROW-543). Mirrors the
+# gateway block above: resolve_session_env reads .sessionEnv from the workspace
+# config, substitutes template tokens, and overlays any --session-env flags
+# (flag wins). Stored as a newline-separated KEY=VALUE list; write_settings_local
+# folds it into settings.local.json .env. CLI_SESSION_ENV holds the raw flag
+# pairs collected during arg parse (templated later, alongside the config map).
+WS_SESSION_ENV=""
+WS_SESSION_ENV_RESOLVED=false
+CLI_SESSION_ENV=""
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 log() { echo "[setup.sh] $*" >&2; }
@@ -219,6 +229,77 @@ resolve_task_provider() {
   [[ -n "$tp" && "$tp" != "null" ]] && TASK_PROVIDER="$tp"
 }
 
+# Substitute the small whitelist of {{token}} placeholders in a session-env value
+# against the resolved setup.sh vars (CROW-543). Unknown tokens are left
+# untouched. Uses bash parameter-expansion replacement (bash 3.2 safe); the
+# result is later baked into JSON via `jq --arg`, so embedded quotes/specials are
+# never a shell or JSON injection risk. Usage: substitute_session_env_tokens VALUE
+substitute_session_env_tokens() {
+  local v="$1"
+  v="${v//\{\{session_name\}\}/$SESSION_NAME}"
+  v="${v//\{\{slug\}\}/$SLUG}"
+  v="${v//\{\{branch\}\}/$BRANCH}"
+  v="${v//\{\{ticket_number\}\}/$TICKET_NUMBER}"
+  v="${v//\{\{repo\}\}/$REPO}"
+  v="${v//\{\{workspace\}\}/$WORKSPACE}"
+  v="${v//\{\{worktree_path\}\}/$WORKTREE_PATH}"
+  v="${v//\{\{ticket_url\}\}/$TICKET_URL}"
+  printf '%s' "$v"
+}
+
+# Resolve this workspace's generic per-session env injection (CROW-543). Sibling
+# of resolve_gateway_env: reads the optional `.sessionEnv` map from this
+# workspace's config.json entry, substitutes template tokens, then overlays any
+# repeatable --session-env KEY=VALUE flags (CLI_SESSION_ENV). Config pairs are
+# emitted first and flag pairs last, so the last-write-wins jq merge in
+# write_settings_local makes the flag value win for a duplicate key. Result is a
+# newline-separated KEY=VALUE list in WS_SESSION_ENV. Fail-open: missing config /
+# no jq → only the flags (if any). Idempotent. Never logs values (a session-env
+# value may carry a secret) — only the injected key names.
+resolve_session_env() {
+  [[ "$WS_SESSION_ENV_RESOLVED" == true ]] && return 0
+  WS_SESSION_ENV_RESOLVED=true
+
+  local pairs="" kv key value
+
+  # 1. Per-workspace config map (.workspaces[].sessionEnv), if present.
+  local config_path="$DEV_ROOT/.claude/config.json"
+  if [[ -f "$config_path" ]] && command -v jq >/dev/null 2>&1; then
+    while IFS= read -r kv; do
+      [[ -n "$kv" ]] || continue
+      key="${kv%%=*}"
+      value="${kv#*=}"
+      value=$(substitute_session_env_tokens "$value")
+      [[ -n "$pairs" ]] && pairs+=$'\n'
+      pairs+="$key=$value"
+    done < <(jq -r --arg name "$WORKSPACE" \
+      '.workspaces[]? | select(.name == $name) | .sessionEnv // {} | to_entries[] | "\(.key)=\(.value)"' \
+      "$config_path" 2>/dev/null)
+  fi
+
+  # 2. --session-env flags overlaid on top (flag wins via later jq write).
+  while IFS= read -r kv; do
+    [[ -n "$kv" ]] || continue
+    key="${kv%%=*}"
+    value="${kv#*=}"
+    value=$(substitute_session_env_tokens "$value")
+    [[ -n "$pairs" ]] && pairs+=$'\n'
+    pairs+="$key=$value"
+  done <<< "$CLI_SESSION_ENV"
+
+  WS_SESSION_ENV="$pairs"
+  if [[ -n "$WS_SESSION_ENV" ]]; then
+    # Log key names only — never the values.
+    local names=""
+    while IFS= read -r kv; do
+      [[ -n "$kv" ]] || continue
+      [[ -n "$names" ]] && names+=", "
+      names+="${kv%%=*}"
+    done <<< "$WS_SESSION_ENV"
+    log "Session env: injecting into settings.local.json .env: $names"
+  fi
+}
+
 # Build the shell prefix that applies (or clears) the gateway env vars on the
 # `claude` launch line — mirrors ClaudeLaunchArgs.gatewayEnvPrefix in Swift.
 # Gateway absent → `unset … && ` so a no-gateway workspace doesn't inherit a
@@ -288,6 +369,13 @@ Optional:
   --claude-binary <path>     [deprecated alias] Same as --agent-binary; only
                              honored when the resolved agent is claude-code.
   --session-id <uuid>        Existing session ID (for secondary repos)
+  --session-env KEY=VALUE    Inject KEY=VALUE into the new session's per-worktree
+                             .claude/settings.local.json .env (repeatable).
+                             Merged on top of this workspace's sessionEnv config
+                             map (flag wins for a duplicate key). VALUE may use
+                             template tokens: {{session_name}} {{slug}} {{branch}}
+                             {{ticket_number}} {{repo}} {{workspace}}
+                             {{worktree_path}} {{ticket_url}}.
   --base-branch <branch>     Default base branch (auto-detected from origin/HEAD if omitted)
   --primary                  Mark worktree as primary
   --skip-launch              Skip agent launch
@@ -323,6 +411,10 @@ parse_args() {
       --agent-binary)      AGENT_BINARY="$2"; shift 2 ;;
       --claude-binary)     CLAUDE_BINARY="$2"; shift 2 ;;
       --session-id)        SESSION_ID="$2"; shift 2 ;;
+      --session-env)
+        [[ "$2" == *=* ]] || die "parse_args" "--session-env expects KEY=VALUE, got: $2"
+        [[ -n "$CLI_SESSION_ENV" ]] && CLI_SESSION_ENV+=$'\n'
+        CLI_SESSION_ENV+="$2"; shift 2 ;;
       --base-branch)       BASE_BRANCH="$2"; shift 2 ;;
       --primary)           PRIMARY=true; shift ;;
       --skip-launch)       SKIP_LAUNCH=true; shift ;;
@@ -533,9 +625,10 @@ create_session() {
 # regardless of --skip-launch, so any worktree the user later opens with Claude
 # Code picks up both overrides.
 write_settings_local() {
-  # Resolve the gateway first so its block is written even when attribution
-  # trailers are disabled.
+  # Resolve the gateway and session env first so their blocks are written even
+  # when attribution trailers are disabled.
   resolve_gateway_env
+  resolve_session_env
 
   local want_attribution=false
   if is_attribution_trailers_enabled && [[ -n "$SESSION_ID" ]]; then
@@ -546,8 +639,8 @@ write_settings_local() {
     log "Attribution trailers disabled via config"
   fi
 
-  if [[ "$want_attribution" != true && "$WS_HAS_GATEWAY" != true ]]; then
-    log "No attribution trailer or gateway to write; skipping settings.local.json"
+  if [[ "$want_attribution" != true && "$WS_HAS_GATEWAY" != true && -z "$WS_SESSION_ENV" ]]; then
+    log "No attribution trailer, gateway, or session env to write; skipping settings.local.json"
     return
   fi
 
@@ -582,6 +675,22 @@ write_settings_local() {
 Co-Authored-By: Claude <noreply@anthropic.com>
 Crow-Session: $SESSION_ID"
 
+  # Build a JSON object from the resolved KEY=VALUE session-env pairs (CROW-543).
+  # Values are baked via `jq --arg` so quotes/specials are safe; the iterative
+  # .[$k]=$v overwrite makes flag pairs (emitted last by resolve_session_env)
+  # win over a same-named config key.
+  local session_env_json="{}" pair key value
+  if [[ -n "$WS_SESSION_ENV" ]]; then
+    while IFS= read -r pair; do
+      [[ -n "$pair" ]] || continue
+      key="${pair%%=*}"
+      value="${pair#*=}"
+      if ! session_env_json=$(jq --arg k "$key" --arg v "$value" '.[$k] = $v' <<< "$session_env_json"); then
+        die "settings_local" "jq failed to build session env object"
+      fi
+    done <<< "$WS_SESSION_ENV"
+  fi
+
   local merged
   if ! merged=$(jq \
     --argjson want_attr "$want_attribution" \
@@ -589,7 +698,9 @@ Crow-Session: $SESSION_ID"
     --argjson want_gw "$WS_HAS_GATEWAY" \
     --arg base_url "$WS_BASE_URL" \
     --arg headers "$WS_CUSTOM_HEADERS" \
+    --argjson session_env "$session_env_json" \
     '(if $want_attr then .attribution.commit = $commit else . end)
+     | (if ($session_env | length) > 0 then .env = (.env // {}) + $session_env else . end)
      | (if $want_gw then .env.ANTHROPIC_BASE_URL = $base_url
                        | .env.ANTHROPIC_CUSTOM_HEADERS = $headers else . end)' \
     <<< "$base"); then
@@ -600,11 +711,11 @@ Crow-Session: $SESSION_ID"
   # owner-only — matching ConfigStore's 0600 on config.json.
   chmod 600 "$settings_path" 2>/dev/null || true
 
-  if [[ "$WS_HAS_GATEWAY" == true ]]; then
-    log "Wrote settings.local.json (attribution + gateway env) to $settings_path (agent: $display_name)"
-  else
-    log "Wrote attribution settings to $settings_path (agent: $display_name)"
-  fi
+  local wrote=""
+  [[ "$want_attribution" == true ]] && wrote="attribution"
+  [[ "$WS_HAS_GATEWAY" == true ]] && wrote="${wrote:+$wrote + }gateway env"
+  [[ -n "$WS_SESSION_ENV" ]] && wrote="${wrote:+$wrote + }session env"
+  log "Wrote settings.local.json ($wrote) to $settings_path (agent: $display_name)"
 
   # Belt-and-suspenders: add the file to the per-worktree git exclude so it
   # is never accidentally committed even if the repo's .gitignore does not
