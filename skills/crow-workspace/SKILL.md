@@ -54,6 +54,28 @@ The worktree's settings.local.json is added to that worktree's per-worktree git 
 
 **When authoring commits by hand** (`git commit -m "…"`, heredoc, `git commit --amend`), include both `Crow-Session: <session-uuid>` and `Co-Authored-By: Claude <noreply@anthropic.com>` as trailers at the end of the message. `attribution.commit` only fires for Claude Code's built-in commit flow; hand-rolled commits bypass it. `setup.sh` also installs a per-worktree `prepare-commit-msg` hook (CROW-518) that idempotently appends both trailers when missing — treat that hook as a safety net, not the primary path. Both trailers must be line-anchored at the end of the message; the `crow:merge` auto-merge gate parses `^Crow-Session:\s*<uuid>\s*$` (see `IssueTracker.crowSessionTrailerPattern`).
 
+### Per-Session Environment Injection (CROW-543)
+
+A workspace can bake arbitrary environment variables into every new session's per-worktree `.claude/settings.local.json .env`. Crow stays domain-agnostic: each workspace declares what it needs. Variables land in the same `.env` block that carries the AI gateway settings, so a session's `claude` (and its hooks) inherit them.
+
+Declare a `sessionEnv` map on the workspace's `config.json` entry (peer of `gateway` / `taskProvider` / `customInstructions`). Values may use template tokens (see below):
+
+```jsonc
+{
+  "name": "SecurityScorecard",
+  "provider": "github",
+  "sessionEnv": { "COORD_SESSION_NAME": "{{session_name}}" }
+}
+```
+
+The example above lets the SecurityScorecard coordination layer's SessionStart `session-namer` hook read `COORD_SESSION_NAME` to auto-name the session — a workspace-only concern, expressed in one config line.
+
+`setup.sh` also accepts a repeatable `--session-env KEY=VALUE` flag. Flag pairs are merged **on top of** the config map, so a flag wins for a key that also appears in `sessionEnv`. Flag values support the same template tokens.
+
+**Template tokens** (resolved from setup.sh's per-session vars): `{{session_name}}`, `{{slug}}`, `{{branch}}`, `{{ticket_number}}`, `{{repo}}`, `{{workspace}}`, `{{worktree_path}}`, `{{ticket_url}}`. Unknown tokens are left untouched.
+
+Backward-compatible: with no `sessionEnv` map and no `--session-env` flag, `setup.sh` writes no `.env` block beyond what attribution/gateway already require. The file is `chmod 600` (a session-env value may carry a secret) and stays in the worktree's git exclude list. Gateway and attribution keys are never clobbered by a same-named session-env key.
+
 ## Multi-Workspace Discovery
 
 ### Step 1: Enumerate Workspaces
