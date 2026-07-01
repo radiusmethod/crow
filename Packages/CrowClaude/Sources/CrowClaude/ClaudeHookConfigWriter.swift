@@ -208,6 +208,11 @@ public struct ClaudeHookConfigWriter: HookConfigWriter {
             return sibling
         }
 
+        // Walk the user's login-shell PATH (same order as CodingAgent.findBinary).
+        if let found = ShellEnvironment.shared.findExecutable("crow") {
+            return found
+        }
+
         let candidates = [
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/crow").path,
             "/usr/local/bin/crow",
