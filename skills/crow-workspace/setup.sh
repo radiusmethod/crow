@@ -1180,13 +1180,11 @@ launch_opencode() {
       die "launch_agent" "opencode binary not found at PATH or known locations; provide --agent-binary"
   fi
   log "Resolved opencode binary: $bin"
-  # OpenCode: no --permission-mode, no --rc. Unattended dispatch uses the
-  # HEADLESS `opencode run "<prompt>"` form — OpenCode's positional prompt
-  # lives on the `run` subcommand and drives the agent to completion; it does
-  # NOT seed an interactive TUI the way Cursor's `agent "<prompt>"` does
-  # (CROW-545 gap). This mirrors OpenCodeAgent.autoLaunchCommand's .job/.review
-  # branch; the skill flow always feeds the prompt at launch.
-  local launch_cmd="cd $WORKTREE_PATH && $bin run \"\$(cat $prompt_path)\""
+  # OpenCode: no --permission-mode, no --rc. Seed the interactive TUI with
+  # `--prompt` so the session stays resident after the first run (#547).
+  # This mirrors OpenCodeAgent.autoLaunchCommand's .job/.review branch; the
+  # skill flow always feeds the prompt at launch.
+  local launch_cmd="cd $WORKTREE_PATH && $bin --prompt \"\$(cat $prompt_path)\""
   create_agent_terminal "OpenCode" "$launch_cmd"
 }
 
