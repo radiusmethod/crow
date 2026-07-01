@@ -27,8 +27,11 @@ struct OpenCodeHookConfigWriterTests {
         #expect(js.contains("\"SessionStart\""))
         #expect(js.contains("case \"session.idle\":"))
         #expect(js.contains("\"Stop\""))
-        #expect(js.contains("case \"permission.asked\":"))
+        // Permission detection uses the first-class `permission.ask` hook, not
+        // a bus event.type — the SDK Event union has no `permission.asked`.
+        #expect(js.contains("\"permission.ask\":"))
         #expect(js.contains("\"PermissionRequest\""))
+        #expect(!js.contains("permission.asked"))
         #expect(js.contains("\"PreToolUse\""))
         #expect(js.contains("\"PostToolUse\""))
         // Prefers the git worktree path for cwd resolution.

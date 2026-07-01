@@ -540,7 +540,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("[Crow] OpenCode scaffold failed: %@", error.localizedDescription)
             }
             if let crowPath = ClaudeHookConfigWriter.findCrowBinary() {
-                let configHome = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"]
+                // XDG spec: an empty `XDG_CONFIG_HOME` is treated as unset, so
+                // fall through to ~/.config/opencode rather than a relative path.
+                let xdgConfig = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"]
+                let configHome = (xdgConfig?.isEmpty == false ? xdgConfig : nil)
                     .map { ($0 as NSString).appendingPathComponent("opencode") }
                     ?? NSString(string: "~/.config/opencode").expandingTildeInPath
                 do {

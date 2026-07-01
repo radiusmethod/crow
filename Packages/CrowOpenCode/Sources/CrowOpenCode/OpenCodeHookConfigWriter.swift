@@ -9,28 +9,38 @@ import CrowCore
 ///
 /// So `installGlobalConfig` writes a single plugin file,
 /// `crow-hooks.js`, that subscribes to OpenCode's `event` bus plus the
-/// `tool.execute.before/after` hooks and shells out (via Bun's `$`) to
-/// `crow hook-event --agent opencode --event <PascalName>`, piping a JSON
-/// payload with the worktree `cwd` on stdin — exactly the shape the crow
-/// server's `hook-event` RPC expects (it resolves the session by matching
-/// `cwd` against registered worktree paths, the same mechanism Codex's
-/// global hooks use).
+/// `tool.execute.before/after` and `permission.ask` hooks and shells out
+/// (via Bun's `$`) to `crow hook-event --agent opencode --event <PascalName>`,
+/// piping a JSON payload with the worktree `cwd` on stdin — exactly the shape
+/// the crow server's `hook-event` RPC expects (it resolves the session by
+/// matching `cwd` against registered worktree paths, the same mechanism
+/// Codex's global hooks use).
 ///
-/// The plugin maps OpenCode's event vocabulary onto Crow's canonical
+/// The plugin maps OpenCode's event/hook vocabulary onto Crow's canonical
 /// PascalCase names so `OpenCodeSignalSource` can share Claude/Codex/Cursor's
-/// vocabulary verbatim:
+/// vocabulary verbatim. The `event.type` strings below were verified against
+/// the `@opencode-ai/sdk` `Event` union and the `Hooks` interface in
+/// `@opencode-ai/plugin` (CROW-545 review):
 ///
-///   session.created       → SessionStart
-///   tool.execute.before   → PreToolUse
-///   tool.execute.after    → PostToolUse
-///   session.idle          → Stop          (the canonical "agent finished")
-///   permission.asked      → PermissionRequest
-///   session.error         → Notification
+///   session.created           → SessionStart     (event bus)
+///   tool.execute.before       → PreToolUse        (hook)
+///   tool.execute.after        → PostToolUse       (hook)
+///   session.idle              → Stop              (event bus; "agent finished")
+///   permission.ask            → PermissionRequest (hook — see below)
+///   session.error             → Notification      (event bus)
 ///
-/// CROW-545 gap: the exact OpenCode event → state timing (esp. whether
-/// `session.idle` is the right "done" signal for headless `opencode run`)
-/// should be confirmed empirically at runtime, the same caveat Cursor's
-/// writer carries for `afterAgentResponse`.
+/// Permission detection uses the **first-class `permission.ask` hook**, not a
+/// bus `event.type`: the SDK `Event` union has no `permission.asked` literal
+/// (only `permission.updated` / `permission.replied`), so keying off the bus
+/// would silently no-op the "agent is blocked waiting on you" indicator. The
+/// `permission.ask` hook fires exactly when OpenCode requests a decision; we
+/// only observe it (never set `output.status`), so the user's/agent's choice
+/// still stands.
+///
+/// CROW-545 gap: the event *names* are now verified, but the *timing/semantics*
+/// (esp. whether `session.idle` is the right "done" signal for headless
+/// `opencode run`) should still be confirmed empirically at runtime — the same
+/// caveat Cursor's writer carries for `afterAgentResponse`.
 ///
 /// Because `HookConfigWriter`'s per-session API doesn't fit OpenCode's
 /// global model, the per-session methods are intentionally no-ops — real
@@ -105,13 +115,18 @@ public struct OpenCodeHookConfigWriter: HookConfigWriter {
                   // OpenCode has finished the turn and is waiting on the user.
                   await emit($, cwd, "Stop");
                   break;
-                case "permission.asked":
-                  await emit($, cwd, "PermissionRequest");
-                  break;
                 case "session.error":
                   await emit($, cwd, "Notification", { message: "Session error" });
                   break;
               }
+            },
+            "permission.ask": async (_input, _output) => {
+              // First-class permission hook — the SDK Event union has no
+              // matching bus type, so keying off `event.type` would silently
+              // no-op. This fires when OpenCode asks for a decision (agent is
+              // now blocked). Observe only: we never set `_output.status`, so
+              // the user's/agent's choice stands.
+              await emit($, cwd, "PermissionRequest");
             },
             "tool.execute.before": async (input) => {
               await emit($, cwd, "PreToolUse", { tool_name: (input && input.tool) || "unknown" });
