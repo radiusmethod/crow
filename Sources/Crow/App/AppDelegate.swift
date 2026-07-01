@@ -5,6 +5,7 @@ import CrowCodex
 import CrowCore
 import CrowCursor
 import CrowGit
+import CrowOpenCode
 import CrowProvider
 import CrowUI
 import CrowPersistence
@@ -405,6 +406,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSLog("[Crow] Cursor agent registered at %@", cursorPath)
         }
 
+        // Conditionally register the OpenCode agent on the same gate. The
+        // OpenCode CLI installs the binary as `opencode`; when it's absent the
+        // picker silently stays at the prior agents (CROW-545).
+        let openCodeAgent = OpenCodeAgent()
+        if let openCodePath = openCodeAgent.findBinary() {
+            AgentRegistry.shared.register(openCodeAgent)
+            NSLog("[Crow] OpenCode agent registered at %@", openCodePath)
+        }
+
         // Initialize libghostty
         NSLog("[Crow] Initializing Ghostty")
         GhosttyApp.shared.initialize()
@@ -513,6 +523,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     try CursorHookConfigWriter.installGlobalConfig(cursorHome: cursorHome, crowPath: crowPath)
                 } catch {
                     NSLog("[Crow] Cursor global config install failed: %@", error.localizedDescription)
+                }
+            }
+        }
+
+        // OpenCode-specific dev-root and global config — only when OpenCode is
+        // registered. AGENTS.md is the same file Codex/Cursor write (idempotent,
+        // preserves the user-edited `## Known Issues / Corrections` section).
+        // OpenCode has no command-based hook file; instead we install a JS
+        // plugin into ~/.config/opencode/plugins/ (honoring XDG_CONFIG_HOME)
+        // that bridges OpenCode's event bus to `crow hook-event` (CROW-545).
+        if AgentRegistry.shared.agent(for: .openCode) != nil {
+            do {
+                try OpenCodeScaffolder.scaffold(devRoot: devRoot)
+            } catch {
+                NSLog("[Crow] OpenCode scaffold failed: %@", error.localizedDescription)
+            }
+            if let crowPath = ClaudeHookConfigWriter.findCrowBinary() {
+                let configHome = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"]
+                    .map { ($0 as NSString).appendingPathComponent("opencode") }
+                    ?? NSString(string: "~/.config/opencode").expandingTildeInPath
+                do {
+                    try OpenCodeHookConfigWriter.installGlobalConfig(configHome: configHome, crowPath: crowPath)
+                } catch {
+                    NSLog("[Crow] OpenCode global config install failed: %@", error.localizedDescription)
                 }
             }
         }
