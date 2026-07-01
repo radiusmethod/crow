@@ -81,8 +81,10 @@ cat > "$TMP/ws2/.claude/config.json" <<'JSON'
 JSON
 DEV_ROOT="$TMP/ws2"
 CROW_BIN=""
+# Skip live login-shell PATH resolution; empty LOGIN_PATH lets resolve_crow_binary
+# fall through to the dev-build branch without picking up a host-installed crow.
 LOGIN_PATH=""
-LOGIN_PATH_RESOLVED=false
+LOGIN_PATH_RESOLVED=true
 EXPECTED="$TMP/ws2/rm/crow/.build/debug/crow"
 check "dev build under workspace" "$EXPECTED" "$(
   if resolve_crow_binary; then echo "$CROW_BIN"; else echo missing; fi

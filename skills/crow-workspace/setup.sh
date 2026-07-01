@@ -50,6 +50,7 @@ CROW_BIN=""
 # Cached login-shell PATH (mirrors ShellEnvironment in Packages/CrowCore).
 LOGIN_PATH=""
 LOGIN_PATH_RESOLVED=false
+JQ_MISSING_WARNED=false
 
 # Resolved AI gateway for this workspace (populated by resolve_gateway_env).
 WS_BASE_URL=""
@@ -466,13 +467,31 @@ parse_args() {
 resolve_login_path() {
   [[ "$LOGIN_PATH_RESOLVED" == true ]] && return 0
   LOGIN_PATH_RESOLVED=true
-  local shell="${SHELL:-/bin/zsh}" path
-  path=$("$shell" -lc 'echo $PATH' 2>/dev/null \
-    | awk 'NF { line=$0 } END { print line }') || true
-  path="${path//[$'\r\n']/}"
-  if [[ -n "$path" ]]; then
-    LOGIN_PATH="$path"
-    return 0
+  local shell="${SHELL:-/bin/zsh}" path tmp pid i
+  tmp=$(mktemp)
+  (
+    "$shell" -lc 'echo $PATH' 2>/dev/null \
+      | awk 'NF { line=$0 } END { print line }'
+  ) > "$tmp" 2>&1 &
+  pid=$!
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [[ $i -lt 50 ]]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    rm -f "$tmp"
+    log "login-shell PATH resolution timed out after 5s; using fallback PATH"
+  else
+    path=$(cat "$tmp" 2>/dev/null || true)
+    rm -f "$tmp"
+    path="${path//[$'\r\n']/}"
+    if [[ -n "$path" ]]; then
+      LOGIN_PATH="$path"
+      return 0
+    fi
   fi
   # Fallback: append well-known dirs to inherited PATH (ShellEnvironment.fallbackPATH).
   local current="${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
@@ -512,7 +531,13 @@ find_on_path() {
 binary_from_config() {
   local key="$1" config_path="${DEV_ROOT:+$DEV_ROOT/.claude/config.json}"
   [[ -n "$config_path" && -f "$config_path" ]] || return 0
-  command -v jq >/dev/null 2>&1 || return 0
+  if ! command -v jq >/dev/null 2>&1; then
+    if [[ "$JQ_MISSING_WARNED" != true ]]; then
+      JQ_MISSING_WARNED=true
+      log "warning: $config_path exists but jq is not installed; defaults.binaries.* overrides are ignored"
+    fi
+    return 0
+  fi
   local configured
   configured=$(jq -r --arg k "$key" '.defaults.binaries[$k] // empty' \
     "$config_path" 2>/dev/null) || true
