@@ -1953,6 +1953,16 @@ final class IssueTracker {
         return pr.mergeStateStatus == "BEHIND" || pr.mergeable == "CONFLICTING"
     }
 
+    /// Whether a session may be considered by the auto-rebase watcher at all.
+    /// Pure so unit tests can exercise it without an `IssueTracker`. The
+    /// Manager session never owns a PR branch, and review sessions exist to
+    /// review someone else's PR — never rewrite the branch under review,
+    /// regardless of the toggle (same policy as
+    /// `AutoRespondCoordinator.shouldSkipReviewSession`, CROW-551).
+    nonisolated static func sessionEligibleForAutoRebase(_ session: Session) -> Bool {
+        session.id != AppState.managerSessionID && session.kind != .review
+    }
+
     /// Per-refresh entry point for the auto-rebase watcher. Picks candidate
     /// (session, PR) pairs and kicks off one rebase attempt per head commit.
     /// No-op when `autoRespond.autoRebaseAndResolveConflicts` is off.
@@ -1961,11 +1971,7 @@ final class IssueTracker {
         guard !viewerPRs.isEmpty else { return }
         let byURL = Dictionary(viewerPRs.map { ($0.url, $0) }, uniquingKeysWith: Self.mergePRRecords)
 
-        for session in appState.sessions where session.id != AppState.managerSessionID {
-            // Review sessions exist to review someone else's PR — never rewrite
-            // the branch under review, regardless of the toggle (same policy as
-            // AutoRespondCoordinator.shouldSkipReviewSession).
-            guard session.kind != .review else { continue }
+        for session in appState.sessions where Self.sessionEligibleForAutoRebase(session) {
             guard let prLink = appState.links(for: session.id).first(where: { $0.linkType == .pr }) else { continue }
             guard !autoRebaseInFlight.contains(prLink.url) else { continue }
             guard let pr = byURL[prLink.url] else { continue }
