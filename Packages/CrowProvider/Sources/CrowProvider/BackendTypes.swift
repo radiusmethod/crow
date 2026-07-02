@@ -215,7 +215,8 @@ public struct AssignedListing: Sendable {
     public let closed: [AssignedIssue]
     /// Total recently-closed matches, independent of the page cap on `closed`
     /// (GitHub's `search` fetches at most 50 nodes but reports the full
-    /// `issueCount`). Falls back to `closed.count` when the backend doesn't
+    /// `issueCount`; Jira reports the REST approximate-count / `acli --count`
+    /// total, #572). Falls back to `closed.count` when the backend doesn't
     /// report a total, so it's always safe to badge from.
     public let closedTotalCount: Int
     /// GitHub-only; nil for GitLab.

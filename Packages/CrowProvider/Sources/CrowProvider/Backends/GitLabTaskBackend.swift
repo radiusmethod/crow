@@ -71,6 +71,11 @@ public struct GitLabTaskBackend: TaskBackend {
             return AssignedListing(open: open, closed: [])
         }
 
+        // `closed` is a single `per_page=50` page and `closedTotalCount` falls
+        // back to its length — if this path ever feeds a done-count badge, the
+        // total must come from the `X-Total` header (`glab api -i`) instead,
+        // per the #562/#572 cap fixes. Today IssueTracker only calls GitLab
+        // with `includeClosed: false` and never badges its closed count.
         let updatedAfter = Self.updatedAfterString()
         let closedOut: String
         do {

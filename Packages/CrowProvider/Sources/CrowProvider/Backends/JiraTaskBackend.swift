@@ -65,6 +65,10 @@ public struct JiraTaskBackend: TaskBackend {
     /// Recently-closed half, mirroring the 24h window GitHub/GitLab use for
     /// closed-issue removal detection in IssueTracker.
     static let closedJQL = "assignee = currentUser() AND statusCategory = Done AND updated >= -1d"
+    /// Page cap for the recently-closed half. The listing's `closedTotalCount`
+    /// comes from a separate count query so the done-in-24h badge doesn't
+    /// saturate at this cap (#572, mirroring GitHub's #562 fix).
+    static let closedPageLimit = 50
 
     public init(
         shellRunner: ShellRunner,
@@ -122,13 +126,23 @@ public struct JiraTaskBackend: TaskBackend {
             }
 
             let closed: [AssignedIssue]
-            switch await JiraSearchClient.fetchAssigned(site: site, jql: Self.closedJQL, authorization: authorization, maxResults: 50, transport: transport) {
+            switch await JiraSearchClient.fetchAssigned(site: site, jql: Self.closedJQL, authorization: authorization, maxResults: Self.closedPageLimit, transport: transport) {
             case .success(let items):
                 closed = Self.parseAssigned(items: items, site: config.site, statusOverride: .done, statusMap: config.statusMap)
             case .failure:
                 return AssignedListing(open: open, closed: [])
             }
-            return AssignedListing(open: open, closed: closed)
+
+            // Total matches in the window — `closed` is a single capped page, so
+            // the badge count must come from a count query or it saturates at
+            // the page cap (#572). Best-effort: nil falls back to closed.count.
+            var closedTotal: Int?
+            if case .success(let count) = await JiraSearchClient.fetchApproximateCount(site: site, jql: Self.closedJQL, authorization: authorization, transport: transport) {
+                // The count is eventually consistent; never report below the
+                // page we literally fetched.
+                closedTotal = max(count, closed.count)
+            }
+            return AssignedListing(open: open, closed: closed, closedTotalCount: closedTotal)
         }
 
         // Legacy fallback: `acli` (no REST credential configured).
@@ -147,12 +161,20 @@ public struct JiraTaskBackend: TaskBackend {
 
         let closed: [AssignedIssue]
         do {
-            let closedOut = try await search(jql: Self.closedJQL, limit: 50)
+            let closedOut = try await search(jql: Self.closedJQL, limit: Self.closedPageLimit)
             closed = Self.parseAssigned(closedOut, site: config.site, statusOverride: .done, statusMap: config.statusMap)
         } catch {
             return AssignedListing(open: open, closed: [])
         }
-        return AssignedListing(open: open, closed: closed)
+
+        // Same badge-total story as the REST path (#572): `--count` reports the
+        // full match count independent of `--limit`. Best-effort.
+        var closedTotal: Int?
+        if let countOut = try? await run(["acli", "jira", "workitem", "search", "--jql", Self.closedJQL, "--count"]),
+           let count = Self.firstInt(countOut) {
+            closedTotal = max(count, closed.count)
+        }
+        return AssignedListing(open: open, closed: closed, closedTotalCount: closedTotal)
     }
 
     public func setLabels(url: String, add: [String], remove: [String]) async throws {
@@ -343,6 +365,13 @@ public struct JiraTaskBackend: TaskBackend {
         if let arr = json as? [[String: Any]] { return arr.first }
         if let obj = json as? [String: Any] { return obj }
         return nil
+    }
+
+    /// Leniently pull the first integer out of `acli … --count` output, whose
+    /// exact shape isn't contract ("96", "96 work items", `{"count":96}` all parse).
+    static func firstInt(_ output: String) -> Int? {
+        guard let range = output.range(of: #"\d+"#, options: .regularExpression) else { return nil }
+        return Int(output[range])
     }
 
     /// Fallback when `create --json` returns non-JSON: scrape the first KEY-123

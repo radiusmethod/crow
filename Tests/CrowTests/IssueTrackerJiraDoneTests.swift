@@ -66,4 +66,25 @@ struct IssueTrackerJiraDoneTests {
         #expect(merged.issues.isEmpty)
         #expect(merged.doneCount == 0)
     }
+
+    /// CROW-572: the badge must reflect the backend-reported window total, not
+    /// the length of the capped closed page — 96 done tickets with a 50-item
+    /// page must badge as 96, mirroring GitHub's #562 `issueCount` fix.
+    @Test func doneCountUsesBackendTotalOverPageCount() {
+        let listing = AssignedListing(
+            open: [issue("PROJ-1", status: .inProgress, state: "open")],
+            closed: [
+                issue("PROJ-2", status: .done, state: "closed"),
+                issue("PROJ-3", status: .done, state: "closed"),
+            ],
+            closedTotalCount: 96
+        )
+
+        let merged = IssueTracker.mergeJiraListing(listing)
+
+        // The flat list still only carries the fetched page…
+        #expect(merged.issues.count == 3)
+        // …but the Done window count is the search total, uncapped.
+        #expect(merged.doneCount == 96)
+    }
 }

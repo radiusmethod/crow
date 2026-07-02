@@ -16,6 +16,10 @@ import Foundation
 /// Cloud). A single page of up to `maxResults` items is fetched, matching the
 /// previous `acli --limit 100` behavior; token pagination (`nextPageToken`) is a
 /// follow-up if boards ever exceed a page.
+///
+/// The enhanced endpoint dropped the legacy `total` field, so match totals that
+/// must exceed the page cap (the done-in-24h badge, #572) come from
+/// `POST /rest/api/3/search/approximate-count` via ``fetchApproximateCount``.
 public enum JiraSearchClient {
     public enum FetchError: Error, Equatable {
         case badSite
@@ -58,6 +62,63 @@ public enum JiraSearchClient {
             return nil
         }
         return issues
+    }
+
+    /// Build the approximate-count REST URL for a site host. Same bare-host
+    /// handling and forced-https as ``searchURL(site:jql:fields:maxResults:)``.
+    static func approximateCountURL(site: String) -> URL? {
+        let trimmedSite = site.trimmingCharacters(in: .whitespaces)
+        guard !trimmedSite.isEmpty else { return nil }
+        let bareHost = trimmedSite.range(of: "://").map { String(trimmedSite[$0.upperBound...]) } ?? trimmedSite
+        guard !bareHost.isEmpty else { return nil }
+
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = bareHost
+        components.path = "/rest/api/3/search/approximate-count"
+        return components.url
+    }
+
+    /// Parse the approximate-count payload (`{ "count": N }`). NSNumber bridges
+    /// both integer and double JSON encodings.
+    static func parseApproximateCount(_ data: Data) -> Int? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return (json["count"] as? NSNumber)?.intValue
+    }
+
+    /// Fetch the (eventually-consistent) total number of work items matching
+    /// `jql` on `site` via `POST /rest/api/3/search/approximate-count` — the
+    /// enhanced search API's replacement for the legacy `total` field. Used so
+    /// counts that must exceed the fetched page cap (the done-in-24h badge,
+    /// #572) don't saturate at the page size. Injectable transport for testing.
+    public static func fetchApproximateCount(
+        site: String,
+        jql: String,
+        authorization: String,
+        transport: (URLRequest) async throws -> (Data, URLResponse) = { try await URLSession.shared.data(for: $0) }
+    ) async -> Result<Int, FetchError> {
+        let trimmedJQL = jql.trimmingCharacters(in: .whitespaces)
+        guard let url = approximateCountURL(site: site), !trimmedJQL.isEmpty else {
+            return .failure(.badSite)
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["jql": trimmedJQL])
+        request.timeoutInterval = 15
+
+        do {
+            let (data, response) = try await transport(request)
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                return .failure(.http(http.statusCode))
+            }
+            guard let count = parseApproximateCount(data) else { return .failure(.decode) }
+            return .success(count)
+        } catch {
+            return .failure(.transport(error.localizedDescription))
+        }
     }
 
     /// Fetch the assigned work items matching `jql` on `site`, authenticated with
