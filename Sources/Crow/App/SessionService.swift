@@ -784,6 +784,13 @@ final class SessionService {
 
         rebuildAllSurfaces(forceRegister: true)
 
+        // A full server restart relaunches a fresh Manager agent, so clear any
+        // showing exit banner — mirrors `restartManager` (#558). The re-arm's
+        // `!managerProcessExited` guard only blocks re-firing, it can't clear a
+        // stale flag, so an already-visible banner would otherwise persist over
+        // a healthy Manager.
+        appState.managerProcessExited = false
+
         // `shutdown` cancelled the exit monitor and `rebuildAllSurfaces` doesn't
         // route through `ensureManagerSession`, so re-arm it here (#558).
         armManagerExitMonitor()
