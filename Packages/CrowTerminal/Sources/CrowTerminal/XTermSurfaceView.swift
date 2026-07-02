@@ -14,6 +14,8 @@ public final class XTermSurfaceView: NSView {
     private var isWebReady = false
     private var isPTYStarted = false
     private var fitDebounceWorkItem: DispatchWorkItem?
+    private var webContentReloadCount = 0
+    private static let maxWebContentReloadAttempts = 3
 
     /// Whether the terminal surface is live (web loaded and PTY spawned).
     public var hasSurface: Bool { isWebReady && isPTYStarted }
@@ -84,6 +86,7 @@ public final class XTermSurfaceView: NSView {
         }
         loadStarted = true
         let folder = htmlURL.deletingLastPathComponent()
+        navigationHandler.allowedResourceDirectory = folder
         log("loading terminal UI from \(htmlURL.path)")
         webView.loadFileURL(htmlURL, allowingReadAccessTo: folder)
     }
@@ -97,6 +100,8 @@ public final class XTermSurfaceView: NSView {
         isWebReady = false
         loadStarted = false
         pendingOutput.removeAll()
+        webContentReloadCount = 0
+        navigationHandler.allowedResourceDirectory = nil
         webView.navigationDelegate = nil
         webView.configuration.userContentController.removeAllScriptMessageHandlers()
     }
@@ -142,6 +147,7 @@ public final class XTermSurfaceView: NSView {
     fileprivate func handleWebReady() {
         guard !isWebReady else { return }
         isWebReady = true
+        webContentReloadCount = 0
         log("xterm.js ready")
         startPTYIfNeeded()
         flushPendingOutput()
@@ -155,7 +161,13 @@ public final class XTermSurfaceView: NSView {
     }
 
     fileprivate func handleWebContentProcessTerminated() {
-        log("WebContent process terminated — reloading terminal UI")
+        guard webContentReloadCount < Self.maxWebContentReloadAttempts else {
+            log("WebContent process terminated — reload cap (\(Self.maxWebContentReloadAttempts)) reached")
+            onSurfaceCreationFailed?()
+            return
+        }
+        webContentReloadCount += 1
+        log("WebContent process terminated — reloading terminal UI (attempt \(webContentReloadCount)/\(Self.maxWebContentReloadAttempts))")
         isWebReady = false
         pendingOutput.removeAll()
         loadStarted = false
@@ -301,15 +313,24 @@ private final class MessageHandler: NSObject, WKScriptMessageHandler {
 
 // MARK: - WKNavigationDelegate
 
+@MainActor
 private final class NavigationHandler: NSObject, WKNavigationDelegate {
     weak var owner: XTermSurfaceView?
+    var allowedResourceDirectory: URL?
 
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
-        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
-        if let url = navigationAction.request.url, url.isFileURL {
+        guard let url = navigationAction.request.url, url.isFileURL,
+              let allowed = allowedResourceDirectory else {
+            decisionHandler(.cancel)
+            return
+        }
+        let allowedPath = allowed.standardizedFileURL.path
+        let requestPath = url.standardizedFileURL.path
+        if requestPath == allowedPath || requestPath.hasPrefix(allowedPath + "/") {
             decisionHandler(.allow)
         } else {
             decisionHandler(.cancel)

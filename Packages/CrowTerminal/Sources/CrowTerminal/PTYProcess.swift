@@ -18,6 +18,23 @@ public final class PTYProcess: @unchecked Sendable {
 
     public init() {}
 
+    deinit {
+        readSource?.cancel()
+        readSource = nil
+        readQueue.sync {
+            if childPID > 0 {
+                kill(childPID, SIGTERM)
+                var status: Int32 = 0
+                waitpid(childPID, &status, 0)
+                childPID = -1
+            }
+            if masterFD >= 0 {
+                close(masterFD)
+                masterFD = -1
+            }
+        }
+    }
+
     public func start(command: String, workingDirectory: String?) throws {
         guard masterFD < 0 else { return }
 
