@@ -103,6 +103,28 @@ import Testing
     #expect(config.autoMergeWatcherEnabled == false)
 }
 
+@Test func appConfigMigratesLegacyAutoRebaseWatcherEnabled() throws {
+    // CROW-551: the top-level `autoRebaseWatcherEnabled` moved into
+    // `autoRespond.autoRebaseAndResolveConflicts`. An existing opt-in carries
+    // forward across the upgrade.
+    let json = #"{"autoRebaseWatcherEnabled": true}"#.data(using: .utf8)!
+    let config = try JSONDecoder().decode(AppConfig.self, from: json)
+    #expect(config.autoRespond.autoRebaseAndResolveConflicts == true)
+
+    // Re-encoding drops the legacy key, so a later opt-out sticks.
+    let reencoded = try JSONEncoder().encode(config)
+    let reencodedJSON = String(data: reencoded, encoding: .utf8)!
+    #expect(!reencodedJSON.contains("autoRebaseWatcherEnabled"))
+}
+
+@Test func appConfigLegacyAutoRebaseWatcherFalseOrMissingStaysOff() throws {
+    let missing = try JSONDecoder().decode(AppConfig.self, from: #"{"workspaces":[]}"#.data(using: .utf8)!)
+    #expect(missing.autoRespond.autoRebaseAndResolveConflicts == false)
+
+    let explicitOff = try JSONDecoder().decode(AppConfig.self, from: #"{"autoRebaseWatcherEnabled": false}"#.data(using: .utf8)!)
+    #expect(explicitOff.autoRespond.autoRebaseAndResolveConflicts == false)
+}
+
 @Test func appConfigAutoCreateWatcherEnabledRoundTrip() throws {
     var config = AppConfig()
     config.autoCreateWatcherEnabled = true
