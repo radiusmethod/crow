@@ -24,10 +24,9 @@ protocol CockpitSessionStarter {
 ///   - Drive `select-window` / `new-window` / `kill-window` / `paste-buffer`
 ///     in response to UI events from the rest of the app.
 ///   - Track readiness via `SentinelWaiter` (replaces the historical 5s
-///     sleep used by the now-removed per-terminal Ghostty path).
+///     sleep from the old per-terminal renderer path).
 ///
-/// Thread-safety: `@MainActor` — same constraint as libghostty, which
-/// requires AppKit-thread access for surface ops.
+/// Thread-safety: `@MainActor` — AppKit-thread access required for surface ops.
 @MainActor
 public final class TmuxBackend {
     public static let shared = TmuxBackend()
@@ -51,9 +50,8 @@ public final class TmuxBackend {
     /// `shutdown()` call from the watchdog flow in PROD #5).
     private var controller: TmuxController?
 
-    /// The single embedded surface attached to the cockpit session. Lazy
-    /// because libghostty needs an NSWindow before `ghostty_surface_new`
-    /// fires.
+    /// The single embedded surface attached to the cockpit session. Created
+    /// lazily on first use; WKWebView must load in a visible window.
     private var sharedSurface: XTermSurfaceView?
 
     /// UUID → tmux window index for tabs registered with us.
@@ -79,20 +77,6 @@ public final class TmuxBackend {
     /// the waiter). `destroyTerminal` cancels these so they don't fire
     /// `onReadinessChanged` for a tab the user just closed. Issue #282.
     private var readinessTasks: [UUID: [Task<Void, Never>]] = [:]
-
-    /// Offscreen window the shared surface lives in until SwiftUI re-parents
-    /// it into the visible UI. Same trick the Ghostty path uses for
-    /// background surface creation.
-    private lazy var offscreenWindow: NSWindow = {
-        let w = NSWindow(
-            contentRect: NSRect(x: -10000, y: -10000, width: 800, height: 600),
-            styleMask: .borderless,
-            backing: .buffered,
-            defer: false
-        )
-        w.isReleasedWhenClosed = false
-        return w
-    }()
 
     /// Public for test isolation. Production callers use `.shared`.
     public init() {}
@@ -636,8 +620,8 @@ public final class TmuxBackend {
         )
         NSLog("[TmuxBackend] created cockpit surface attach=%@", attachCommand)
         // Cache before SwiftUI re-parents into the visible tab container.
-        // Unlike libghostty, WKWebView must load in a visible window — do not
-        // park in the offscreen window or xterm.js never initializes.
+        // WKWebView must load in a visible window — do not park offscreen or
+        // xterm.js never initializes.
         sharedSurface = view
         return view
     }
@@ -664,10 +648,9 @@ public final class TmuxBackend {
             return ctrl
         }
         guard !tmuxBinary.isEmpty, !socketPath.isEmpty else {
-            // Backend wasn't configured this run (flag off, or tmux not
-            // discovered). Throw rather than precondition-crash — callers
-            // (notably TerminalSurfaceView's surfaceForBackend) catch and
-            // fall back to per-terminal Ghostty rendering.
+            // Backend wasn't configured this run (tmux not discovered).
+            // Throw rather than precondition-crash — callers catch and surface
+            // an error overlay.
             throw TmuxBackendError.notConfigured
         }
         let ctrl = TmuxController(

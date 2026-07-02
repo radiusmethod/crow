@@ -59,8 +59,12 @@ public final class PTYProcess: @unchecked Sendable {
         posix_spawnattr_setflags(&attrs, Int16(POSIX_SPAWN_SETSID))
 
         var envStrings = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
-        envStrings.append("TERM=xterm-256color")
-        envStrings.append("COLORTERM=truecolor")
+        if !envStrings.contains(where: { $0.hasPrefix("TERM=") }) {
+            envStrings.append("TERM=xterm-256color")
+        }
+        if !envStrings.contains(where: { $0.hasPrefix("COLORTERM=") }) {
+            envStrings.append("COLORTERM=truecolor")
+        }
         if !envStrings.contains(where: { $0.hasPrefix("LANG=") }) {
             envStrings.append("LANG=en_US.UTF-8")
         }
@@ -109,13 +113,17 @@ public final class PTYProcess: @unchecked Sendable {
     public func terminate() {
         readSource?.cancel()
         readSource = nil
-        if childPID > 0 {
-            kill(childPID, SIGTERM)
-            childPID = -1
-        }
         if masterFD >= 0 {
             close(masterFD)
             masterFD = -1
+        }
+        let pid = childPID
+        guard pid > 0 else { return }
+        childPID = -1
+        kill(pid, SIGTERM)
+        readQueue.async { _ in
+            var status: Int32 = 0
+            waitpid(pid, &status, 0)
         }
     }
 
@@ -143,6 +151,7 @@ public final class PTYProcess: @unchecked Sendable {
     private func waitForExit() {
         let pid = childPID
         guard pid > 0 else { return }
+        childPID = -1
         readQueue.async { [weak self] in
             var status: Int32 = 0
             waitpid(pid, &status, 0)

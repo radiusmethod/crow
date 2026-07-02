@@ -13,6 +13,7 @@ public final class XTermSurfaceView: NSView {
     private var loadStarted = false
     private var isWebReady = false
     private var isPTYStarted = false
+    private var fitDebounceWorkItem: DispatchWorkItem?
 
     /// Whether the terminal surface is live (web loaded and PTY spawned).
     public var hasSurface: Bool { isWebReady && isPTYStarted }
@@ -215,10 +216,12 @@ public final class XTermSurfaceView: NSView {
     }
 
     fileprivate func scheduleFit() {
-        webView.evaluateJavaScript("window.crowFit && window.crowFit()", completionHandler: nil)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+        fitDebounceWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
             self?.webView.evaluateJavaScript("window.crowFit && window.crowFit()", completionHandler: nil)
         }
+        fitDebounceWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
     }
 
     public override func layout() {

@@ -27,7 +27,7 @@ Replace Ghostty with an xterm.js terminal surface hosted in WKWebView, backed by
 - Intel and Apple Silicon Macs build and run from the same source without Ghostty.
 - Simpler CI (no submodule, no Zig cache, no framework assembly).
 - Terminal UX regresses vs Ghostty for v1 spike: no GPU rendering, no OSC 8 link hover, no Quick Look on selection, no rich context menu. Search (Cmd+F) still routes through tmux.
-- Manager process-exit banner (previously via Ghostty child-exit callback) is not wired for the shared attach client.
+- Manager process-exit banner (previously via Ghostty child-exit callback) is not wired for the shared attach client. Tracked in #558.
 
 # Alternatives considered
 

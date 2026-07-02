@@ -1502,10 +1502,9 @@ final class SessionService {
         store.mutate { data in data.terminals.removeAll { $0.id == terminalID } }
 
         // Defer the backing destroy so SwiftUI's render pass detaches the
-        // GhosttySurfaceView from the view hierarchy before we free its
-        // underlying `ghostty_surface_t` (or kill the tmux window). Freeing
-        // it while AppKit still holds the view risks a Metal/input callback
-        // landing on a dangling pointer (issue #282).
+        // terminal surface from the view hierarchy before we kill the tmux
+        // window. Destroying while AppKit still holds the view risks a
+        // WebKit callback landing on a freed surface (issue #282).
         //
         // Note: single-tick defer is a conservative first attempt. Neither
         // Combine nor DispatchQueue strictly guarantee ordering against the
