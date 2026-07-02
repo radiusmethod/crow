@@ -23,10 +23,10 @@ public final class PTYProcess: @unchecked Sendable {
         readSource = nil
         readQueue.sync {
             if childPID > 0 {
-                kill(childPID, SIGTERM)
-                var status: Int32 = 0
-                waitpid(childPID, &status, 0)
+                let pid = childPID
                 childPID = -1
+                kill(pid, SIGTERM)
+                Self.forceReap(pid)
             }
             if masterFD >= 0 {
                 close(masterFD)
@@ -138,8 +138,7 @@ public final class PTYProcess: @unchecked Sendable {
             if pid > 0 {
                 self.childPID = -1
                 kill(pid, SIGTERM)
-                var status: Int32 = 0
-                waitpid(pid, &status, 0)
+                Self.forceReap(pid)
             }
 
             if let source = self.readSource {
@@ -196,6 +195,18 @@ public final class PTYProcess: @unchecked Sendable {
         DispatchQueue.main.async {
             handler?(code)
         }
+    }
+
+    /// Reap a child after SIGTERM without blocking the read queue indefinitely.
+    private static func forceReap(_ pid: pid_t) {
+        var status: Int32 = 0
+        if waitpid(pid, &status, WNOHANG) == pid { return }
+        for _ in 0..<10 {
+            usleep(50_000)
+            if waitpid(pid, &status, WNOHANG) == pid { return }
+        }
+        kill(pid, SIGKILL)
+        _ = waitpid(pid, &status, 0)
     }
 
     private static func decodeExitStatus(_ status: Int32) -> Int32 {
