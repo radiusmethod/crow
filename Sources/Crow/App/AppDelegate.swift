@@ -842,8 +842,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tracker.onAutoMergeEnabled = { [weak self] sessionID, prURL, number in
             self?.notificationManager?.notifyAutoMergeEnabled(prURL: prURL, number: number, sessionID: sessionID)
         }
-        tracker.autoRebaseWatcherEnabledProvider = { [weak self] in
-            self?.appConfig?.autoRebaseWatcherEnabled ?? false
+        tracker.autoRebaseAndResolveConflictsProvider = { [weak self] in
+            self?.appConfig?.autoRespond.autoRebaseAndResolveConflicts ?? false
         }
         tracker.respondToChangesRequestedProvider = { [weak self] in
             self?.appConfig?.autoRespond.respondToChangesRequested ?? false
