@@ -98,6 +98,65 @@ import Foundation
         let result = await JiraSearchClient.fetchAssigned(site: "", jql: "x", authorization: "Basic creds")
         #expect(result.failureError == .badSite)
     }
+
+    // MARK: - Approximate count (#572)
+
+    @Test func buildsApproximateCountURL() {
+        let url = JiraSearchClient.approximateCountURL(site: "acme.atlassian.net")
+        #expect(url?.absoluteString == "https://acme.atlassian.net/rest/api/3/search/approximate-count")
+        // Forced https on a cleartext origin, nil on a blank site.
+        #expect(JiraSearchClient.approximateCountURL(site: "http://acme.atlassian.net")?.scheme == "https")
+        #expect(JiraSearchClient.approximateCountURL(site: " ") == nil)
+    }
+
+    @Test func parseApproximateCountReadsCount() {
+        #expect(JiraSearchClient.parseApproximateCount(Data(#"{"count":96}"#.utf8)) == 96)
+        #expect(JiraSearchClient.parseApproximateCount(Data("{}".utf8)) == nil)
+        #expect(JiraSearchClient.parseApproximateCount(Data("not json".utf8)) == nil)
+    }
+
+    @Test func fetchApproximateCountPostsJQLWithAuth() async {
+        let result = await JiraSearchClient.fetchApproximateCount(
+            site: "acme.atlassian.net",
+            jql: "statusCategory = Done",
+            authorization: "Basic creds",
+            transport: { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.value(forHTTPHeaderField: "Authorization") == "Basic creds")
+                #expect(request.url?.path == "/rest/api/3/search/approximate-count")
+                let body = try? JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: String]
+                #expect(body == ["jql": "statusCategory = Done"])
+                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                return (Data(#"{"count":96}"#.utf8), response)
+            }
+        )
+        guard case .success(let count) = result else {
+            Issue.record("expected success, got \(result)")
+            return
+        }
+        #expect(count == 96)
+    }
+
+    @Test func fetchApproximateCountFailsOnNon2xxAndDecode() async {
+        let unauthorized = await JiraSearchClient.fetchApproximateCount(
+            site: "acme.atlassian.net", jql: "x", authorization: "Basic creds",
+            transport: { request in
+                (Data(), HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: nil)!)
+            }
+        )
+        #expect(unauthorized.failureError == .http(401))
+
+        let garbage = await JiraSearchClient.fetchApproximateCount(
+            site: "acme.atlassian.net", jql: "x", authorization: "Basic creds",
+            transport: { request in
+                (Data("not json".utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            }
+        )
+        #expect(garbage.failureError == .decode)
+
+        let blank = await JiraSearchClient.fetchApproximateCount(site: "", jql: "x", authorization: "Basic creds")
+        #expect(blank.failureError == .badSite)
+    }
 }
 
 /// `Result<[[String:Any]], _>` isn't `Equatable` (the success payload holds

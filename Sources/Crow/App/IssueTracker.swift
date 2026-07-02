@@ -2507,13 +2507,15 @@ final class IssueTracker {
 
     /// Merge a Jira `AssignedListing` into the board's flat issue list: open
     /// issues plus the closed (Done) issues deduped by `id` against the open
-    /// set, mirroring the GitHub closed-issue merge. `doneCount` is the full
-    /// closed count (the 24h Done window), matching GitHub's `doneIssuesLast24h`
-    /// semantics — it counts the window, not just the post-dedup remainder.
+    /// set, mirroring the GitHub closed-issue merge. `doneCount` is the
+    /// backend-reported window total (`closedTotalCount`), not the length of
+    /// the capped closed page, so the badge doesn't saturate at the 50-item
+    /// page cap (#572, mirroring GitHub's #562 fix) — and it counts the window,
+    /// not just the post-dedup remainder, matching GitHub's semantics.
     nonisolated static func mergeJiraListing(_ listing: AssignedListing) -> (issues: [AssignedIssue], doneCount: Int) {
         let openIDs = Set(listing.open.map(\.id))
         let uniqueDone = listing.closed.filter { !openIDs.contains($0.id) }
-        return (listing.open + uniqueDone, listing.closed.count)
+        return (listing.open + uniqueDone, listing.closedTotalCount)
     }
 
     /// Fetch open Corveil tasks assigned to the user for one workspace config.
