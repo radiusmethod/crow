@@ -120,11 +120,7 @@ final class JobScheduler {
                 // Persist run time first so the job isn't re-fired next tick.
                 self.onJobRan(captured.id, Date())
                 // Watch this run so its session auto-completes on success (CROW-561).
-                self.watchedRuns[result.sessionID] = RunWatch(
-                    terminalID: result.terminalID,
-                    startedAt: Date(),
-                    promptsDeliveredAt: nil
-                )
+                self.beginWatching(sessionID: result.sessionID, terminalID: result.terminalID)
                 self.deliverRemainingPrompts(
                     captured, sessionID: result.sessionID, terminalID: result.terminalID
                 )
@@ -197,6 +193,27 @@ final class JobScheduler {
 
     // MARK: - Auto-complete on finish (CROW-561)
 
+    /// Start watching a job run for successful-finish auto-completion. Called by
+    /// `fire`; also the seam integration tests use to seed a run with a specific
+    /// delivery/started time.
+    func beginWatching(
+        sessionID: UUID,
+        terminalID: UUID,
+        startedAt: Date = Date(),
+        promptsDeliveredAt: Date? = nil
+    ) {
+        watchedRuns[sessionID] = RunWatch(
+            terminalID: terminalID,
+            startedAt: startedAt,
+            promptsDeliveredAt: promptsDeliveredAt
+        )
+    }
+
+    /// Whether a run is still being watched (integration-test assertion seam).
+    func isWatching(sessionID: UUID) -> Bool {
+        watchedRuns[sessionID] != nil
+    }
+
     /// Record that a watched run has had all of its prompts delivered, starting
     /// the settle window before it can be judged finished.
     private func markPromptsDelivered(sessionID: UUID) {
@@ -210,7 +227,7 @@ final class JobScheduler {
     /// still working, awaiting input / errored (`.waiting`), or never having
     /// started (`.idle`). Keyed purely on `AgentActivityState`, so it works the
     /// same across Claude/Codex/Cursor/OpenCode. See `finishDecision`.
-    private func checkFinishedRuns(now: Date) {
+    func checkFinishedRuns(now: Date) {
         // Mutating `watchedRuns` inside the loop is safe: `for (_, _) in dict`
         // iterates a value copy, so the mutation just triggers copy-on-write.
         for (sessionID, run) in watchedRuns {
