@@ -60,7 +60,7 @@ public final class PTYProcess: @unchecked Sendable {
 
         var envStrings = ProcessInfo.processInfo.environment.map { "\($0.key)=\($0.value)" }
         if !envStrings.contains(where: { $0.hasPrefix("TERM=") }) {
-            envStrings.append("TERM=xterm-256color")
+            envStrings.append("TERM=xterm-kitty")
         }
         if !envStrings.contains(where: { $0.hasPrefix("COLORTERM=") }) {
             envStrings.append("COLORTERM=truecolor")
@@ -111,26 +111,37 @@ public final class PTYProcess: @unchecked Sendable {
     }
 
     public func terminate() {
-        readSource?.cancel()
-        readSource = nil
-        if masterFD >= 0 {
-            close(masterFD)
-            masterFD = -1
-        }
         let pid = childPID
-        guard pid > 0 else { return }
-        childPID = -1
-        kill(pid, SIGTERM)
-        readQueue.async { _ in
-            var status: Int32 = 0
-            waitpid(pid, &status, 0)
+        if pid > 0 {
+            childPID = -1
+            kill(pid, SIGTERM)
+        }
+
+        if let source = readSource {
+            readSource = nil
+            source.cancel()
+        }
+
+        if pid > 0 {
+            readQueue.async { [weak self] in
+                var status: Int32 = 0
+                waitpid(pid, &status, 0)
+                _ = self
+            }
         }
     }
 
     private func startReading() {
         let source = DispatchSource.makeReadSource(fileDescriptor: masterFD, queue: readQueue)
-        source.setEventHandler { [weak self] in
+        source.setCancelHandler { [weak self] in
             guard let self else { return }
+            if self.masterFD >= 0 {
+                close(self.masterFD)
+                self.masterFD = -1
+            }
+        }
+        source.setEventHandler { [weak self] in
+            guard let self, self.masterFD >= 0 else { return }
             var buffer = [UInt8](repeating: 0, count: 65536)
             let count = Darwin.read(self.masterFD, &buffer, buffer.count)
             if count > 0 {
@@ -141,26 +152,44 @@ public final class PTYProcess: @unchecked Sendable {
                 }
             } else if count == 0 {
                 source.cancel()
-                self.waitForExit()
+                self.reapChild(notifyExit: true)
+            } else {
+                let err = errno
+                if err == EINTR || err == EAGAIN {
+                    return
+                }
+                source.cancel()
+                self.reapChild(notifyExit: true)
             }
         }
         source.resume()
         readSource = source
     }
 
-    private func waitForExit() {
+    private func reapChild(notifyExit: Bool) {
         let pid = childPID
         guard pid > 0 else { return }
         childPID = -1
-        readQueue.async { [weak self] in
-            var status: Int32 = 0
-            waitpid(pid, &status, 0)
-            let code = (status >> 8) & 0xFF
-            let handler = self?.onExit
-            DispatchQueue.main.async {
-                handler?(Int32(code))
-            }
+        var status: Int32 = 0
+        waitpid(pid, &status, 0)
+        guard notifyExit else { return }
+        let code = Self.decodeExitStatus(status)
+        let handler = onExit
+        DispatchQueue.main.async {
+            handler?(code)
         }
+    }
+
+    private static func decodeExitStatus(_ status: Int32) -> Int32 {
+        // Decode wait(2) status without WEXITSTATUS/WTERMSIG macros (unsupported in Swift).
+        let lowByte = status & 0xFF
+        if lowByte == 0 {
+            return (status >> 8) & 0xFF
+        }
+        if lowByte != 0x7F {
+            return 128 + (status & 0x7F)
+        }
+        return status
     }
 }
 

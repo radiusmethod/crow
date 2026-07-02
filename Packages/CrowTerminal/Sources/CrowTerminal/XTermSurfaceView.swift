@@ -164,7 +164,10 @@ public final class XTermSurfaceView: NSView {
     }
 
     fileprivate func handleResize(rows: Int, cols: Int) {
-        pty.resize(rows: UInt16(max(rows, 1)), cols: UInt16(max(cols, 1)))
+        pty.resize(
+            rows: UInt16(clamping: max(rows, 1)),
+            cols: UInt16(clamping: max(cols, 1))
+        )
     }
 
     private func startPTYIfNeeded() {
