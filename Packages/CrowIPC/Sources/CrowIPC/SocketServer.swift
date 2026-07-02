@@ -156,18 +156,18 @@ public final class SocketServer: @unchecked Sendable {
         // request at a time. A full async I/O rewrite would avoid the blocked
         // thread but is out of scope for the current architecture.
         let semaphore = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) var response: JSONRPCResponse?
+        let responseBox = ResponseBox()
         let capturedRouter = router
         let capturedRequest = request
 
         Task {
-            response = await capturedRouter.handle(request: capturedRequest)
+            responseBox.value = await capturedRouter.handle(request: capturedRequest)
             semaphore.signal()
         }
 
         semaphore.wait()
 
-        if let response {
+        if let response = responseBox.value {
             writeResponse(response, to: fd)
         }
     }
@@ -188,6 +188,14 @@ public final class SocketServer: @unchecked Sendable {
             }
         }
     }
+}
+
+/// Thread-safe carrier that lets the async handler hand its result back to the
+/// blocked socket thread. Access is serialized by the surrounding semaphore
+/// (the value is only read after `semaphore.wait()` observes the signal), so
+/// `@unchecked Sendable` is sound here.
+private final class ResponseBox: @unchecked Sendable {
+    var value: JSONRPCResponse?
 }
 
 public enum SocketError: Error, LocalizedError {
