@@ -41,9 +41,18 @@ struct JobFinishDecisionTests {
         #expect(decide(activity: .done) == .complete)
     }
 
-    @Test func completesWhenAgentIdleAfterSettle() {
-        // TUI agents (Cursor/OpenCode) rest at `.idle` when finished.
-        #expect(decide(activity: .idle) == .complete)
+    @Test func doesNotCompleteWhileIdle() {
+        // `.idle` is set only on a fresh SessionStart — it is the never-started
+        // default, never a resting-after-work state on any agent kind. It must
+        // not count as finished (would bury failed launches / booting agents).
+        #expect(decide(activity: .idle) == .keepWaiting)
+    }
+
+    @Test func doesNotCompleteWhenAgentNeverEmittedAHookEvent() {
+        // A failed launch parks readiness at `.agentLaunched` but no agent runs,
+        // so no hook event ever arrives and the state stays the default `.idle`.
+        // The run must stay active so the failure surfaces, not be completed.
+        #expect(decide(readiness: .agentLaunched, activity: .idle) == .keepWaiting)
     }
 
     @Test func doesNotCompleteWhileWorking() {

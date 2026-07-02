@@ -51,6 +51,8 @@ final class JobScheduler {
     }
 
     /// Active job runs, keyed by session id, awaiting successful-finish detection.
+    /// In-memory only: an app relaunch mid-run drops the watch, reverting that run
+    /// to the pre-CROW-561 "linger until manually completed" behavior.
     private var watchedRuns: [UUID: RunWatch] = [:]
 
     /// Reads the current job list (from AppDelegate's `appConfig`).
@@ -184,6 +186,8 @@ final class JobScheduler {
                 .flatMap({ $0 })
                 .first(where: { $0.id == terminalID }) else {
                 NSLog("[JobScheduler] terminal \(terminalID) gone; stopping prompt delivery")
+                // Delivery aborted — stop watching this run for completion too.
+                self.watchedRuns[sessionID] = nil
                 return
             }
             TerminalRouter.send(terminal, text: prompts[0] + "\n")
@@ -202,12 +206,13 @@ final class JobScheduler {
     /// Auto-complete watched job runs whose agent has finished successfully.
     ///
     /// A run completes when, after all its prompts were delivered plus a settle
-    /// window, its agent has come to rest (`.done`/`.idle`) rather than still
-    /// `.working` or `.waiting` (awaiting input / errored — those are left
-    /// active so they surface). Keyed purely on `AgentActivityState`, so it works
-    /// the same across Claude/Codex/Cursor/OpenCode.
+    /// window, the agent has emitted a real finish event (`.done`) rather than
+    /// still working, awaiting input / errored (`.waiting`), or never having
+    /// started (`.idle`). Keyed purely on `AgentActivityState`, so it works the
+    /// same across Claude/Codex/Cursor/OpenCode. See `finishDecision`.
     private func checkFinishedRuns(now: Date) {
-        // Snapshot so we can mutate `watchedRuns` while iterating.
+        // Mutating `watchedRuns` inside the loop is safe: `for (_, _) in dict`
+        // iterates a value copy, so the mutation just triggers copy-on-write.
         for (sessionID, run) in watchedRuns {
             let decision = Self.finishDecision(
                 now: now,
@@ -241,6 +246,22 @@ final class JobScheduler {
 
     /// Decide a watched run's fate from plain inputs. `status == nil` means the
     /// session no longer exists.
+    ///
+    /// Only `.done` counts as finished. `.idle` deliberately does **not**: across
+    /// every agent kind it is set *only* on a fresh `SessionStart` (the default /
+    /// never-started state), never as a resting state after work. Treating it as
+    /// finished would silently complete failed launches (readiness parks at
+    /// `.agentLaunched` with no agent, so no hook event ever arrives and the state
+    /// stays the default `.idle`), still-booting agents, and TUI agents reasoning
+    /// before their first tool call — the exact "silently completed" outcome this
+    /// feature must avoid. `.done`, by contrast, is only produced by a real finish
+    /// event (Claude/Codex `Stop`, or a TUI `Stop`/`Notification` safety-net),
+    /// which proves the agent actually ran.
+    ///
+    /// Known limitation: OpenCode/Cursor map an error `Notification`
+    /// (e.g. `session.error`) to `.done` when no top-level Stop was recorded, so an
+    /// errored TUI run can complete as "success". Claude/Codex errored runs
+    /// (`StopFailure` → `.waiting`) are correctly left active.
     static func finishDecision(
         now: Date,
         status: SessionStatus?,
@@ -262,11 +283,12 @@ final class JobScheduler {
         guard readiness == .agentLaunched else { return .keepWaiting }
 
         switch activityState {
-        case .working, .waiting:
-            // Still processing, or awaiting input / errored — leave it active so
-            // it surfaces rather than being silently completed.
+        case .idle, .working, .waiting:
+            // Not finished: `.idle` is the never-started default, `.working` is
+            // in-progress, `.waiting` is awaiting input or errored. All stay
+            // active so the run surfaces rather than being silently completed.
             return .keepWaiting
-        case .idle, .done:
+        case .done:
             return .complete
         }
     }
