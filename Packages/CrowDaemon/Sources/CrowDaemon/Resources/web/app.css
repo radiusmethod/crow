@@ -990,21 +990,26 @@ button.scratch-link:hover { border-color: var(--blue); }
 .tk-dot { width: 7px; height: 7px; border-radius: 50%; }
 .tk-n { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
-/* Left-column nav rows (CROW-917 / CROW-1237): Grid · Scorecard, then
+/* Left-column nav rows (CROW-917 / CROW-1237 / CROW-1241): Grid · Scorecard, then
    Reviews · Scratch, then the full-width Manager pill. Each .nav-pills-row is
    its own non-wrapping flex line so groups never reflow; the "+" and Select
-   buttons live in the right icon column. Four pills on one row ellipsized. */
+   buttons live in the right icon column. Four pills on one row ellipsized.
+   Equal boxes: `flex: 1 1 0` shares leftover width (not content-sized `auto`,
+   which let Scorecard outgrow Grid and a Reviews/Scratch badge steal from its
+   neighbor). Shared `min-height` keeps both 2×2 rows the same height so a badge
+   sits inside without changing the box. */
 .nav-pills-row { display: flex; gap: 6px; }
+.nav-pills-row > .nav-pill { flex: 1 1 0; min-width: 0; min-height: 32px; }
 .nav-pill {
-  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 5px;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
   padding: 6px 8px; border-radius: 6px; cursor: pointer;
   background: var(--bg-surface); border: 1px solid rgba(179, 142, 70, 0.3);
 }
 .nav-pill:hover { border-color: var(--border-strong); }
 .nav-pill.active { background: var(--bg-card); border-color: rgba(179, 142, 70, 0.6); }
-.pill-label { color: var(--gold-dark); font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pill-label { color: var(--gold-dark); font-size: 12px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .nav-pill.active .pill-label { color: var(--gold); }
-.pill-badge { padding: 0 6px; border-radius: 8px; font-size: 10px; font-weight: 700; background: rgba(221, 196, 130, 0.2); color: var(--gold); }
+.pill-badge { flex: 0 0 auto; padding: 0 6px; border-radius: 8px; font-size: 10px; font-weight: 700; line-height: 1.2; background: rgba(221, 196, 130, 0.2); color: var(--gold); }
 .pill-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
 .pill-dot.pulse { animation: crow-pulse 1.5s ease-in-out infinite; }
 .nav-plus {

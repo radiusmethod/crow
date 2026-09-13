@@ -652,6 +652,25 @@ import Testing
             "the Scratch-as-card CSS is dead once Scratch is a nav pill")
     }
 
+    /// CROW-1241: the 2×2 nav pills must share width and height. `flex: 1 1 auto`
+    /// sizes each button from its label (and Reviews/Scratch badges), so Scorecard
+    /// outgrows Grid and a badge steals width from its neighbor. Pin `flex: 1 1 0`
+    /// + a shared min-height on the row's pills so content no longer drives the box.
+    @Test func navPillsInARowAreEqualSize() throws {
+        // stripComments: the flex/min-height values are also named in the rule's
+        // doc comment, so a whole-file `contains` would false-pass off the prose
+        // once the declaration is deleted.
+        let css = Self.stripComments(try Self.webAsset("app.css"))
+        #expect(
+            css.contains(".nav-pills-row > .nav-pill { flex: 1 1 0; min-width: 0; min-height: 32px; }"),
+            "nav pills in a row must share leftover width (flex: 1 1 0, not auto) and a min-height so badges can't resize them (CROW-1241)")
+        // `\n.nav-pill {` skips the `.nav-pills-row > .nav-pill` rule above it.
+        let pill = try Self.ruleBody(openedBy: "\n.nav-pill {", in: css)
+        #expect(
+            !pill.contains("flex: 1 1 auto"),
+            "content-sized flex-basis on .nav-pill is the CROW-1241 regression")
+    }
+
     /// CROW-917/922: layout decisions with no other pin, verified to regress silently
     /// (reverting any leaves every suite green). CROW-922 made the right column's icon
     /// buttons natural-size (`flex: 0 0 auto`) with a `min-height` floor above the WCAG
