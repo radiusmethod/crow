@@ -69,6 +69,20 @@ check('Explore action', board.textContent.includes('Explore'));
 check('Ticket action', board.textContent.includes('Ticket'));
 check('Work action', board.textContent.includes('Work'));
 check('Done action', board.textContent.includes('Done'));
+const row = board.querySelector('.scratch-row');
+check('item is a board-card', row && row.classList.contains('board-card'));
+check('items sit in a spaced list', !!board.querySelector('.scratch-list'));
+const footerActions = row && row.querySelector('.card-foot .card-actions');
+check('actions sit in that card\'s footer', !!(footerActions &&
+  [...footerActions.querySelectorAll('button')].some((b) => b.textContent === 'Explore') &&
+  [...footerActions.querySelectorAll('button')].some((b) => b.textContent === 'Done')));
+T.boardData.scratch = { todos: [item, { ...item, id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', text: 'second scratch item' }] };
+T.renderBoard();
+const distinct = [...board.querySelectorAll('.scratch-row')];
+check('two items are two distinct cards', distinct.length === 2 &&
+  distinct.every((c) => c.classList.contains('board-card') && c.querySelector('.card-foot .card-actions')));
+T.boardData.scratch = { todos: [item] };
+T.renderBoard();
 const capturedTicket = [...board.querySelectorAll('button')].find((b) => b.textContent === 'Ticket');
 const capturedWork = [...board.querySelectorAll('button')].find((b) => b.textContent === 'Work');
 check('Ticket enabled before a ticket exists', capturedTicket && !capturedTicket.disabled);

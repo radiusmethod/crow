@@ -652,6 +652,27 @@ import Testing
             "the Scratch-as-card CSS is dead once Scratch is a nav pill")
     }
 
+    /// CROW-1249: Scratch *board* items are distinct large cards so each
+    /// Explore / Ticket / Work / Done cluster is visually owned by that item.
+    /// The CROW-1237 sidebar card class stays forbidden.
+    @Test func scratchBoardItemsHaveDedicatedCardCSS() throws {
+        let css = Self.stripComments(try Self.webAsset("app.css"))
+        #expect(
+            css.contains(".scratch-list {") && css.contains(".scratch-row {"),
+            "scratch items need a list + dedicated card rule (CROW-1249)")
+        let foot = try Self.ruleBody(openedBy: "\n.scratch-row .card-foot {", in: css)
+        #expect(
+            foot.contains("border-top:") && foot.contains("background:"),
+            "the action cluster must sit in a distinct footer region of the card (CROW-1249)")
+        let row = try Self.stripComments(String(try Self.functionBody("scratchRow", in: try Self.webClientJS())))
+        #expect(
+            row.contains("board-card scratch-row"),
+            "scratchRow must reuse board-card chrome plus the scratch-row treatment")
+        #expect(
+            row.contains("scratch-row-body") && row.contains("card-foot"),
+            "title/chips stay in the body; actions stay in card-foot")
+    }
+
     /// CROW-1241: the 2×2 nav pills must share width and height. `flex: 1 1 auto`
     /// sizes each button from its label (and Reviews/Scratch badges), so Scorecard
     /// outgrows Grid and a badge steals width from its neighbor. Pin `flex: 1 1 0`
