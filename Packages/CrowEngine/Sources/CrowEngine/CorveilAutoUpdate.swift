@@ -8,12 +8,24 @@ import Darwin
 ///
 /// Network, hashing, and config writes live in `CorveilAutoUpdateService`
 /// (CrowDaemon). This type is the policy: platform asset names, checksum
-/// tables, managed-dir layout, and "does this configured path count as an
-/// operator override?". Keeping it here lets the rules be unit-tested without
-/// a daemon, a GitHub round-trip, or Application Support (ADR 0012).
+/// tables, managed-dir layout, and whether Crow should adopt
+/// `binaries["corveil"]` onto the downloader. Keeping it here lets the rules
+/// be unit-tested without a daemon, a GitHub round-trip, or Application
+/// Support (ADR 0012).
 public enum CorveilAutoUpdate {
     public static let checksumsAssetName = "checksums.txt"
     public static let binaryFileName = "corveil"
+
+    /// Outcome of ``autoManageDecision(autoUpdateEnabled:optOutSentinel:configuredPath:managedRoot:)``.
+    public enum AutoManageDecision: Equatable, Sendable {
+        /// Download / verify / link. Crow owns `binaries["corveil"]`.
+        case manage
+        /// Auto-update is off. Leave the configured path alone.
+        case disabled
+        /// Leftover `#1228` default-off + source-build, no sentinel. Flip
+        /// auto-update on, persist the opt-out sentinel, then manage.
+        case leftoverAdopt
+    }
     /// Upper bound on a downloaded asset. Published CLIs are ~100–110 MiB
     /// (v0.4.41 darwin-amd64 is 111_143_664 bytes); anything larger is treated
     /// as a bad/malicious payload rather than written.
@@ -56,7 +68,7 @@ public enum CorveilAutoUpdate {
     }
 
     /// True when `path` is inside Crow's managed corveil dir (the auto-updater
-    /// owns it). An operator-set source-build path is anything else.
+    /// owns it). A source-build / operator path is anything else.
     public static func isManagedPath(_ path: String, managedRoot: URL) -> Bool {
         let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
         let root = managedRoot.standardizedFileURL.path
@@ -65,15 +77,24 @@ public enum CorveilAutoUpdate {
         return standardized.hasPrefix(prefix)
     }
 
-    /// Crow manages the binary only when auto-update is on **and** the
-    /// configured path is unset or already a managed install. A real source
-    /// build in `binaries["corveil"]` always wins.
-    public static func shouldAutoManage(configuredPath: String?, managedRoot: URL) -> Bool {
-        guard let path = configuredPath?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !path.isEmpty else {
-            return true
-        }
-        return isManagedPath(path, managedRoot: managedRoot)
+    /// Whether this check should download, stay off, or one-shot a leftover
+    /// `#1228` default-off + source-build config onto the downloader (CROW-1247).
+    ///
+    /// When auto-update is **on**, Crow owns `binaries["corveil"]` — a previous
+    /// `out/` path is not a skip. When it is **off**, the operator path is left
+    /// alone unless this is the one-shot leftover (`false` + non-managed path +
+    /// no opt-out sentinel).
+    public static func autoManageDecision(
+        autoUpdateEnabled: Bool,
+        optOutSentinel: Bool,
+        configuredPath: String?,
+        managedRoot: URL
+    ) -> AutoManageDecision {
+        if autoUpdateEnabled { return .manage }
+        let path = configuredPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let hasNonManagedPath = !path.isEmpty && !isManagedPath(path, managedRoot: managedRoot)
+        if !optOutSentinel && hasNonManagedPath { return .leftoverAdopt }
+        return .disabled
     }
 
     /// Parse GNU `sha256sum` output (`<hex>  <name>` or `<hex> *<name>`).
@@ -157,6 +178,9 @@ public enum CorveilAutoUpdate {
 public struct CorveilAutoUpdateStatus: Sendable, Equatable {
     public enum State: String, Sendable, Equatable {
         case disabled
+        /// Retained for status payloads written before CROW-1247. Auto-update
+        /// on no longer skips a source-build path, so a live check does not
+        /// produce this state.
         case skippedOverride = "skipped_override"
         case upToDate = "up_to_date"
         case updated

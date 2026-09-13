@@ -949,6 +949,35 @@ import Testing
     """.data(using: .utf8)!
     let config = try JSONDecoder().decode(AppConfig.self, from: json)
     #expect(config.defaults.corveilAutoUpdate == false)
+    #expect(config.defaults.corveilAutoUpdateOptOut == false)
+}
+
+@Test func corveilAutoUpdateOptOutMissingDecodesFalse() throws {
+    let json = """
+    {"defaults": {"corveilAutoUpdate": false}}
+    """.data(using: .utf8)!
+    let config = try JSONDecoder().decode(AppConfig.self, from: json)
+    #expect(config.defaults.corveilAutoUpdateOptOut == false)
+}
+
+@Test func corveilAutoUpdateOptOutRoundTrip() throws {
+    let on = AppConfig(defaults: ConfigDefaults(corveilAutoUpdateOptOut: true))
+    let decoded = try JSONDecoder().decode(AppConfig.self, from: JSONEncoder().encode(on))
+    #expect(decoded.defaults.corveilAutoUpdateOptOut)
+}
+
+@Test func stickyOptOutSentinelIsStickyAndIgnoresLeftoverSave() {
+    // Leftover false saved unchanged — do not stamp the sentinel.
+    #expect(!ConfigDefaults.stickyOptOutSentinel(
+        incoming: false, stored: false, storedAutoUpdate: false, incomingAutoUpdate: false))
+    // Explicit true→false is a real opt-out.
+    #expect(ConfigDefaults.stickyOptOutSentinel(
+        incoming: false, stored: false, storedAutoUpdate: true, incomingAutoUpdate: false))
+    // Once set, a round-trip that omits it (incoming false) keeps it.
+    #expect(ConfigDefaults.stickyOptOutSentinel(
+        incoming: false, stored: true, storedAutoUpdate: false, incomingAutoUpdate: false))
+    #expect(ConfigDefaults.stickyOptOutSentinel(
+        incoming: true, stored: true, storedAutoUpdate: true, incomingAutoUpdate: true))
 }
 
 @Test func corveilAutoUpdateRoundTrip() throws {

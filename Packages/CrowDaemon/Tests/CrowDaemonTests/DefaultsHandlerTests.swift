@@ -102,6 +102,7 @@ import CrowPersistence
         let onDisk = try #require(ConfigStore.loadConfig(devRoot: devRoot))
         #expect(onDisk.defaults.corveilAutoUpdate)
         #expect(onDisk.defaults.corveilVersion == "v0.4.32")
+        #expect(onDisk.defaults.corveilAutoUpdateOptOut == false)
     }
 
     @Test @MainActor func setPatchesCorveilAutoUpdateOff() async throws {
@@ -117,6 +118,48 @@ import CrowPersistence
         #expect(resp.result?["defaults"]?.objectValue?["corveil_auto_update"] == .bool(false))
         let onDisk = try #require(ConfigStore.loadConfig(devRoot: devRoot))
         #expect(onDisk.defaults.corveilAutoUpdate == false)
+        #expect(onDisk.defaults.corveilAutoUpdateOptOut)
+    }
+
+    @Test @MainActor func setConfigTrueToFalseWritesOptOutSentinel() async throws {
+        let devRoot = tempDevRoot()
+        defer { try? FileManager.default.removeItem(atPath: devRoot) }
+        var seed = AppConfig()
+        seed.defaults.corveilAutoUpdate = true
+        seed.defaults.binaries["corveil"] = "/Users/jane/dev/corveil/out/corveil"
+        try ConfigStore.saveConfig(seed, devRoot: devRoot)
+
+        var incoming = seed
+        incoming.defaults.corveilAutoUpdate = false
+        let json = String(data: try JSONEncoder().encode(incoming), encoding: .utf8)!
+        let resp = await call("set-config", ["config": .string(json)], devRoot: devRoot)
+        #expect(resp.error == nil)
+
+        let onDisk = try #require(ConfigStore.loadConfig(devRoot: devRoot))
+        #expect(onDisk.defaults.corveilAutoUpdate == false)
+        #expect(onDisk.defaults.corveilAutoUpdateOptOut)
+        #expect(onDisk.defaults.binaries["corveil"] == "/Users/jane/dev/corveil/out/corveil")
+    }
+
+    @Test @MainActor func setConfigLeftoverFalseDoesNotWriteSentinel() async throws {
+        let devRoot = tempDevRoot()
+        defer { try? FileManager.default.removeItem(atPath: devRoot) }
+        var seed = AppConfig()
+        seed.defaults.corveilAutoUpdate = false
+        seed.defaults.corveilAutoUpdateOptOut = false
+        seed.defaults.binaries["corveil"] = "/Users/jane/dev/corveil/out/corveil"
+        try ConfigStore.saveConfig(seed, devRoot: devRoot)
+
+        var incoming = seed
+        incoming.defaults.provider = "gitlab"
+        let json = String(data: try JSONEncoder().encode(incoming), encoding: .utf8)!
+        let resp = await call("set-config", ["config": .string(json)], devRoot: devRoot)
+        #expect(resp.error == nil)
+
+        let onDisk = try #require(ConfigStore.loadConfig(devRoot: devRoot))
+        #expect(onDisk.defaults.corveilAutoUpdate == false)
+        #expect(onDisk.defaults.corveilAutoUpdateOptOut == false)
+        #expect(onDisk.defaults.provider == "gitlab")
     }
 
     @Test @MainActor func setPatchesOnlyProvidedFields() async throws {

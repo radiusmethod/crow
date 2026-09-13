@@ -483,7 +483,12 @@ func makeSettingsHandlers(
                         config.defaults.ignoreReviewLabels =
                             patch.apply(to: config.defaults.ignoreReviewLabels)
                     }
-                    if let corveilAutoUpdate { config.defaults.corveilAutoUpdate = corveilAutoUpdate }
+                    if let corveilAutoUpdate {
+                        config.defaults.corveilAutoUpdate = corveilAutoUpdate
+                        if !corveilAutoUpdate {
+                            config.defaults.corveilAutoUpdateOptOut = true
+                        }
+                    }
                     if let corveilVersion { config.defaults.corveilVersion = corveilVersion }
                     return (before, config.defaults)
                 }

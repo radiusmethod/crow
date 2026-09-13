@@ -29,8 +29,8 @@ public struct Defaults: ParsableCommand {
         CLI used for new workspaces, the branch prefix for new session branches, \
         the repo/label lists that filter the review and ticket boards, and the \
         binary path overrides. --corveil-auto-update downloads the host-platform \
-        CLI from corveil/corveil-releases (on by default; skipped when \
-        binaries[corveil] is a source-build path).
+        CLI from corveil/corveil-releases (on by default). When on, Crow owns \
+        binaries[corveil]; pass false to keep a source-build path.
         """,
         subcommands: [DefaultsGet.self, DefaultsSet.self]
     )
@@ -84,8 +84,9 @@ public struct DefaultsSet: ParsableCommand {
         other, matching how GitManager reads them; setting only one warns if the \
         resulting pair is crossed. --corveil-auto-update is live and on by \
         default: Crow downloads from corveil/corveil-releases, verifies \
-        checksums, and hot-swaps the symlink; a source-build binaries[corveil] \
-        path is never overwritten. Pass false to opt out.
+        checksums, and hot-swaps the symlink. When it is on, Crow owns \
+        binaries[corveil] (a previous source-build path is adopted, not \
+        skipped). Pass false to leave an operator path, including out/, alone.
         """
     )
 

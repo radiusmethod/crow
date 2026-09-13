@@ -660,6 +660,15 @@ public enum ParityLedger {
         .field("defaults.corveilAutoUpdate", read: "defaults get", write: "defaults set"),
         .field("defaults.corveilVersion", read: "defaults get", write: "defaults set"),
         .field(
+            "defaults.corveilAutoUpdateOptOut",
+            noCLI: """
+                Migration sentinel (CROW-1247). Distinguishes leftover \
+                `corveilAutoUpdate: false` from #1228's default-off from a later \
+                explicit opt-out. Written when the leftover adopt runs and as a \
+                side effect of `crow defaults set --corveil-auto-update false` / \
+                turning the Settings toggle off. Not a setting — there is no flag.
+                """),
+        .field(
             "defaults.excludeDirs",
             read: "defaults get",
             writeNoCLI: """
