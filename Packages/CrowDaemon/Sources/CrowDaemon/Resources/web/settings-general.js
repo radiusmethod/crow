@@ -60,7 +60,7 @@
     }
     S.cfg.defaults.corveilVersion = S.cfg.defaults.corveilVersion || 'latest';
     body.appendChild(S.toggleField('Auto-download corveil CLI', S.cfg.defaults, 'corveilAutoUpdate',
-      'On by default. Crow downloads the host-platform binary from the public corveil/corveil-releases repo, verifies its checksum, and links it. A custom path above is never overwritten.'));
+      'On by default. Crow downloads the host-platform binary from the public corveil/corveil-releases repo, verifies its checksum, and links it. When on, Crow owns the path above (a source-build is adopted). Turn this off to keep an operator path, including out/.'));
     body.appendChild(S.textField('corveil version', S.cfg.defaults, 'corveilVersion',
       { help: "Use 'latest' or pin a tag such as v0.4.32. The -releases mirror can trail source by a day." }));
 
@@ -131,7 +131,7 @@
     input.value = S.cfg.defaults.binaries.corveil || '';
     wrap.appendChild(input);
     wrap.appendChild(el('div', 'st-help',
-      'Leave blank to let Crow auto-download (when enabled below), or point at a source build. A custom path is never overwritten.'));
+      'Leave blank to let Crow auto-download (when enabled below), or point at a source build. When auto-download is on, Crow owns this path and will replace a source-build with the managed CLI. Turn auto-download off to keep an operator path.'));
 
     const row = el('div', 'st-row-actions');
     row.style.marginTop = '8px';

@@ -1247,11 +1247,21 @@ public struct ConfigDefaults: Codable, Sendable, Equatable {
     /// `corveil/corveil-releases` GitHub repo and links it under Application
     /// Support (CROW-1210). Default **on** (CROW-1229) so a fresh install gets a
     /// CLI without pointing `binaries["corveil"]` at a build. A missing key
-    /// decodes as on; an explicit `false` stays off.
+    /// decodes as on; an explicit `false` stays off **after** the CROW-1247
+    /// leftover one-shot (see ``corveilAutoUpdateOptOut``).
     ///
-    /// Auto-manage is skipped when `binaries["corveil"]` is set to a path
-    /// outside Crow's managed dir — a local `out/` build always wins.
+    /// When this is on, Crow owns `binaries["corveil"]` — a previous source-build
+    /// path is adopted onto the managed install, not skipped. Turn it off to
+    /// keep an operator path, including `out/`.
     public var corveilAutoUpdate: Bool
+
+    /// Sticky sentinel (CROW-1247). Distinguishes leftover `corveilAutoUpdate:
+    /// false` persisted when #1228 defaulted the toggle off from a later
+    /// explicit opt-out. Missing decodes as false. Once true, a `false`
+    /// auto-update flag is left alone and is not one-shot onto the downloader
+    /// again. Not a user-facing setting — written when the leftover adopt
+    /// runs and when the operator sets auto-update off.
+    public var corveilAutoUpdateOptOut: Bool
 
     /// Which `corveil-releases` tag to keep linked: `"latest"` or a pin like
     /// `"v0.4.32"`. Ignored unless `corveilAutoUpdate` is on.
@@ -1350,6 +1360,7 @@ public struct ConfigDefaults: Codable, Sendable, Equatable {
         binaries: [String: String] = [:],
         mirrorClaudeMCPToCodex: Bool = true,
         corveilAutoUpdate: Bool = true,
+        corveilAutoUpdateOptOut: Bool = false,
         corveilVersion: String = ConfigDefaults.corveilVersionLatest
     ) {
         self.provider = provider
@@ -1362,6 +1373,7 @@ public struct ConfigDefaults: Codable, Sendable, Equatable {
         self.binaries = binaries
         self.mirrorClaudeMCPToCodex = mirrorClaudeMCPToCodex
         self.corveilAutoUpdate = corveilAutoUpdate
+        self.corveilAutoUpdateOptOut = corveilAutoUpdateOptOut
         self.corveilVersion = Self.normalizedCorveilVersion(corveilVersion) ?? Self.corveilVersionLatest
     }
 
@@ -1377,6 +1389,7 @@ public struct ConfigDefaults: Codable, Sendable, Equatable {
         binaries = try container.decodeIfPresent([String: String].self, forKey: .binaries) ?? [:]
         mirrorClaudeMCPToCodex = try container.decodeIfPresent(Bool.self, forKey: .mirrorClaudeMCPToCodex) ?? true
         corveilAutoUpdate = try container.decodeIfPresent(Bool.self, forKey: .corveilAutoUpdate) ?? true
+        corveilAutoUpdateOptOut = try container.decodeIfPresent(Bool.self, forKey: .corveilAutoUpdateOptOut) ?? false
         if let raw = try container.decodeIfPresent(String.self, forKey: .corveilVersion),
            let normalized = Self.normalizedCorveilVersion(raw) {
             corveilVersion = normalized
@@ -1386,7 +1399,21 @@ public struct ConfigDefaults: Codable, Sendable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case provider, cli, branchPrefix, excludeDirs, excludeReviewRepos, excludeTicketRepos, ignoreReviewLabels, binaries, mirrorClaudeMCPToCodex, corveilAutoUpdate, corveilVersion
+        case provider, cli, branchPrefix, excludeDirs, excludeReviewRepos, excludeTicketRepos, ignoreReviewLabels, binaries, mirrorClaudeMCPToCodex, corveilAutoUpdate, corveilAutoUpdateOptOut, corveilVersion
+    }
+
+    /// Sticky OR for ``corveilAutoUpdateOptOut`` across a `set-config` replace
+    /// (CROW-1247). Once true it stays true; a true→false auto-update transition
+    /// also sets it. A leftover `false` that is saved unchanged does **not**.
+    public static func stickyOptOutSentinel(
+        incoming: Bool,
+        stored: Bool?,
+        storedAutoUpdate: Bool?,
+        incomingAutoUpdate: Bool
+    ) -> Bool {
+        let storedSentinel = stored ?? false
+        let wasOn = storedAutoUpdate ?? true
+        return storedSentinel || incoming || (wasOn && !incomingAutoUpdate)
     }
 }
 

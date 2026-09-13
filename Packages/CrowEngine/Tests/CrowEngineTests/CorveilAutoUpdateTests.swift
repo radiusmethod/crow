@@ -16,14 +16,48 @@ struct CorveilAutoUpdateTests {
         #expect(CorveilAutoUpdate.assetName(os: "linux", arch: "amd64") == "corveil-linux-amd64")
     }
 
-    @Test func shouldAutoManageWhenPathUnsetOrManaged() {
+    @Test func autoManageDecisionAdoptsSourceBuildWhenOn() {
         let root = URL(fileURLWithPath: "/tmp/crow-managed-corveil")
-        #expect(CorveilAutoUpdate.shouldAutoManage(configuredPath: nil, managedRoot: root))
-        #expect(CorveilAutoUpdate.shouldAutoManage(configuredPath: "  ", managedRoot: root))
-        #expect(CorveilAutoUpdate.shouldAutoManage(
-            configuredPath: "/tmp/crow-managed-corveil/v0.4.32/corveil", managedRoot: root))
-        #expect(!CorveilAutoUpdate.shouldAutoManage(
-            configuredPath: "/Users/jane/dev/corveil/out/corveil-darwin-arm64", managedRoot: root))
+        let source = "/Users/jane/dev/corveil/out/corveil-darwin-arm64"
+        #expect(CorveilAutoUpdate.autoManageDecision(
+            autoUpdateEnabled: true, optOutSentinel: false,
+            configuredPath: nil, managedRoot: root) == .manage)
+        #expect(CorveilAutoUpdate.autoManageDecision(
+            autoUpdateEnabled: true, optOutSentinel: false,
+            configuredPath: "  ", managedRoot: root) == .manage)
+        #expect(CorveilAutoUpdate.autoManageDecision(
+            autoUpdateEnabled: true, optOutSentinel: false,
+            configuredPath: "/tmp/crow-managed-corveil/v0.4.32/corveil",
+            managedRoot: root) == .manage)
+        #expect(CorveilAutoUpdate.autoManageDecision(
+            autoUpdateEnabled: true, optOutSentinel: false,
+            configuredPath: source, managedRoot: root) == .manage)
+    }
+
+    @Test func autoManageDecisionSkipsWhenOffWithSentinel() {
+        let root = URL(fileURLWithPath: "/tmp/crow-managed-corveil")
+        let source = "/Users/jane/dev/corveil/out/corveil-darwin-arm64"
+        #expect(CorveilAutoUpdate.autoManageDecision(
+            autoUpdateEnabled: false, optOutSentinel: true,
+            configuredPath: source, managedRoot: root) == .disabled)
+        #expect(CorveilAutoUpdate.autoManageDecision(
+            autoUpdateEnabled: false, optOutSentinel: false,
+            configuredPath: nil, managedRoot: root) == .disabled)
+        #expect(CorveilAutoUpdate.autoManageDecision(
+            autoUpdateEnabled: false, optOutSentinel: false,
+            configuredPath: "/tmp/crow-managed-corveil/v0.4.32/corveil",
+            managedRoot: root) == .disabled)
+    }
+
+    @Test func autoManageDecisionOneShotLeftoverFalseAndSourceBuild() {
+        let root = URL(fileURLWithPath: "/tmp/crow-managed-corveil")
+        let source = "/Users/jane/dev/corveil/out/corveil-darwin-arm64"
+        #expect(CorveilAutoUpdate.autoManageDecision(
+            autoUpdateEnabled: false, optOutSentinel: false,
+            configuredPath: source, managedRoot: root) == .leftoverAdopt)
+        #expect(CorveilAutoUpdate.autoManageDecision(
+            autoUpdateEnabled: false, optOutSentinel: true,
+            configuredPath: source, managedRoot: root) == .disabled)
     }
 
     @Test func parseChecksumsAcceptsGnuSha256sum() {

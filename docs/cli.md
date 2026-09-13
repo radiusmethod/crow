@@ -802,7 +802,7 @@ View or change workspace and automation defaults.
 crow defaults <get|set>
 ```
 
-These are the `defaults` block of config.json: the forge provider and CLI used for new workspaces, the branch prefix for new session branches, the repo/label lists that filter the review and ticket boards, and the binary path overrides. --corveil-auto-update downloads the host-platform CLI from corveil/corveil-releases (on by default; skipped when binaries[corveil] is a source-build path).
+These are the `defaults` block of config.json: the forge provider and CLI used for new workspaces, the branch prefix for new session branches, the repo/label lists that filter the review and ticket boards, and the binary path overrides. --corveil-auto-update downloads the host-platform CLI from corveil/corveil-releases (on by default). When on, Crow owns binaries[corveil]; pass false to keep a source-build path.
 
 Subcommands: [`get`](#crow-defaults-get), [`set`](#crow-defaults-set).
 
@@ -834,7 +834,7 @@ Only the flags you pass change; at least one is required.
 
 Most of these are live. The provider and CLI are re-read on each repo scan, the board lists are re-read on each board poll (about a minute), and the branch prefix is read when a workspace is created. --binary is the exception: agent binary discovery and the .claude/bin symlinks are both set up at startup, so a change there returns "restart_required" and needs a crowd restart — including when you remove one, since the stale symlink keeps shadowing PATH until then.
 
---provider and --cli are stored independently and neither implies the other, matching how GitManager reads them; setting only one warns if the resulting pair is crossed. --corveil-auto-update is live and on by default: Crow downloads from corveil/corveil-releases, verifies checksums, and hot-swaps the symlink; a source-build binaries[corveil] path is never overwritten. Pass false to opt out.
+--provider and --cli are stored independently and neither implies the other, matching how GitManager reads them; setting only one warns if the resulting pair is crossed. --corveil-auto-update is live and on by default: Crow downloads from corveil/corveil-releases, verifies checksums, and hot-swaps the symlink. When it is on, Crow owns binaries[corveil] (a previous source-build path is adopted, not skipped). Pass false to leave an operator path, including out/, alone.
 
 | Flag | Value | Required | Description |
 | --- | --- | --- | --- |

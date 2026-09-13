@@ -84,7 +84,182 @@ import FoundationNetworking
             now: Date.init)
     }
 
-    @Test func skippedWhenOperatorOverrideIsSet() async throws {
+    @Test func adoptsWhenAutoUpdateOnAndSourceBuild() async throws {
+        let devRoot = try tempDir("crowd-corveil-dev")
+        let managed = try tempDir("crowd-corveil-bin")
+        defer {
+            try? FileManager.default.removeItem(at: devRoot)
+            try? FileManager.default.removeItem(at: managed)
+        }
+        let source = devRoot.appendingPathComponent("out/corveil-darwin-arm64")
+        try FileManager.default.createDirectory(
+            at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("source-build".utf8).write(to: source)
+
+        var config = AppConfig()
+        #expect(config.defaults.corveilAutoUpdate)
+        config.defaults.binaries["corveil"] = source.path
+        try ConfigStore.saveConfig(config, devRoot: devRoot.path)
+
+        let binary = Data("corveil-fixture".utf8)
+        let checksums = "\(fakeHash)  \(assetName())\n"
+        let service = CorveilAutoUpdateService(
+            devRoot: devRoot.path,
+            managedRoot: managed,
+            userAgent: "Crow/test",
+            transport: transport(binary: binary, checksums: checksums),
+            hooks: hooks())
+        let status = await service.runCheck()
+        #expect(status.state == .updated)
+        #expect(status.state != .skippedOverride)
+        let dest = CorveilAutoUpdate.binaryURL(tag: "v0.4.32", managedRoot: managed)
+        #expect(ConfigStore.loadConfig(devRoot: devRoot.path)?.defaults.binaries["corveil"]
+                == dest.path)
+        #expect(try Data(contentsOf: source) == Data("source-build".utf8))
+    }
+
+    @Test func leavesSourceBuildAloneWhenAutoUpdateOff() async throws {
+        let devRoot = try tempDir("crowd-corveil-dev")
+        let managed = try tempDir("crowd-corveil-bin")
+        defer {
+            try? FileManager.default.removeItem(at: devRoot)
+            try? FileManager.default.removeItem(at: managed)
+        }
+        let source = "/Users/jane/dev/corveil/out/corveil"
+        var config = AppConfig()
+        config.defaults.corveilAutoUpdate = false
+        config.defaults.corveilAutoUpdateOptOut = true
+        config.defaults.binaries["corveil"] = source
+        try ConfigStore.saveConfig(config, devRoot: devRoot.path)
+
+        let hits = HitCount()
+        let transport: @Sendable (URLRequest) async throws -> (Data, URLResponse) = { request in
+            hits.value += 1
+            return (Data(), HTTPURLResponse(
+                url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
+        }
+        let service = CorveilAutoUpdateService(
+            devRoot: devRoot.path,
+            managedRoot: managed,
+            userAgent: "Crow/test",
+            transport: transport,
+            hooks: hooks())
+        let status = await service.runCheck()
+        #expect(status.state == .disabled)
+        #expect(hits.value == 0)
+        #expect(ConfigStore.loadConfig(devRoot: devRoot.path)?.defaults.binaries["corveil"]
+                == source)
+        #expect(ConfigStore.loadConfig(devRoot: devRoot.path)?.defaults.corveilAutoUpdate == false)
+    }
+
+    @Test func oneShotLeftoverFalseAndSourceBuildAdopts() async throws {
+        let devRoot = try tempDir("crowd-corveil-dev")
+        let managed = try tempDir("crowd-corveil-bin")
+        defer {
+            try? FileManager.default.removeItem(at: devRoot)
+            try? FileManager.default.removeItem(at: managed)
+        }
+        let source = devRoot.appendingPathComponent("out/corveil-darwin-arm64")
+        try FileManager.default.createDirectory(
+            at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("source-build".utf8).write(to: source)
+
+        var config = AppConfig()
+        config.defaults.corveilAutoUpdate = false
+        config.defaults.corveilAutoUpdateOptOut = false
+        config.defaults.binaries["corveil"] = source.path
+        try ConfigStore.saveConfig(config, devRoot: devRoot.path)
+
+        let binary = Data("corveil-fixture".utf8)
+        let checksums = "\(fakeHash)  \(assetName())\n"
+        let service = CorveilAutoUpdateService(
+            devRoot: devRoot.path,
+            managedRoot: managed,
+            userAgent: "Crow/test",
+            transport: transport(binary: binary, checksums: checksums),
+            hooks: hooks())
+        let status = await service.runCheck()
+        #expect(status.state == .updated)
+        let dest = CorveilAutoUpdate.binaryURL(tag: "v0.4.32", managedRoot: managed)
+        let onDisk = try #require(ConfigStore.loadConfig(devRoot: devRoot.path))
+        #expect(onDisk.defaults.corveilAutoUpdate)
+        #expect(onDisk.defaults.corveilAutoUpdateOptOut)
+        #expect(onDisk.defaults.binaries["corveil"] == dest.path)
+        #expect(try Data(contentsOf: source) == Data("source-build".utf8))
+    }
+
+    @Test func doesNotReAdoptAfterOptOutSentinel() async throws {
+        let devRoot = try tempDir("crowd-corveil-dev")
+        let managed = try tempDir("crowd-corveil-bin")
+        defer {
+            try? FileManager.default.removeItem(at: devRoot)
+            try? FileManager.default.removeItem(at: managed)
+        }
+        let source = "/Users/jane/dev/corveil/out/corveil"
+        var config = AppConfig()
+        config.defaults.corveilAutoUpdate = false
+        config.defaults.corveilAutoUpdateOptOut = true
+        config.defaults.binaries["corveil"] = source
+        try ConfigStore.saveConfig(config, devRoot: devRoot.path)
+
+        let hits = HitCount()
+        let transport: @Sendable (URLRequest) async throws -> (Data, URLResponse) = { request in
+            hits.value += 1
+            return (Data(), HTTPURLResponse(
+                url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
+        }
+        let service = CorveilAutoUpdateService(
+            devRoot: devRoot.path,
+            managedRoot: managed,
+            userAgent: "Crow/test",
+            transport: transport,
+            hooks: hooks())
+        let status = await service.runCheck()
+        #expect(status.state == .disabled)
+        #expect(hits.value == 0)
+        let onDisk = try #require(ConfigStore.loadConfig(devRoot: devRoot.path))
+        #expect(onDisk.defaults.corveilAutoUpdate == false)
+        #expect(onDisk.defaults.corveilAutoUpdateOptOut)
+        #expect(onDisk.defaults.binaries["corveil"] == source)
+    }
+
+    @Test func leftoverOfflineKeepsSourceBuildPath() async throws {
+        let devRoot = try tempDir("crowd-corveil-dev")
+        let managed = try tempDir("crowd-corveil-bin")
+        defer {
+            try? FileManager.default.removeItem(at: devRoot)
+            try? FileManager.default.removeItem(at: managed)
+        }
+        let source = devRoot.appendingPathComponent("out/corveil")
+        try FileManager.default.createDirectory(
+            at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("source-build".utf8).write(to: source)
+
+        var config = AppConfig()
+        config.defaults.corveilAutoUpdate = false
+        config.defaults.binaries["corveil"] = source.path
+        try ConfigStore.saveConfig(config, devRoot: devRoot.path)
+
+        let transport: @Sendable (URLRequest) async throws -> (Data, URLResponse) = { _ in
+            throw URLError(.notConnectedToInternet)
+        }
+        let service = CorveilAutoUpdateService(
+            devRoot: devRoot.path,
+            managedRoot: managed,
+            userAgent: "Crow/test",
+            transport: transport,
+            hooks: hooks())
+        let status = await service.runCheck()
+        #expect(status.state == .failed)
+        #expect(status.message?.contains("Could not fetch") == true)
+        #expect(try Data(contentsOf: source) == Data("source-build".utf8))
+        let onDisk = try #require(ConfigStore.loadConfig(devRoot: devRoot.path))
+        #expect(onDisk.defaults.binaries["corveil"] == source.path)
+        #expect(onDisk.defaults.corveilAutoUpdate)
+        #expect(onDisk.defaults.corveilAutoUpdateOptOut)
+    }
+
+    @Test func checkIfDueRunsLeftoverAdoptWhenEnabledFlagIsFalse() async throws {
         let devRoot = try tempDir("crowd-corveil-dev")
         let managed = try tempDir("crowd-corveil-bin")
         defer {
@@ -92,20 +267,21 @@ import FoundationNetworking
             try? FileManager.default.removeItem(at: managed)
         }
         var config = AppConfig()
-        #expect(config.defaults.corveilAutoUpdate)
+        config.defaults.corveilAutoUpdate = false
         config.defaults.binaries["corveil"] = "/Users/jane/dev/corveil/out/corveil"
         try ConfigStore.saveConfig(config, devRoot: devRoot.path)
 
+        let binary = Data("corveil-fixture".utf8)
+        let checksums = "\(fakeHash)  \(assetName())\n"
         let service = CorveilAutoUpdateService(
             devRoot: devRoot.path,
             managedRoot: managed,
             userAgent: "Crow/test",
-            transport: transport(binary: Data("bin".utf8), checksums: ""),
+            transport: transport(binary: binary, checksums: checksums),
             hooks: hooks())
-        let status = await service.runCheck()
-        #expect(status.state == .skippedOverride)
-        #expect(ConfigStore.loadConfig(devRoot: devRoot.path)?.defaults.binaries["corveil"]
-                == "/Users/jane/dev/corveil/out/corveil")
+        let status = await service.checkIfDue(enabled: false, intervalHours: 1)
+        #expect(status.state == .updated)
+        #expect(ConfigStore.loadConfig(devRoot: devRoot.path)?.defaults.corveilAutoUpdate == true)
     }
 
     @Test func checksumMismatchKeepsLastGood() async throws {
@@ -137,6 +313,39 @@ import FoundationNetworking
         #expect(status.message?.contains("Checksum mismatch") == true)
         #expect(FileManager.default.fileExists(atPath: lastGood.path))
         #expect(ConfigStore.loadConfig(devRoot: devRoot.path)?.defaults.binaries["corveil"] == nil)
+    }
+
+    @Test func checksumMismatchKeepsSourceBuildPath() async throws {
+        let devRoot = try tempDir("crowd-corveil-dev")
+        let managed = try tempDir("crowd-corveil-bin")
+        defer {
+            try? FileManager.default.removeItem(at: devRoot)
+            try? FileManager.default.removeItem(at: managed)
+        }
+        let source = devRoot.appendingPathComponent("out/corveil")
+        try FileManager.default.createDirectory(
+            at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("source-build".utf8).write(to: source)
+
+        var config = AppConfig()
+        config.defaults.corveilAutoUpdate = true
+        config.defaults.binaries["corveil"] = source.path
+        try ConfigStore.saveConfig(config, devRoot: devRoot.path)
+
+        let binary = Data("new-bytes".utf8)
+        let checksums = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  \(assetName())\n"
+        let service = CorveilAutoUpdateService(
+            devRoot: devRoot.path,
+            managedRoot: managed,
+            userAgent: "Crow/test",
+            transport: transport(binary: binary, checksums: checksums),
+            hooks: hooks())
+        let status = await service.runCheck()
+        #expect(status.state == .failed)
+        #expect(status.message?.contains("Checksum mismatch") == true)
+        #expect(try Data(contentsOf: source) == Data("source-build".utf8))
+        #expect(ConfigStore.loadConfig(devRoot: devRoot.path)?.defaults.binaries["corveil"]
+                == source.path)
     }
 
     @Test func successfulDownloadLinksManagedBinary() async throws {

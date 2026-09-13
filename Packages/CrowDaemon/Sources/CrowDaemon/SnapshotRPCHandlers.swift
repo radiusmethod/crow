@@ -184,6 +184,11 @@ func makeSnapshotHandlers(
                 merged = try ConfigStore.withConfigLock {
                     let current = ConfigStore.loadConfig(devRoot: devRoot)
                     var m = SettingsSecrets.preservingSecrets(incoming: incoming, current: current)
+                    m.defaults.corveilAutoUpdateOptOut = ConfigDefaults.stickyOptOutSentinel(
+                        incoming: incoming.defaults.corveilAutoUpdateOptOut,
+                        stored: current?.defaults.corveilAutoUpdateOptOut,
+                        storedAutoUpdate: current?.defaults.corveilAutoUpdate,
+                        incomingAutoUpdate: incoming.defaults.corveilAutoUpdate)
                     // CROW-2841: a workspace just added from the web arrives with no
                     // gateway (the web can't author one). On a managed / design-partner
                     // install, default each genuinely-new workspace to the org gateway

@@ -11,8 +11,10 @@ import FoundationNetworking
 /// `corveil/corveil-releases` (CROW-1210).
 ///
 /// Failures never throw and never break startup: the last-good binary stays
-/// linked and a warning is logged. An operator-set `binaries["corveil"]`
-/// outside the managed dir is never overwritten.
+/// linked and a warning is logged. When auto-update is on, Crow owns
+/// `binaries["corveil"]` (CROW-1247) — a previous source-build path is adopted,
+/// not skipped. When it is off, an operator path (including `out/`) is left
+/// alone. Do not delete the previous binary.
 actor CorveilAutoUpdateService {
     struct Hooks: Sendable {
         var verify: @Sendable (String) -> CorveilCLI.Outcome
@@ -60,9 +62,10 @@ actor CorveilAutoUpdateService {
         self.onSkillWarning = onSkillWarning
     }
 
-    /// Run when enabled and the interval has elapsed, or when `force`.
+    /// Run when enabled (or leftover-adopt applies) and the interval has elapsed,
+    /// or when `force`.
     func checkIfDue(enabled: Bool, intervalHours: Int, force: Bool = false) async -> CorveilAutoUpdateStatus {
-        guard enabled else {
+        if !enabled, !isLeftoverAdopt() {
             let status = CorveilAutoUpdateStatus(
                 state: .disabled,
                 checkedAtMs: currentTimeMs())
@@ -92,20 +95,22 @@ actor CorveilAutoUpdateService {
     private func performCheck() async -> CorveilAutoUpdateStatus {
         let checkedAt = currentTimeMs()
         let config = ConfigStore.loadConfig(devRoot: devRoot) ?? AppConfig()
-        guard config.defaults.corveilAutoUpdate else {
+        switch CorveilAutoUpdate.autoManageDecision(
+            autoUpdateEnabled: config.defaults.corveilAutoUpdate,
+            optOutSentinel: config.defaults.corveilAutoUpdateOptOut,
+            configuredPath: config.defaults.binaries["corveil"],
+            managedRoot: managedRoot
+        ) {
+        case .disabled:
             return CorveilAutoUpdateStatus(state: .disabled, checkedAtMs: checkedAt)
+        case .leftoverAdopt:
+            CrowLog.info("[CorveilAutoUpdate] leftover default-off + source-build — adopting onto the auto-downloader")
+            persistLeftoverAdopt()
+        case .manage:
+            break
         }
+
         let configured = config.defaults.binaries["corveil"]
-        guard CorveilAutoUpdate.shouldAutoManage(
-            configuredPath: configured, managedRoot: managedRoot
-        ) else {
-            CrowLog.info("[CorveilAutoUpdate] skipped — binaries[\"corveil\"] is an operator override")
-            return CorveilAutoUpdateStatus(
-                state: .skippedOverride,
-                path: configured,
-                message: "Operator-set corveil path is left alone",
-                checkedAtMs: checkedAt)
-        }
 
         let release: CorveilReleaseClient.Release
         do {
@@ -214,6 +219,8 @@ actor CorveilAutoUpdateService {
         do {
             try mutateConfig(devRoot: devRoot) { config in
                 config.defaults.binaries["corveil"] = dest.path
+                config.defaults.corveilAutoUpdate = true
+                config.defaults.corveilAutoUpdateOptOut = true
             }
         } catch {
             return failed("Installed \(release.tag) but could not persist path: \(error.localizedDescription)",
@@ -235,6 +242,29 @@ actor CorveilAutoUpdateService {
             path: dest.path,
             message: outcome.message,
             checkedAtMs: checkedAt)
+    }
+
+    private func isLeftoverAdopt() -> Bool {
+        let config = ConfigStore.loadConfig(devRoot: devRoot) ?? AppConfig()
+        return CorveilAutoUpdate.autoManageDecision(
+            autoUpdateEnabled: config.defaults.corveilAutoUpdate,
+            optOutSentinel: config.defaults.corveilAutoUpdateOptOut,
+            configuredPath: config.defaults.binaries["corveil"],
+            managedRoot: managedRoot) == .leftoverAdopt
+    }
+
+    /// Flip leftover default-off onto the downloader and stamp the sentinel so a
+    /// later explicit false is a real opt-out. Best-effort: a persist failure
+    /// does not abort the download (startup never fails).
+    private func persistLeftoverAdopt() {
+        do {
+            try mutateConfig(devRoot: devRoot) { config in
+                config.defaults.corveilAutoUpdate = true
+                config.defaults.corveilAutoUpdateOptOut = true
+            }
+        } catch {
+            CrowLog.info("[CorveilAutoUpdate] could not persist leftover adopt: \(error.localizedDescription)")
+        }
     }
 
     private func failed(
