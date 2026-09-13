@@ -62,6 +62,36 @@ final class SessionSurfaceController {
             }
         }
 
+        // CROW-1244: sessions that only have an add-link ticket row
+        // (`ticketURL` nil) still count as ticketed. Copy the first `.ticket`
+        // link into ticketURL (+ provider/number) so auto-complete,
+        // mark-in-review, and `can_set_project_status` see the same ticket
+        // the sidebar already shows. Persist so the heal is one-shot.
+        var adoptedTicketLink = false
+        for i in appState.sessions.indices {
+            let sid = appState.sessions[i].id
+            let sessionLinks = data.links.filter { $0.sessionID == sid }
+            guard appState.sessions[i].adoptTicketMetadataFromLinks(sessionLinks) else { continue }
+            adoptedTicketLink = true
+            if appState.sessions[i].codeProvider == nil,
+               appState.sessions[i].provider?.isTaskOnly == true {
+                let wtPath = appState.worktrees[sid]?
+                    .first(where: { $0.isPrimary })?.worktreePath
+                    ?? appState.worktrees[sid]?.first?.worktreePath
+                appState.sessions[i].codeProvider = SessionService.resolvedCodeProvider(
+                    forTask: appState.sessions[i].provider, worktreePath: wtPath)
+            }
+        }
+        if adoptedTicketLink {
+            store.mutate { data in
+                for session in appState.sessions {
+                    if let i = data.sessions.firstIndex(where: { $0.id == session.id }) {
+                        data.sessions[i] = session
+                    }
+                }
+            }
+        }
+
         // Backfill provider from ticketURL for sessions that predate provider tracking
         for i in appState.sessions.indices {
             if appState.sessions[i].provider == nil, let url = appState.sessions[i].ticketURL {

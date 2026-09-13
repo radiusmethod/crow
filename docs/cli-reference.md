@@ -283,6 +283,8 @@ Add a link (issue, PR, repo, or custom) to a session.
 
 `--type pr` is **idempotent** (CROW-1220): if the session already has a `.pr` link, or this URL is already linked, the call returns the existing `link_id` with `"skipped": true` and does not stack extras. Automation uses `links.first(where: { $0.linkType == .pr })`.
 
+`--type ticket` also writes `session.ticketURL` / `provider` / `ticketNumber` when those are unset (CROW-1244), matching `set-ticket`, so auto-complete, `mark-in-review`, and `can_set_project_status` see the same ticket the sidebar already shows. An existing `ticketURL` is not overwritten.
+
 ```bash
 crow add-link --session <uuid> --label "Issue #123" --url "https://..." --type ticket
 ```

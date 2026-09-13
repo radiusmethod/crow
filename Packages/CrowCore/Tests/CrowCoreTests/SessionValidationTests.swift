@@ -24,3 +24,17 @@ import Testing
 @Test func detectEmptyURLProvider() {
     #expect(Validation.detectProviderFromURL("") == nil)
 }
+
+@Test func issueNumberFromGitHubIssueURL() {
+    #expect(Validation.issueNumber(fromTicketURL: "https://github.com/org/repo/issues/42") == 42)
+    #expect(Validation.issueNumber(fromTicketURL: "https://github.com/org/repo/issues/42?tab=comments") == 42)
+    #expect(Validation.issueNumber(fromTicketURL: "https://github.com/org/repo/pull/42") == nil)
+}
+
+@Test func issueNumberFromGitLabIssueURL() {
+    #expect(Validation.issueNumber(fromTicketURL: "https://gitlab.com/org/repo/-/issues/7") == 7)
+}
+
+@Test func issueNumberFromJiraKey() {
+    #expect(Validation.issueNumber(fromTicketURL: "https://acme.atlassian.net/browse/MAXX-10") == 10)
+}

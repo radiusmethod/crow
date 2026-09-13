@@ -31,6 +31,25 @@ import Testing
     #expect(appState.assignedIssue(for: session) == nil)
 }
 
+@MainActor @Test func assignedIssueForSessionMatchesTicketLinkWhenTicketURLNil() {
+    // CROW-1244: a cosmetic `add-link --type ticket` row is the same ticket
+    // as `set-ticket`. Labels / board matching must not require ticketURL.
+    let appState = AppState()
+    let issue = AssignedIssue(
+        id: "github:org/repo#3296", number: 3296, title: "Dead AIGateway",
+        state: "closed", url: "https://github.com/org/repo/issues/3296",
+        repo: "org/repo", labels: [LabelInfo(name: "bug")], provider: .github
+    )
+    appState.assignedIssues = [issue]
+    let session = Session(name: "link-only")
+    appState.links[session.id] = [
+        SessionLink(sessionID: session.id, label: "Issue #3296",
+                    url: "https://github.com/org/repo/issues/3296", linkType: .ticket)
+    ]
+    #expect(appState.assignedIssue(for: session)?.id == "github:org/repo#3296")
+    #expect(appState.labels(forSession: session) == [LabelInfo(name: "bug")])
+}
+
 @MainActor @Test func assignedIssueForSessionReturnsNilWhenNoMatch() {
     let appState = AppState()
     appState.assignedIssues = [

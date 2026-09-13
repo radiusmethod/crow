@@ -217,8 +217,15 @@ public final class PRLinkReconciler {
 
     /// Instance convenience over ``canSetProjectStatus(session:providerManager:)``
     /// using this tracker's provider manager — the daemon's `list-sessions` gate.
+    /// Infers `provider` from the session's ticket URL or first `.ticket` link
+    /// when `set-ticket` never wrote it (CROW-1244).
     public func canSetProjectStatus(for session: Session) -> Bool {
-        Self.canSetProjectStatus(session: session, providerManager: providerManager)
+        var resolved = session
+        if resolved.provider == nil,
+           let url = resolved.effectiveTicketURL(from: appState.links(for: resolved.id)) {
+            resolved.provider = Validation.detectProviderFromURL(url)
+        }
+        return Self.canSetProjectStatus(session: resolved, providerManager: providerManager)
     }
 
     /// For each non-archived, non-review session missing a `.pr` link with a

@@ -292,6 +292,59 @@ import Testing
     #expect(Session(name: "none").ticketBadgeLabel == nil)
 }
 
+@Test func effectiveTicketURLPrefersSetTicket() {
+    let session = Session(name: "s", ticketURL: "https://github.com/org/repo/issues/1")
+    let links = [
+        SessionLink(sessionID: session.id, label: "Issue #99",
+                    url: "https://github.com/org/repo/issues/99", linkType: .ticket)
+    ]
+    #expect(session.effectiveTicketURL(from: links) == "https://github.com/org/repo/issues/1")
+}
+
+@Test func effectiveTicketURLFallsBackToTicketLink() {
+    let session = Session(name: "s")
+    let links = [
+        SessionLink(sessionID: session.id, label: "PR",
+                    url: "https://github.com/org/repo/pull/2", linkType: .pr),
+        SessionLink(sessionID: session.id, label: "Issue #3296",
+                    url: "https://github.com/corveil/corveil/issues/3296", linkType: .ticket),
+    ]
+    #expect(session.effectiveTicketURL(from: links) == "https://github.com/corveil/corveil/issues/3296")
+}
+
+@Test func effectiveTicketURLNilWithoutTicketURLOrLink() {
+    let session = Session(name: "s")
+    let links = [
+        SessionLink(sessionID: session.id, label: "PR",
+                    url: "https://github.com/org/repo/pull/2", linkType: .pr)
+    ]
+    #expect(session.effectiveTicketURL(from: links) == nil)
+}
+
+@Test func adoptTicketMetadataFromLinksFillsNilTicketURL() {
+    var session = Session(name: "s")
+    let links = [
+        SessionLink(sessionID: session.id, label: "Issue #42",
+                    url: "https://github.com/org/repo/issues/42", linkType: .ticket)
+    ]
+    let adopted = session.adoptTicketMetadataFromLinks(links)
+    #expect(adopted)
+    #expect(session.ticketURL == "https://github.com/org/repo/issues/42")
+    #expect(session.provider == .github)
+    #expect(session.ticketNumber == 42)
+}
+
+@Test func adoptTicketMetadataFromLinksDoesNotOverwriteSetTicket() {
+    var session = Session(name: "s", ticketURL: "https://github.com/org/repo/issues/1", provider: .github)
+    let links = [
+        SessionLink(sessionID: session.id, label: "Issue #99",
+                    url: "https://github.com/org/repo/issues/99", linkType: .ticket)
+    ]
+    let adopted = session.adoptTicketMetadataFromLinks(links)
+    #expect(adopted == false)
+    #expect(session.ticketURL == "https://github.com/org/repo/issues/1")
+}
+
 // MARK: - Enum Raw Values
 
 @Test func sessionKindRawValues() {

@@ -28,7 +28,7 @@ public final class SessionCompletionController {
         let inReviewURLs = Set(issues.filter { $0.projectStatus == .inReview }.map(\.url))
 
         for session in appState.activeSessions {
-            guard let ticketURL = session.ticketURL else { continue }
+            guard let ticketURL = session.effectiveTicketURL(from: appState.links(for: session.id)) else { continue }
             if inReviewURLs.contains(ticketURL) {
                 print("[IssueTracker] Session '\(session.name)' — ticket is In Review on project board, updating session status")
                 appState.onSetSessionInReview?(session.id)
@@ -61,6 +61,10 @@ public final class SessionCompletionController {
     /// or `CLOSED`; an issue-only session needs its ticket URL in
     /// `closedIssueURLs`. Missing-from-open is no longer sufficient.
     ///
+    /// A session is ticketed when `set-ticket` wrote `ticketURL` **or** when
+    /// it has an `add-link --type ticket` row (CROW-1244). The two stores are
+    /// the same product concept; auto-complete used to ignore the link.
+    ///
     /// `prDataComplete` is `false` when the stale-PR follow-up errored
     /// (rate-limited, non-zero exit, parse failure). In that case, PR-linked
     /// completions are skipped entirely to avoid completing on stale data.
@@ -72,7 +76,10 @@ public final class SessionCompletionController {
         prsByURL: [String: ViewerPR],
         prDataComplete: Bool
     ) -> CompletionResult {
-        let withTickets = candidateSessions.filter { $0.ticketURL != nil }
+        func ticketURL(for session: Session) -> String? {
+            session.effectiveTicketURL(from: linksBySessionID[session.id] ?? [])
+        }
+        let withTickets = candidateSessions.filter { ticketURL(for: $0) != nil }
 
         // Floor guard: if we have candidates but openIssueURLs is empty, the
         // consolidated query likely returned partial data. Skip this cycle.
@@ -86,7 +93,7 @@ public final class SessionCompletionController {
 
         var decisions: [CompletionDecision] = []
         for session in withTickets {
-            guard let ticketURL = session.ticketURL else { continue }
+            guard let ticketURL = ticketURL(for: session) else { continue }
             if openIssueURLs.contains(ticketURL) { continue }
 
             let sessionLinks = linksBySessionID[session.id] ?? []
@@ -265,7 +272,9 @@ public final class SessionCompletionController {
         )
 
         if result.floorGuardTriggered {
-            let count = candidateSessions.filter { $0.ticketURL != nil }.count
+            let count = candidateSessions.filter {
+                $0.effectiveTicketURL(from: linksBySessionID[$0.id] ?? []) != nil
+            }.count
             print("[IssueTracker] skipping auto-complete — openIssues empty with \(count) candidate sessions (likely partial fetch)")
             return
         }

@@ -1153,10 +1153,11 @@ public final class IssueTracker {
         guard !session.isManager else {
             throw SessionActionError.managerSession("mark-in-review")
         }
-        guard let ticketURL = session.ticketURL, !ticketURL.isEmpty else {
+        guard let ticketURL = session.effectiveTicketURL(from: appState.links(for: session.id)),
+              !ticketURL.isEmpty else {
             throw SessionActionError.noTicketURL("mark-in-review")
         }
-        guard let taskProvider = session.provider else {
+        guard let taskProvider = session.provider ?? Validation.detectProviderFromURL(ticketURL) else {
             throw SessionActionError.noProvider("mark-in-review")
         }
 
@@ -1257,10 +1258,11 @@ public final class IssueTracker {
         guard !session.isManager else {
             throw SessionActionError.managerSession("mark-issue-done")
         }
-        guard let ticketURL = session.ticketURL, !ticketURL.isEmpty else {
+        guard let ticketURL = session.effectiveTicketURL(from: appState.links(for: session.id)),
+              !ticketURL.isEmpty else {
             throw SessionActionError.noTicketURL("mark-issue-done")
         }
-        guard let taskProvider = session.provider else {
+        guard let taskProvider = session.provider ?? Validation.detectProviderFromURL(ticketURL) else {
             throw SessionActionError.noProvider("mark-issue-done")
         }
 
@@ -1328,8 +1330,8 @@ public final class IssueTracker {
     /// therefore reports failures as `SessionActionError` (#876).
     public func transitionTicket(sessionID: UUID, to status: TicketStatus) async {
         guard let session = appState.sessions.first(where: { $0.id == sessionID }),
-              let ticketURL = session.ticketURL,
-              let taskProvider = session.provider else { return }
+              let ticketURL = session.effectiveTicketURL(from: appState.links(for: session.id)),
+              let taskProvider = session.provider ?? Validation.detectProviderFromURL(ticketURL) else { return }
 
         let backend: TaskBackend
         if taskProvider == .jira {
@@ -1361,7 +1363,9 @@ public final class IssueTracker {
     @discardableResult
     public func resyncJira() async -> Int {
         let targets: [(id: UUID, status: TicketStatus)] = appState.sessions.compactMap { session in
-            guard session.provider == .jira, session.ticketURL != nil else { return nil }
+            let ticketURL = session.effectiveTicketURL(from: appState.links(for: session.id))
+            let provider = session.provider ?? ticketURL.flatMap(Validation.detectProviderFromURL)
+            guard provider == .jira, ticketURL != nil else { return nil }
             let status: TicketStatus
             switch session.status {
             case .inReview: status = .inReview

@@ -29,7 +29,7 @@ public enum SessionActionError: Error, LocalizedError, Equatable {
         case .managerSession(let verb):
             "\(verb) does not apply to Manager sessions"
         case .noTicketURL(let verb):
-            "\(verb) needs a linked ticket — attach one with `crow set-ticket --url …`"
+            "\(verb) needs a linked ticket — attach one with `crow set-ticket --url …` or `crow add-link --type ticket`"
         case .noPRLink(let verb):
             "\(verb) needs a linked PR — attach one with `crow add-link --type pr --url …`"
         case .noProvider(let verb):

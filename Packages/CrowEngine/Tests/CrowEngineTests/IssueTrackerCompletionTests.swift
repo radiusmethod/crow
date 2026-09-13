@@ -55,6 +55,10 @@ struct IssueTrackerCompletionTests {
         SessionLink(sessionID: sessionID, label: "PR", url: url, linkType: .pr)
     }
 
+    private func ticketLink(sessionID: UUID, url: String) -> SessionLink {
+        SessionLink(sessionID: sessionID, label: "Issue", url: url, linkType: .ticket)
+    }
+
     private func makeViewerPR(
         url: String,
         state: String,
@@ -108,8 +112,9 @@ struct IssueTrackerCompletionTests {
 
     @Test
     func floorGuardDoesNotFireWhenNoCandidatesHaveTickets() {
-        // If no candidate sessions have ticket URLs, an empty openIssues
-        // set is just a user with no assigned issues — not a partial fetch.
+        // If no candidate sessions have ticket URLs *or* ticket links, an
+        // empty openIssues set is just a user with no assigned issues — not
+        // a partial fetch (CROW-1244: a ticket *link* now counts as a ticket).
         let session = makeSession(ticketURL: nil)
         let result = IssueTracker.decideSessionCompletions(
             candidateSessions: [session],
@@ -120,6 +125,22 @@ struct IssueTrackerCompletionTests {
             prDataComplete: true
         )
         #expect(result.floorGuardTriggered == false)
+        #expect(result.completions.isEmpty)
+    }
+
+    @Test
+    func floorGuardFiresWhenCandidatesHaveTicketLinksButNoTicketURL() {
+        let session = makeSession(ticketURL: nil)
+        let ticketURL = "https://github.com/foo/bar/issues/1"
+        let result = IssueTracker.decideSessionCompletions(
+            candidateSessions: [session],
+            linksBySessionID: [session.id: [ticketLink(sessionID: session.id, url: ticketURL)]],
+            openIssueURLs: [],
+            closedIssueURLs: [],
+            prsByURL: [:],
+            prDataComplete: true
+        )
+        #expect(result.floorGuardTriggered == true)
         #expect(result.completions.isEmpty)
     }
 
@@ -268,6 +289,68 @@ struct IssueTrackerCompletionTests {
         )
         // Still open trumps closed — a session whose ticket is in the open
         // set must not be completed regardless of other payload contents.
+        #expect(result.completions.isEmpty)
+    }
+
+    @Test
+    func mergedPRCompletesWhenTicketIsOnlyALink() {
+        // CROW-1244: work-session auto-complete used to require `ticketURL`
+        // (`set-ticket`). A session whose ticket is only an `add-link --type
+        // ticket` row — with a MERGED PR — stayed Active forever. Do not
+        // require a Claude Code terminal as extra evidence.
+        let session = makeSession(ticketURL: nil)
+        let ticketURL = "https://github.com/foo/bar/issues/1"
+        let prURL = "https://github.com/foo/bar/pull/2"
+        let result = IssueTracker.decideSessionCompletions(
+            candidateSessions: [session],
+            linksBySessionID: [session.id: [
+                ticketLink(sessionID: session.id, url: ticketURL),
+                prLink(sessionID: session.id, url: prURL),
+            ]],
+            openIssueURLs: ["https://github.com/foo/bar/issues/other"],
+            closedIssueURLs: [ticketURL],
+            prsByURL: [prURL: makeViewerPR(url: prURL, state: "MERGED")],
+            prDataComplete: true
+        )
+        #expect(result.floorGuardTriggered == false)
+        #expect(result.completions == [
+            IssueTracker.CompletionDecision(sessionID: session.id, reason: "PR merged")
+        ])
+    }
+
+    @Test
+    func issueOnlyCompletesViaClosedIssueURLWhenTicketIsOnlyALink() {
+        let ticketURL = "https://github.com/foo/bar/issues/1"
+        let session = makeSession(ticketURL: nil)
+        let result = IssueTracker.decideSessionCompletions(
+            candidateSessions: [session],
+            linksBySessionID: [session.id: [ticketLink(sessionID: session.id, url: ticketURL)]],
+            openIssueURLs: ["https://github.com/foo/bar/issues/other"],
+            closedIssueURLs: [ticketURL],
+            prsByURL: [:],
+            prDataComplete: true
+        )
+        #expect(result.completions == [
+            IssueTracker.CompletionDecision(sessionID: session.id, reason: "issue closed")
+        ])
+    }
+
+    @Test
+    func sessionStillInOpenIssuesViaTicketLinkIsSkipped() {
+        let ticketURL = "https://github.com/foo/bar/issues/1"
+        let session = makeSession(ticketURL: nil)
+        let prURL = "https://github.com/foo/bar/pull/2"
+        let result = IssueTracker.decideSessionCompletions(
+            candidateSessions: [session],
+            linksBySessionID: [session.id: [
+                ticketLink(sessionID: session.id, url: ticketURL),
+                prLink(sessionID: session.id, url: prURL),
+            ]],
+            openIssueURLs: [ticketURL],
+            closedIssueURLs: [],
+            prsByURL: [prURL: makeViewerPR(url: prURL, state: "MERGED")],
+            prDataComplete: true
+        )
         #expect(result.completions.isEmpty)
     }
 

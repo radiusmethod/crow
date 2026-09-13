@@ -35,6 +35,11 @@ func makeEngineLinkHandlers(
                 let existing = capturedAppState.links(for: sessionID)
                 if let match = existing.first(where: { $0.url == url })
                     ?? (linkType == .pr ? existing.first(where: { $0.linkType == .pr }) : nil) {
+                    // Re-running `add-link --type ticket` on an existing row
+                    // still heals a missing `ticketURL` (CROW-1244).
+                    if linkType == .ticket || match.linkType == .ticket {
+                        adoptTicketLink(sessionID: sessionID, appState: capturedAppState, store: capturedStore)
+                    }
                     return [
                         "link_id": .string(match.id.uuidString),
                         "skipped": .bool(true),
@@ -42,6 +47,9 @@ func makeEngineLinkHandlers(
                 }
                 capturedAppState.links[sessionID, default: []].append(link)
                 capturedStore.mutate { $0.links.append(link) }
+                if linkType == .ticket {
+                    adoptTicketLink(sessionID: sessionID, appState: capturedAppState, store: capturedStore)
+                }
                 return [
                     "link_id": .string(link.id.uuidString),
                     "skipped": .bool(false),
@@ -142,4 +150,28 @@ func makeEngineLinkHandlers(
         },
     ]
     return handlers
+}
+
+/// Fill `session.ticketURL` / provider / number from the first `.ticket` link
+/// when `set-ticket` never ran (CROW-1244). Mirrors `set-ticket`'s provider
+/// detection, including pairing a task-only tracker with the workspace's code
+/// provider. No-op when `ticketURL` is already set.
+@MainActor
+private func adoptTicketLink(sessionID: UUID, appState: AppState, store: JSONStore) {
+    guard let idx = appState.sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+    let links = appState.links(for: sessionID)
+    guard appState.sessions[idx].adoptTicketMetadataFromLinks(links) else { return }
+    if appState.sessions[idx].codeProvider == nil,
+       appState.sessions[idx].provider?.isTaskOnly == true {
+        let wtPath = appState.worktrees[sessionID]?
+            .first(where: { $0.isPrimary })?.worktreePath
+            ?? appState.worktrees[sessionID]?.first?.worktreePath
+        appState.sessions[idx].codeProvider = SessionService.resolvedCodeProvider(
+            forTask: appState.sessions[idx].provider, worktreePath: wtPath)
+    }
+    store.mutate { data in
+        if let i = data.sessions.firstIndex(where: { $0.id == sessionID }) {
+            data.sessions[i] = appState.sessions[idx]
+        }
+    }
 }
