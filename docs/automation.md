@@ -12,7 +12,7 @@ A fully automated ticket walks through these stages:
 4. **PR open** — when Claude pushes the branch and you open a PR, Crow auto-suggests opening one if you forget (#213).
 5. **Review** — repos that opt in get a review session auto-started when the PR turns reviewable (#209). The review board lets you batch-start, bulk-delete, and filter sessions (#207, #210, #212, #220, #226, #231).
 6. **Status response** — Crow can prompt Claude to fix changes-requested reviews and failing CI runs without you typing anything (#214).
-7. **Completion** — the session moves to Completed once the PR is merged or the issue is closed *and* the session shows positive evidence the work was attempted (#182). Session analytics are emitted via Claude Code's OpenTelemetry pipeline (#137).
+7. **Completion** — the session moves to Completed once its linked PR is MERGED/CLOSED or its ticket is in the recently-closed set (positive evidence — not mere absence from the open-issue list; #182). The ticket may be `set-ticket` **or** an `add-link --type ticket` row (CROW-1244). Session analytics are emitted via Claude Code's OpenTelemetry pipeline (#137).
 
 ## Settings → Automation tab
 
@@ -228,7 +228,7 @@ The Manager terminal launches in `--permission-mode auto` by default so orchestr
 
 ### #182 — Positive-evidence auto-complete
 
-Auto-complete (PR merged / issue closed) no longer fires solely on the GitHub signal. The session must also show positive evidence that work was attempted — at minimum a started Claude Code terminal with non-empty activity. This prevents idle sessions from being marked completed when an unrelated PR lands.
+Auto-complete (PR merged / issue closed) no longer fires solely because the ticket dropped out of the open-issue list. Work sessions need a MERGED/CLOSED PR record in the payload, or the ticket URL in the recently-closed set. A Claude Code terminal is **not** required (`decideSessionCompletions` does not look at one). The ticket may be `session.ticketURL` (`set-ticket`) or a `.ticket` add-link row (CROW-1244) — the two stores are the same product concept. Review sessions complete on a `.pr` link alone.
 
 ### #213 — Auto-suggest opening a PR
 

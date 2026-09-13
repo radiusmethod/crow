@@ -238,4 +238,33 @@ struct ManagerMigrationTests {
         // Managed work terminal's claude command is cleared so it starts as a shell.
         #expect(row?.command == nil)
     }
+
+    @MainActor
+    @Test
+    func hydrateAdoptsTicketLinkIntoTicketURL() {
+        // CROW-1244: a session persisted with a `.ticket` link but nil
+        // `ticketURL` (failed set-ticket, or an agent that only add-link'd)
+        // must pick the URL up on hydrate so auto-complete / mark-in-review
+        // see a ticket after restart.
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("crow-hydrate-ticket-\(UUID().uuidString)")
+        let store = JSONStore(directory: tmp)
+        let sessionID = UUID()
+        let ticketURL = "https://github.com/corveil/corveil/issues/3296"
+        store.mutate { data in
+            data.sessions = [Session(id: sessionID, name: "link-only", kind: .work)]
+            data.links = [SessionLink(
+                sessionID: sessionID, label: "Issue #3296", url: ticketURL, linkType: .ticket)]
+        }
+
+        let appState = AppState()
+        let service = SessionService(store: store, appState: appState)
+        service.hydrateState()
+
+        let session = appState.sessions.first { $0.id == sessionID }
+        #expect(session?.ticketURL == ticketURL)
+        #expect(session?.provider == .github)
+        #expect(session?.ticketNumber == 3296)
+        #expect(store.data.sessions.first { $0.id == sessionID }?.ticketURL == ticketURL)
+    }
 }

@@ -55,10 +55,11 @@ import CrowProvider
     }
 
     /// The case the handler-level guard could not see: a ticket URL is present
-    /// but the session has no provider, so the old code returned silently.
+    /// but Crow cannot detect a provider from it, so the old code returned
+    /// silently. Detectable URLs (github.com, …) now infer a provider (CROW-1244).
     @Test func markIssueDoneReportsMissingProvider() async {
         let (_, tracker, session) = seed(
-            ticketURL: "https://github.com/corveil/crow/issues/816", provider: nil)
+            ticketURL: "https://example.com/issues/816", provider: nil)
         await #expect(throws: SessionActionError.noProvider("mark-issue-done")) {
             try await tracker.markIssueDone(sessionID: session.id)
         }
@@ -149,9 +150,24 @@ import CrowProvider
         }
     }
 
+    @Test func markInReviewAcceptsTicketLinkWhenTicketURLNil() async throws {
+        // CROW-1244: mark-in-review used to require `session.ticketURL`. A
+        // GitLab ticket *link* is enough; GitLab has no In Review column so
+        // this stays hermetic (unimplemented → warning, not a `gh` round-trip).
+        let (_, tracker, session) = seed(
+            ticketURL: nil,
+            provider: nil,
+            links: [SessionLink(
+                sessionID: UUID(), label: "Issue #7",
+                url: "https://gitlab.com/acme/api/-/issues/7", linkType: .ticket)])
+        let warning = try await tracker.markInReview(sessionID: session.id)
+        #expect(warning != nil, "a board that cannot move must be disclosed, not swallowed")
+        #expect(warning?.contains("In Review") == true)
+    }
+
     @Test func markInReviewReportsMissingProvider() async {
         let (_, tracker, session) = seed(
-            ticketURL: "https://github.com/corveil/crow/issues/876", provider: nil)
+            ticketURL: "https://example.com/issues/876", provider: nil)
         await #expect(throws: SessionActionError.noProvider("mark-in-review")) {
             try await tracker.markInReview(sessionID: session.id)
         }

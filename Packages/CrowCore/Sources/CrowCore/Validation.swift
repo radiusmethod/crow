@@ -79,6 +79,18 @@ public enum Validation {
         parseJiraKey(spec)?.key
     }
 
+    /// Numeric GitHub `/issues/<n>` or GitLab `/-/issues/<n>` id, or the numeric
+    /// suffix of a Jira key. Nil for pull/MR URLs and unparseable input. Used
+    /// when `add-link --type ticket` fills `session.ticketNumber` (CROW-1244).
+    public static func issueNumber(fromTicketURL url: String) -> Int? {
+        if isJiraSpec(url) { return parseJiraKey(url)?.number }
+        guard let range = url.range(of: "/issues/", options: .caseInsensitive) else { return nil }
+        let rest = url[range.upperBound...]
+        let digits = rest.prefix { $0.isNumber }
+        guard let n = Int(digits), n > 0 else { return nil }
+        return n
+    }
+
     /// Extract a ticket key (e.g. `MAXX-7035`) embedded in a git branch name such
     /// as `feature/max-monorepo-maxx-7035-citations`. Returns the first
     /// LETTERS-DIGITS token that validates as a Jira-style key, uppercased.

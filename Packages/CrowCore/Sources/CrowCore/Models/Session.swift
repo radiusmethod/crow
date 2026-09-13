@@ -116,6 +116,38 @@ public struct Session: Identifiable, Codable, Sendable {
         return nil
     }
 
+    /// Ticket URL Crow treats as "this session's ticket": `ticketURL` from
+    /// `set-ticket`, falling back to the first `.ticket` add-link row so the
+    /// two stores cannot diverge (CROW-1244). Blank strings do not count.
+    public func effectiveTicketURL(from links: [SessionLink]) -> String? {
+        if let url = ticketURL?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty {
+            return url
+        }
+        guard let raw = links.first(where: { $0.linkType == .ticket })?.url else { return nil }
+        let url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return url.isEmpty ? nil : url
+    }
+
+    /// Copy the first `.ticket` add-link row into `ticketURL` (and provider /
+    /// number when those are also unset) so `set-ticket` and `add-link --type
+    /// ticket` cannot stay diverged (CROW-1244). Does not overwrite an existing
+    /// `ticketURL`. Returns whether any field changed.
+    @discardableResult
+    public mutating func adoptTicketMetadataFromLinks(_ links: [SessionLink]) -> Bool {
+        if let existing = ticketURL?.trimmingCharacters(in: .whitespacesAndNewlines), !existing.isEmpty {
+            return false
+        }
+        guard let url = effectiveTicketURL(from: links) else { return false }
+        ticketURL = url
+        if provider == nil {
+            provider = Validation.detectProviderFromURL(url)
+        }
+        if ticketNumber == nil {
+            ticketNumber = Validation.issueNumber(fromTicketURL: url)
+        }
+        return true
+    }
+
     /// Wall-clock span from first `SessionStart` to last `SessionEnd`, or `nil`
     /// while the session is open-ended (no end yet, non-Claude agents that never
     /// send `SessionEnd`, or clock skew putting the end before the start).

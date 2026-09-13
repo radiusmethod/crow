@@ -732,7 +732,7 @@ public final class AppState {
     /// for all providers, plus a Jira-key fallback (`PROJ-123`) so Jira browse-URL
     /// variants still link (#533). GitHub/GitLab keep exact-URL matching only.
     private func ticketMatches(session: Session, issue: AssignedIssue) -> Bool {
-        guard let url = session.ticketURL else { return false }
+        guard let url = session.effectiveTicketURL(from: links(for: session.id)) else { return false }
         if url == issue.url { return true }
         guard issue.provider == .jira,
               let sessionKey = Validation.jiraKey(from: url),
@@ -751,7 +751,7 @@ public final class AppState {
     /// URL, plus a Jira-key fallback so labels/metadata resolve for In-Review and
     /// browse-URL-variant Jira sessions (#533).
     public func assignedIssue(for session: Session) -> AssignedIssue? {
-        guard session.ticketURL != nil else { return nil }
+        guard session.effectiveTicketURL(from: links(for: session.id)) != nil else { return nil }
         return assignedIssues.first { ticketMatches(session: session, issue: $0) }
     }
 

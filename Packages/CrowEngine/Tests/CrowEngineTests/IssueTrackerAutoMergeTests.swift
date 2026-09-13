@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import CrowCore
+import CrowPersistence
 import CrowProvider
 @testable import CrowEngine
 
@@ -516,5 +517,20 @@ struct CanSetProjectStatusTests {
     @Test func noProviderCannotSetStatus() {
         // A provider-less session (e.g. the Manager) is never eligible.
         #expect(!IssueTracker.canSetProjectStatus(session: session(provider: nil), providerManager: providerManager))
+    }
+
+    @Test @MainActor func ticketLinkInfersProviderForProjectStatus() {
+        // CROW-1244: list-sessions `can_set_project_status` used to be false
+        // whenever `session.provider` was nil, even with a GitHub ticket link.
+        let appState = AppState()
+        let session = Session(name: "s")
+        appState.sessions = [session]
+        appState.links[session.id] = [SessionLink(
+            sessionID: session.id, label: "Issue #1",
+            url: "https://github.com/foo/bar/issues/1", linkType: .ticket)]
+        let store = JSONStore(directory: URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("crow-1244-status-\(UUID().uuidString)"))
+        let tracker = IssueTracker(appState: appState, providerManager: providerManager, store: store)
+        #expect(tracker.canSetProjectStatus(for: session))
     }
 }

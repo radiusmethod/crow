@@ -119,4 +119,59 @@ struct EngineLinkRPCTests {
         #expect(second.result?["link_id"]?.stringValue == firstID)
         #expect(appState.links(for: sessionID).count == 1)
     }
+
+    @Test("ticket link fills ticketURL when set-ticket never ran")
+    func ticketLinkFillsTicketURL() async throws {
+        let (router, appState, store, sessionID) = try harness()
+        store.mutate { $0.sessions = appState.sessions }
+        let url = "https://github.com/corveil/corveil/issues/3296"
+        let response = await add(
+            router, sessionID: sessionID, label: "Issue #3296", url: url, type: "ticket")
+        #expect(response.error == nil)
+        #expect(response.result?["skipped"] == .bool(false))
+        let session = try #require(appState.sessions.first(where: { $0.id == sessionID }))
+        #expect(session.ticketURL == url)
+        #expect(session.provider == .github)
+        #expect(session.ticketNumber == 3296)
+        let persisted = store.data.sessions.first(where: { $0.id == sessionID })
+        #expect(persisted?.ticketURL == url)
+        #expect(persisted?.provider == .github)
+        #expect(persisted?.ticketNumber == 3296)
+    }
+
+    @Test("ticket link does not overwrite an existing ticketURL")
+    func ticketLinkDoesNotClobberSetTicket() async throws {
+        let (router, appState, _, sessionID) = try harness()
+        let idx = try #require(appState.sessions.firstIndex(where: { $0.id == sessionID }))
+        appState.sessions[idx].ticketURL = "https://github.com/corveil/crow/issues/1244"
+        appState.sessions[idx].provider = .github
+        appState.sessions[idx].ticketNumber = 1244
+        let response = await add(
+            router, sessionID: sessionID, label: "Issue #1",
+            url: "https://github.com/org/repo/issues/1", type: "ticket")
+        #expect(response.result?["skipped"] == .bool(false))
+        let session = try #require(appState.sessions.first(where: { $0.id == sessionID }))
+        #expect(session.ticketURL == "https://github.com/corveil/crow/issues/1244")
+        #expect(session.ticketNumber == 1244)
+    }
+
+    @Test("re-adding an existing ticket link still heals a missing ticketURL")
+    func skippedTicketLinkHealsTicketURL() async throws {
+        let (router, appState, _, sessionID) = try harness()
+        let url = "https://github.com/corveil/corveil/issues/3296"
+        _ = await add(router, sessionID: sessionID, label: "Issue #3296", url: url, type: "ticket")
+        // Simulate a pre-heal store: link exists, ticketURL was never written.
+        if let idx = appState.sessions.firstIndex(where: { $0.id == sessionID }) {
+            appState.sessions[idx].ticketURL = nil
+            appState.sessions[idx].provider = nil
+            appState.sessions[idx].ticketNumber = nil
+        }
+        let second = await add(
+            router, sessionID: sessionID, label: "Issue #3296", url: url, type: "ticket")
+        #expect(second.result?["skipped"] == .bool(true))
+        let session = try #require(appState.sessions.first(where: { $0.id == sessionID }))
+        #expect(session.ticketURL == url)
+        #expect(session.provider == .github)
+        #expect(session.ticketNumber == 3296)
+    }
 }
