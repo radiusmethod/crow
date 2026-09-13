@@ -51,28 +51,32 @@ function renderScratchBoard(root) {
       todos.length ? 'Nothing open — capture one above, or Show done.' : 'Scratch is empty. Capture one above; Explore opens a Manager without filing a ticket.'));
     return;
   }
-  for (const item of visible) root.appendChild(scratchRow(item));
+  const list = el('div', 'scratch-list');
+  for (const item of visible) list.appendChild(scratchRow(item));
+  root.appendChild(list);
 }
 
 function scratchRow(item) {
-  const card = el('div', 'issue-card scratch-row');
+  const card = el('div', 'board-card scratch-row');
+  const body = el('div', 'scratch-row-body');
   const top = el('div', 'card-title-row');
   top.appendChild(el('div', 'card-title', item.text || '(untitled)'));
-  card.appendChild(top);
-  if (item.note) card.appendChild(el('div', 'card-desc', item.note));
+  body.appendChild(top);
+  if (item.note) body.appendChild(el('div', 'card-desc', item.note));
 
   const chips = el('div', 'scratch-chips');
   chips.appendChild(scratchStateChip(item.state));
   if (item.priority) chips.appendChild(el('span', 'status-pill', item.priority));
   for (const tag of (item.tags || [])) chips.appendChild(el('span', 'label-pill', tag));
-  card.appendChild(chips);
+  body.appendChild(chips);
 
   const links = item.links || [];
   if (links.length) {
     const trail = el('div', 'scratch-links');
     for (const link of links) trail.appendChild(scratchLinkBadge(link));
-    card.appendChild(trail);
+    body.appendChild(trail);
   }
+  card.appendChild(body);
 
   const foot = el('div', 'card-foot');
   const actions = el('div', 'card-actions');

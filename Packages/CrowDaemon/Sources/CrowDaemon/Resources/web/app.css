@@ -846,6 +846,29 @@ button.scratch-link {
   border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer;
 }
 button.scratch-link:hover { border-color: var(--blue); }
+/* CROW-1249: Scratch board items are large, separated cards so each
+   Explore / Ticket / Work / Done cluster is unmistakably that item's.
+   Reuses .board-card chrome (tokenized bg/border/hover). Do not revive the
+   CROW-1237 sidebar card class — Scratch stays a nav pill there. */
+.scratch-list { display: flex; flex-direction: column; gap: 16px; }
+.scratch-row {
+  display: flex; flex-direction: column; padding: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28), 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+.scratch-row-body { padding: 16px 18px 12px; }
+.scratch-row .card-title { font-size: 15px; margin-top: 0; }
+.scratch-row .card-foot {
+  margin-top: 0; padding: 12px 18px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+.scratch-row .card-actions { margin-left: 0; }
+@media (max-width: 720px) {
+  .scratch-list { gap: 12px; }
+  .scratch-row-body, .scratch-row .card-foot { padding-left: 14px; padding-right: 14px; }
+}
 /* Centred title, refresh right (CROW-924): now the .tickets-card is full-width (CROW-922)
    the compact-card overlap that forced a left-aligned space-between row (CROW-913) is gone.
    A 3-column grid — a left spacer track that mirrors the button width via --tk-refresh, the
