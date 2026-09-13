@@ -197,9 +197,11 @@ function sidebarIconColumn() {
   return col;
 }
 
-// Left sidebar-top stack (CROW-917 / CROW-1237): the Tickets card over three
+// Left sidebar-top stack (CROW-917 / CROW-1237 / CROW-1241): the Tickets card over three
 // nav-pill rows — Grid · Scorecard, Reviews · Scratch, then the full-width
 // Manager pill. Four pills on one row ellipsize at the default sidebar width.
+// Equal-size 2×2 is CSS (`.nav-pills-row > .nav-pill`); badges append here without
+// a layout branch.
 function sidebarLeftStack() {
   const wrap = el('div', 'sidebar-left');
   wrap.appendChild(ticketsCard());
